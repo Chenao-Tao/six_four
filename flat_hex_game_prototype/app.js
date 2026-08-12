@@ -10,13 +10,14 @@ import {
   applyMove,
   capturePositionEffect,
   captureMoveForClickedPiece,
+  createCustomState,
   createInitialState,
   isOnBoard,
   keyOf,
   legalMoves,
   promotionTypeForMove,
   stepwiseGameSearch
-} from './game.js?v=layout3-facing-preview-1';
+} from './game.js?v=custom-board-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -32,6 +33,16 @@ const faceBadge = document.getElementById('faceBadge');
 const previewButton = document.getElementById('previewButton');
 const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
+const resetButton = document.getElementById('resetButton');
+const customizeButton = document.getElementById('customizeButton');
+const customEditorControls = document.getElementById('customEditorControls');
+const editorStatus = document.getElementById('editorStatus');
+const switchEditorFaceButton = document.getElementById('switchEditorFaceButton');
+const clearEditorFaceButton = document.getElementById('clearEditorFaceButton');
+const saveCustomButton = document.getElementById('saveCustomButton');
+const cancelCustomButton = document.getElementById('cancelCustomButton');
+const pieceEditorModal = document.getElementById('pieceEditorModal');
+const pieceEditorPoint = document.getElementById('pieceEditorPoint');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -43,6 +54,9 @@ let autoTimer = null;
 let animationLock = false;
 let simulationLock = false;
 let previewSide = null;
+let customEditor = null;
+let editorPoint = null;
+let draftPieceSequence = 0;
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -123,6 +137,7 @@ function drawStaticBoard() {
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
+  svg.appendChild(svgElement('g', { id: 'editorTargetLayer' }));
 }
 
 function oppositeBoardSide(side) {
@@ -134,11 +149,13 @@ function activeBoardSide() {
 }
 
 function displayedBoardSide() {
+  if (customEditor) return customEditor.side;
   return previewSide ?? activeBoardSide();
 }
 
 function displayedPieces() {
   const side = displayedBoardSide();
+  if (customEditor) return customEditor.boardStates[side];
   return state.boardStates?.[side] ?? state.pieces;
 }
 
@@ -197,6 +214,10 @@ function renderPiece(piece) {
   group.appendChild(label);
   group.addEventListener('click', event => {
     event.stopPropagation();
+    if (customEditor) {
+      openPieceEditor(piece.position);
+      return;
+    }
     if (isPreviewing()) {
       boardHelp.textContent = '当前是背面预览；返回当前朝上面后才能移动棋子。';
       return;
@@ -211,6 +232,35 @@ function renderPiece(piece) {
     selectPiece(piece.id);
   });
   return group;
+}
+
+function renderEditorTargets() {
+  const layer = document.getElementById('editorTargetLayer');
+  layer.replaceChildren();
+  if (!customEditor) return;
+  const occupiedKeys = new Set(displayedPieces().map(item => keyOf(item.position)));
+  BOARD_POINTS.forEach(point => {
+    const pixel = toPixel(point);
+    const target = svgElement('circle', {
+      class: `editor-target ${occupiedKeys.has(keyOf(point)) ? 'occupied' : ''}`,
+      cx: pixel.x,
+      cy: pixel.y,
+      r: 18,
+      'data-editor-point': keyOf(point),
+      tabindex: 0,
+      role: 'button',
+      'aria-label': `设置交点 ${keyOf(point)} 的棋子`
+    });
+    const choosePoint = event => {
+      event.stopPropagation();
+      openPieceEditor(point);
+    };
+    target.addEventListener('click', choosePoint);
+    target.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') choosePoint(event);
+    });
+    layer.appendChild(target);
+  });
 }
 
 function renderMoves() {
@@ -240,39 +290,60 @@ function renderMoves() {
 function render() {
   const boardSide = displayedBoardSide();
   const previewing = isPreviewing();
+  const editing = Boolean(customEditor);
   svg.dataset.side = boardSide;
   boardShell.dataset.side = boardSide;
   boardShell.classList.toggle('previewing', previewing);
+  boardShell.classList.toggle('editing', editing);
   const pieceLayer = document.getElementById('pieceLayer');
   pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
   renderFaceLabels(boardSide);
-  if (previewing) {
+  renderEditorTargets();
+  if (previewing || editing) {
     document.getElementById('movePathLayer').replaceChildren();
     document.getElementById('moveTargetLayer').replaceChildren();
   } else {
     renderMoves();
   }
-  turnBadge.textContent = state.winner
-    ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
-    : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
+  turnBadge.textContent = editing
+    ? `自定义棋盘 · 编辑${boardSide === 'front' ? 'A 面' : 'B 面'}`
+    : state.winner
+      ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
+      : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
   const sideName = boardSide === 'front' ? 'A 面 · 布局三' : 'B 面 · 互补拼图';
-  faceBadge.textContent = previewing
-    ? `背面预览 · ${sideName} · 禁止移动`
-    : `当前朝上 · ${sideName} · 已翻 ${state.flipCount ?? 0} 次`;
+  faceBadge.textContent = editing
+    ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · 点击交点设子`
+    : previewing
+      ? `背面预览 · ${sideName} · 禁止移动`
+      : `当前朝上 · ${sideName} · 已翻 ${state.flipCount ?? 0} 次`;
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
-  stepButton.disabled = previewing;
-  autoButton.disabled = previewing;
-  turnBadge.classList.toggle('winner-glow', Boolean(state.winner));
+  stepButton.disabled = previewing || editing;
+  autoButton.disabled = previewing || editing;
+  resetButton.disabled = editing;
+  previewButton.disabled = editing;
+  customizeButton.disabled = editing;
+  customEditorControls.classList.toggle('hidden', !editing);
+  if (editing) {
+    const pieceCount = customEditor.boardStates[boardSide].length;
+    editorStatus.textContent = `正在编辑 ${boardSide === 'front' ? 'A' : 'B'} 面 · ${pieceCount} 枚棋子`;
+    switchEditorFaceButton.textContent = `切换到 ${boardSide === 'front' ? 'B' : 'A'} 面`;
+  }
+  turnBadge.classList.toggle('winner-glow', Boolean(state.winner && !editing));
   historyElement.replaceChildren(...state.history.slice().reverse().map(item => {
     const line = document.createElement('li');
     line.textContent = item;
     return line;
   }));
-  if (!selectedPieceId) selectedInfo.textContent = state.winner ? '整局结束。' : '尚未选择棋子';
+  if (editing) {
+    selectedInfo.textContent = '点击任意交点设置或替换棋子；每个面都需要一枚白王和一枚黑王。';
+  } else if (!selectedPieceId) {
+    selectedInfo.textContent = state.winner ? '整局结束。' : '尚未选择棋子';
+  }
 }
 
 function selectPiece(pieceId) {
+  if (customEditor) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面预览不可操作；返回当前朝上面后才能移动棋子。';
     return;
@@ -345,7 +416,7 @@ async function animateBoardFlip(nextState) {
 }
 
 async function commitMove(pieceId, move, promote = false, decisionNote = '') {
-  if (isPreviewing()) return;
+  if (customEditor || isPreviewing()) return;
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
@@ -381,7 +452,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
 }
 
 function chooseMove(move) {
-  if (isPreviewing() || animationLock || !selectedPieceId) return;
+  if (customEditor || isPreviewing() || animationLock || !selectedPieceId) return;
   const mover = state.pieces.find(item => item.id === selectedPieceId);
   const promotionType = promotionTypeForMove(state, selectedPieceId, move);
   if (promotionType) {
@@ -407,10 +478,126 @@ promotionModal.querySelectorAll('[data-promote]').forEach(button => {
   });
 });
 
-function resetGame() {
+function stopAutoSimulation() {
   clearInterval(autoTimer);
   autoTimer = null;
-  document.getElementById('autoButton').classList.remove('active');
+  autoButton.classList.remove('active');
+  autoButton.textContent = '连续模拟';
+}
+
+function closePieceEditor() {
+  editorPoint = null;
+  pieceEditorModal.classList.add('hidden');
+}
+
+function openPieceEditor(point) {
+  if (!customEditor) return;
+  editorPoint = { q: point.q, r: point.r };
+  const existing = customEditor.boardStates[customEditor.side]
+    .find(item => keyOf(item.position) === keyOf(editorPoint));
+  pieceEditorPoint.textContent = existing
+    ? `交点 ${keyOf(editorPoint)} 当前为${existing.side === 'white' ? '白方' : '黑方'}${PIECE_NAMES[existing.type]}，请选择替换棋子。`
+    : `交点 ${keyOf(editorPoint)} 为空，请选择要放置的棋子。`;
+  pieceEditorModal.classList.remove('hidden');
+}
+
+function setEditorPiece(side, type) {
+  if (!customEditor || !editorPoint) return;
+  if (type === 'king' && !KING_POINTS.some(point => keyOf(point) === keyOf(editorPoint))) {
+    pieceEditorPoint.textContent = '王只能放在棋盘中心或六个外角，请取消后重新选点。';
+    return;
+  }
+  const pieces = customEditor.boardStates[customEditor.side];
+  const remaining = pieces.filter(item => keyOf(item.position) !== keyOf(editorPoint));
+  draftPieceSequence += 1;
+  remaining.push({
+    id: `draft-${draftPieceSequence}`,
+    side,
+    type,
+    position: { ...editorPoint }
+  });
+  customEditor.boardStates[customEditor.side] = remaining;
+  closePieceEditor();
+  boardHelp.textContent = `已在 ${keyOf(remaining.at(-1).position)} 放置${side === 'white' ? '白方' : '黑方'}${PIECE_NAMES[type]}。`;
+  render();
+}
+
+function removeEditorPiece() {
+  if (!customEditor || !editorPoint) return;
+  const pointKey = keyOf(editorPoint);
+  customEditor.boardStates[customEditor.side] = customEditor.boardStates[customEditor.side]
+    .filter(item => keyOf(item.position) !== pointKey);
+  closePieceEditor();
+  boardHelp.textContent = `已清空交点 ${pointKey}。`;
+  render();
+}
+
+function enterCustomEditor() {
+  if (animationLock || simulationLock || pendingPromotion || customEditor) return;
+  stopAutoSimulation();
+  previewSide = null;
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  customEditor = {
+    side: 'front',
+    boardStates: { front: [], back: [] }
+  };
+  boardHelp.textContent = '已进入空白棋盘编辑：点击交点设置棋子，A、B 两面分别编辑。';
+  render();
+}
+
+async function switchEditorFace() {
+  if (!customEditor || animationLock) return;
+  closePieceEditor();
+  animationLock = true;
+  boardShell.classList.add('flipping');
+  boardHelp.textContent = '正在翻到另一面继续编辑……';
+  await new Promise(resolve => setTimeout(resolve, 430));
+  customEditor.side = oppositeBoardSide(customEditor.side);
+  render();
+  await new Promise(resolve => setTimeout(resolve, 470));
+  boardShell.classList.remove('flipping');
+  animationLock = false;
+  boardHelp.textContent = `正在编辑 ${customEditor.side === 'front' ? 'A' : 'B'} 面，点击交点设置棋子。`;
+}
+
+function clearEditorFace() {
+  if (!customEditor) return;
+  customEditor.boardStates[customEditor.side] = [];
+  closePieceEditor();
+  boardHelp.textContent = `已清空 ${customEditor.side === 'front' ? 'A' : 'B'} 面；取消编辑仍可返回原棋局。`;
+  render();
+}
+
+function cancelCustomBoard() {
+  if (!customEditor) return;
+  customEditor = null;
+  closePieceEditor();
+  boardHelp.textContent = '已取消自定义，原棋局未发生改变。';
+  render();
+}
+
+function saveCustomBoard() {
+  if (!customEditor) return;
+  const result = createCustomState(customEditor.boardStates);
+  if (result.error) {
+    boardHelp.textContent = `无法保存：${result.error}`;
+    selectedInfo.textContent = result.error;
+    return;
+  }
+  state = result.state;
+  customEditor = null;
+  previewSide = null;
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  closePieceEditor();
+  boardHelp.textContent = '自定义双面棋盘已保存，A 面朝上，由白方先行。';
+  render();
+}
+
+function resetGame() {
+  if (customEditor) return;
+  stopAutoSimulation();
   state = createInitialState();
   previewSide = null;
   selectedPieceId = null;
@@ -422,7 +609,7 @@ function resetGame() {
 }
 
 async function toggleFacePreview() {
-  if (animationLock || simulationLock || pendingPromotion) return;
+  if (customEditor || animationLock || simulationLock || pendingPromotion) return;
   if (autoTimer) {
     clearInterval(autoTimer);
     autoTimer = null;
@@ -448,6 +635,7 @@ async function toggleFacePreview() {
 }
 
 async function simulateStep() {
+  if (customEditor) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面预览期间不能运行算法；请先返回当前朝上面。';
     return;
@@ -500,11 +688,21 @@ async function simulateStep() {
   }
 }
 
-document.getElementById('resetButton').addEventListener('click', resetGame);
+resetButton.addEventListener('click', resetGame);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
+customizeButton.addEventListener('click', enterCustomEditor);
+switchEditorFaceButton.addEventListener('click', switchEditorFace);
+clearEditorFaceButton.addEventListener('click', clearEditorFace);
+saveCustomButton.addEventListener('click', saveCustomBoard);
+cancelCustomButton.addEventListener('click', cancelCustomBoard);
+pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
+  button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));
+});
+pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
+pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
 autoButton.addEventListener('click', event => {
-  if (isPreviewing()) return;
+  if (customEditor || isPreviewing()) return;
   if (autoTimer) {
     clearInterval(autoTimer);
     autoTimer = null;
@@ -528,6 +726,7 @@ autoButton.addEventListener('click', event => {
 });
 
 svg.addEventListener('click', () => {
+  if (customEditor) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面仅供预览；返回当前朝上面后才能移动棋子。';
     return;
@@ -535,6 +734,10 @@ svg.addEventListener('click', () => {
   selectedPieceId = null;
   selectedMoves = new Map();
   render();
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !pieceEditorModal.classList.contains('hidden')) closePieceEditor();
 });
 
 drawStaticBoard();

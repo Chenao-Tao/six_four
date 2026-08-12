@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形平面棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=layout3-facing-preview-1">
+  <link rel="stylesheet" href="styles.css?v=custom-board-1">
 </head>
 <body>
   <main class="app-shell">
@@ -30,6 +30,16 @@
             <button id="previewButton" aria-pressed="false">预览背面</button>
             <button id="stepButton">算法演示一步</button>
             <button id="autoButton">连续模拟</button>
+            <button id="customizeButton">自定义棋盘</button>
+          </div>
+          <div class="editor-controls hidden" id="customEditorControls">
+            <div class="editor-status" id="editorStatus">正在编辑 A 面</div>
+            <div class="buttons">
+              <button id="switchEditorFaceButton">切换到 B 面</button>
+              <button id="clearEditorFaceButton">清空当前面</button>
+              <button id="saveCustomButton" class="primary">保存并开局</button>
+              <button id="cancelCustomButton">取消</button>
+            </div>
           </div>
           <div class="selected" id="selectedInfo">尚未选择棋子</div>
         </section>
@@ -64,6 +74,32 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=layout3-facing-preview-1"></script>
+  <div class="modal hidden" id="pieceEditorModal">
+    <div class="modal-card piece-editor-card" role="dialog" aria-modal="true" aria-labelledby="pieceEditorTitle">
+      <h2 id="pieceEditorTitle">设置交点棋子</h2>
+      <p id="pieceEditorPoint">请选择阵营与身份。</p>
+      <div class="piece-palette">
+        <div class="palette-row">
+          <span>白方</span>
+          <button data-editor-side="white" data-editor-type="king">王</button>
+          <button data-editor-side="white" data-editor-type="queen">后</button>
+          <button data-editor-side="white" data-editor-type="bishop">象</button>
+          <button data-editor-side="white" data-editor-type="pawn">兵</button>
+        </div>
+        <div class="palette-row">
+          <span>黑方</span>
+          <button data-editor-side="black" data-editor-type="king">王</button>
+          <button data-editor-side="black" data-editor-type="queen">后</button>
+          <button data-editor-side="black" data-editor-type="bishop">象</button>
+          <button data-editor-side="black" data-editor-type="pawn">兵</button>
+        </div>
+      </div>
+      <div class="buttons modal-actions">
+        <button data-editor-action="remove">清空该点</button>
+        <button data-editor-action="close">取消</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="app.js?v=custom-board-1"></script>
 </body>
 </html>

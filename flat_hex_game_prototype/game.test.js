@@ -7,6 +7,7 @@ import {
   captureMoveForClickedPiece,
   chooseSimulationAction,
   createCaptureDemoState,
+  createCustomState,
   createInitialState,
   keyOf,
   legalMoves,
@@ -302,4 +303,69 @@ test('布局三棋子身份与交点严格匹配参考图', () => {
     'wP2:white:pawn@-2,1',
     'wQ:white:queen@0,1'
   ].sort());
+});
+
+test('自定义双面棋盘通过校验后以白方第一手开局且不引用编辑草稿', () => {
+  const draft = {
+    front: [
+      piece('', 'white', 'king', 0, 0),
+      piece('', 'black', 'king', 4, 0),
+      piece('', 'white', 'pawn', 1, 0)
+    ],
+    back: [
+      piece('', 'white', 'king', -4, 0),
+      piece('', 'black', 'king', 0, 4),
+      piece('', 'black', 'bishop', -1, 1)
+    ]
+  };
+
+  const result = createCustomState(draft);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.turn, 'white');
+  assert.equal(result.state.moveNumber, 1);
+  assert.equal(result.state.boardSide, 'front');
+  assert.equal(result.state.flipCount, 0);
+  assert.strictEqual(result.state.pieces, result.state.boardStates.front);
+  assert.equal(result.state.history.at(-1), '自定义棋盘已保存：白方先行');
+  assert.equal(new Set(result.state.boardStates.front.map(item => item.id)).size, 3);
+
+  draft.front[0].position.q = 3;
+  assert.deepEqual(result.state.boardStates.front[0].position, { q: 0, r: 0 });
+});
+
+test('自定义棋盘拒绝重叠、越界和缺少双方王的布局', () => {
+  const validBack = [
+    piece('', 'white', 'king', -4, 0),
+    piece('', 'black', 'king', 4, 0)
+  ];
+
+  assert.match(createCustomState({
+    front: [
+      piece('', 'white', 'king', 0, 0),
+      piece('', 'black', 'king', 0, 0)
+    ],
+    back: validBack
+  }).error, /A 面.*同一交点/);
+
+  assert.match(createCustomState({
+    front: [
+      piece('', 'white', 'king', 0, 0),
+      piece('', 'black', 'king', 5, 0)
+    ],
+    back: validBack
+  }).error, /A 面.*棋盘外/);
+
+  assert.match(createCustomState({
+    front: [piece('', 'white', 'king', 0, 0)],
+    back: validBack
+  }).error, /A 面.*黑方王/);
+
+  assert.match(createCustomState({
+    front: [
+      piece('', 'white', 'king', 1, 0),
+      piece('', 'black', 'king', 4, 0)
+    ],
+    back: validBack
+  }).error, /A 面.*王只能放在中心或六个外角/);
 });

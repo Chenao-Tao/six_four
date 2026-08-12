@@ -129,6 +129,62 @@ export function createInitialState() {
   ));
 }
 
+const VALID_PIECE_SIDES = new Set(['white', 'black']);
+const VALID_PIECE_TYPES = new Set(Object.keys(PIECE_NAMES));
+const KING_POINT_KEYS = new Set(KING_POINTS.map(keyOf));
+
+function normalizeCustomFace(face, pieces) {
+  const faceName = face === 'front' ? 'A 面' : 'B 面';
+  if (!Array.isArray(pieces)) return { error: `${faceName}棋子数据无效` };
+  const occupied = new Set();
+  const kingCounts = { white: 0, black: 0 };
+  const normalized = [];
+
+  for (const [index, item] of pieces.entries()) {
+    if (!VALID_PIECE_SIDES.has(item?.side) || !VALID_PIECE_TYPES.has(item?.type)) {
+      return { error: `${faceName}第 ${index + 1} 枚棋子的阵营或身份无效` };
+    }
+    const position = item.position;
+    if (!Number.isInteger(position?.q) || !Number.isInteger(position?.r) || !isOnBoard(position)) {
+      return { error: `${faceName}第 ${index + 1} 枚棋子位于棋盘外` };
+    }
+    const positionKey = keyOf(position);
+    if (occupied.has(positionKey)) return { error: `${faceName}同一交点只能放一枚棋子` };
+    if (item.type === 'king' && !KING_POINT_KEYS.has(positionKey)) {
+      return { error: `${faceName}的王只能放在中心或六个外角` };
+    }
+    occupied.add(positionKey);
+    if (item.type === 'king') kingCounts[item.side] += 1;
+    normalized.push({
+      id: `custom-${face}-${item.side}-${item.type}-${index + 1}`,
+      side: item.side,
+      type: item.type,
+      position: { q: position.q, r: position.r }
+    });
+  }
+
+  for (const side of ['white', 'black']) {
+    if (kingCounts[side] !== 1) {
+      return { error: `${faceName}必须且只能有一枚${side === 'white' ? '白方' : '黑方'}王` };
+    }
+  }
+  return { pieces: normalized };
+}
+
+export function createCustomState(boardStates) {
+  const front = normalizeCustomFace('front', boardStates?.front);
+  if (front.error) return { error: front.error };
+  const back = normalizeCustomFace('back', boardStates?.back);
+  if (back.error) return { error: back.error };
+  return {
+    state: withInitialPositionHistory(doubleSidedState(
+      front.pieces,
+      back.pieces,
+      { history: ['自定义棋盘已保存：白方先行'] }
+    ))
+  };
+}
+
 export function createCaptureDemoState() {
   return withInitialPositionHistory(doubleSidedState(
     [
