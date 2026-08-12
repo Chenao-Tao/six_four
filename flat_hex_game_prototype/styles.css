@@ -76,6 +76,7 @@ button[aria-pressed="true"] { color: #071015; background: var(--gold); }
 button:disabled { opacity: .42; cursor: not-allowed; }
 button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .selected { margin-top: 12px; padding: 10px; color: #adc0d2; border-radius: 9px; background: #0e151e; font-size: 13px; }
+.active-layout { margin-top: 10px; color: var(--gold); font-size: 12px; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }
@@ -86,7 +87,8 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .panel-selection { margin-bottom: 8px; color: var(--gold); font-size: 12px; }
 .layout-library { display: grid; gap: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; background: rgba(5,12,18,.48); }
 .layout-library label { color: #9fb4c5; font-size: 12px; font-weight: 700; }
-.layout-save-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
+.layout-save-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.layout-save-row input, .layout-save-row select { flex: 1 1 140px; }
 .layout-library input, .layout-library select { min-width: 0; padding: 8px 9px; color: #eaf2f8; border: 1px solid rgba(255,255,255,.16); border-radius: 9px; background: #0e151e; }
 .layout-library input:focus, .layout-library select:focus { border-color: var(--cyan); outline: none; }
 .rules ul { margin: 0; padding-left: 20px; color: #adbdcb; font-size: 13px; line-height: 1.6; }

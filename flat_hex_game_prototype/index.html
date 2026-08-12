@@ -32,6 +32,7 @@
             <button id="autoButton">连续模拟</button>
             <button id="customizeButton">自定义棋盘</button>
           </div>
+          <div class="active-layout" id="activeLayoutStatus">当前启用布局：默认布局</div>
           <div class="editor-controls hidden" id="customEditorControls">
             <div class="editor-status" id="editorStatus">正在编辑 A 面</div>
             <div class="editor-modes" role="group" aria-label="编辑工具">
@@ -56,7 +57,8 @@
                 <select id="savedLayoutSelect" aria-label="已保存布局">
                   <option value="">暂无已保存布局</option>
                 </select>
-                <button id="loadLayoutButton" disabled>载入</button>
+                <button id="loadLayoutButton" disabled>载入编辑</button>
+                <button id="activateLayoutButton" disabled>启用并开局</button>
                 <button id="deleteLayoutButton" disabled>删除</button>
               </div>
             </div>
@@ -82,7 +84,7 @@
             <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
             <li><b>双面棋盘</b>：当前朝上面才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后整块六边形实际翻面，原背面成为新的可操作面。</li>
             <li><b>板块拆装</b>：三角板旋转120°时板上的棋子跟随旋转；也可单独翻面或选择两块板交换位置，另一面同步更新。</li>
-            <li><b>布局存档</b>：可随时保存尚未摆完的双面布局，并在当前浏览器中载入或删除；“保存并开局”要求 A、B 两面合计只有一枚白王和一枚黑王，放在哪一面均可。</li>
+            <li><b>布局文件</b>：布局保存到项目的本地 JSON 文件，可重复载入；“启用并开局”或“保存并开局”会设为重开的起始布局。开局布局要求 A、B 两面合计只有一枚白王和一枚黑王。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -128,6 +130,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=global-king-count-1"></script>
+  <script type="module" src="app.js?v=file-layout-library-1"></script>
 </body>
 </html>

@@ -22,7 +22,7 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=global-king-count-1';
+} from './game.js?v=file-layout-library-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -40,6 +40,7 @@ const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
 const customizeButton = document.getElementById('customizeButton');
+const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
 const editorStatus = document.getElementById('editorStatus');
 const switchEditorFaceButton = document.getElementById('switchEditorFaceButton');
@@ -59,6 +60,7 @@ const layoutNameInput = document.getElementById('layoutNameInput');
 const saveLayoutButton = document.getElementById('saveLayoutButton');
 const savedLayoutSelect = document.getElementById('savedLayoutSelect');
 const loadLayoutButton = document.getElementById('loadLayoutButton');
+const activateLayoutButton = document.getElementById('activateLayoutButton');
 const deleteLayoutButton = document.getElementById('deleteLayoutButton');
 const size = 72;
 const center = { x: 380, y: 350 };
@@ -76,6 +78,8 @@ let customEditor = null;
 let editorPoint = null;
 let draftPieceSequence = 0;
 let savedLayouts = [];
+let activeLayoutName = '默认布局';
+let activeInitialState = createInitialState();
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -90,7 +94,26 @@ function clonePiecesByFace(boardStates) {
   };
 }
 
-function loadSavedLayouts() {
+function cloneGameState(source) {
+  const boardStates = clonePiecesByFace(source.boardStates);
+  return {
+    ...source,
+    history: [...source.history],
+    positionHistory: [...(source.positionHistory ?? [])],
+    boardStates,
+    pieces: boardStates[source.boardSide],
+    boardFaceLabels: {
+      front: [...source.boardFaceLabels.front],
+      back: [...source.boardFaceLabels.back]
+    },
+    boardPanelRotations: {
+      front: [...source.boardPanelRotations.front],
+      back: [...source.boardPanelRotations.back]
+    }
+  };
+}
+
+function legacySavedLayouts() {
   try {
     const stored = localStorage.getItem(LAYOUT_STORAGE_KEY);
     if (!stored) return [];
@@ -103,13 +126,62 @@ function loadSavedLayouts() {
   }
 }
 
-function persistSavedLayouts() {
+async function requestLayoutLibrary(path = '/api/layouts', options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers
+  });
+  const body = await response.json().catch(() => ({ error: `服务器返回 ${response.status}` }));
+  if (!response.ok) throw new Error(body.error || `布局文件操作失败（${response.status}）`);
+  return body;
+}
+
+function applyLayoutLibrary(library, selectedName = '') {
+  savedLayouts = library.layouts;
+  activeLayoutName = library.activeLayoutName;
+  const activeLayout = savedLayouts.find(layout => layout.name === activeLayoutName);
+  if (activeLayout?.builtIn) {
+    activeInitialState = createInitialState();
+  } else if (activeLayout) {
+    const result = createCustomState(
+      activeLayout.boardStates,
+      activeLayout.faceLabels,
+      activeLayout.panelRotations
+    );
+    activeInitialState = result.error ? createInitialState() : result.state;
+  } else {
+    activeInitialState = createInitialState();
+  }
+  activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName}`;
+  refreshSavedLayoutOptions(selectedName || activeLayoutName);
+}
+
+async function initializeLayoutLibrary() {
   try {
-    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(savedLayouts));
-    return true;
+    let library = await requestLayoutLibrary();
+    const legacyLayouts = legacySavedLayouts();
+    let migrationFailed = false;
+    for (const layout of legacyLayouts) {
+      if (!library.layouts.some(item => item.name === layout.name)) {
+        try {
+          library = await requestLayoutLibrary('/api/layouts', {
+            method: 'POST',
+            body: JSON.stringify({ layout, activate: false })
+          });
+        } catch {
+          migrationFailed = true;
+        }
+      }
+    }
+    if (legacyLayouts.length && !migrationFailed) localStorage.removeItem(LAYOUT_STORAGE_KEY);
+    applyLayoutLibrary(library);
+    state = cloneGameState(activeInitialState);
+    if (migrationFailed) {
+      boardHelp.textContent = '部分旧缓存布局不符合当前规则，已保留在浏览器缓存中；其他布局已载入。';
+    }
+    render();
   } catch (error) {
-    boardHelp.textContent = `保存布局失败：${error.message}`;
-    return false;
+    boardHelp.textContent = `读取本地布局文件失败：${error.message}`;
   }
 }
 
@@ -132,8 +204,10 @@ function refreshSavedLayoutOptions(selectedName = '') {
       : savedLayouts[0].name;
   }
   const hasSelection = Boolean(savedLayoutSelect.value);
-  loadLayoutButton.disabled = !hasSelection;
-  deleteLayoutButton.disabled = !hasSelection;
+  activateLayoutButton.disabled = !hasSelection;
+  const selectedLayout = savedLayouts.find(item => item.name === savedLayoutSelect.value);
+  loadLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.builtIn);
+  deleteLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.builtIn);
 }
 
 function toPixel(point) {
@@ -482,7 +556,7 @@ function render() {
   }));
   if (editing) {
     selectedInfo.textContent = customEditor.mode === 'pieces'
-      ? '点击任意交点设置或替换棋子；每个面都需要一枚白王和一枚黑王。'
+      ? '点击任意交点设置或替换棋子；A、B 两面合计每方最多一枚王。'
       : customEditor.swapPending
         ? '点击另一块三角板交换两个实体板的位置；另一面会同步更新。'
         : '选择三角板后可以翻转该板正反面，或与另一块板交换位置。';
@@ -739,8 +813,11 @@ function cancelCustomBoard() {
   render();
 }
 
-function saveCustomBoard() {
+async function saveCustomBoard() {
   if (!customEditor) return;
+  const enteredName = layoutNameInput.value.trim();
+  const name = !enteredName || enteredName === '默认布局' ? nextCustomLayoutName() : enteredName;
+  layoutNameInput.value = name;
   const result = createCustomState(
     customEditor.boardStates,
     customEditor.faceLabels,
@@ -751,13 +828,28 @@ function saveCustomBoard() {
     selectedInfo.textContent = result.error;
     return;
   }
-  state = result.state;
+  const snapshot = layoutSnapshotFromEditor(name, {
+    boardStates: result.state.boardStates,
+    faceLabels: result.state.boardFaceLabels,
+    panelRotations: result.state.boardPanelRotations
+  });
+  try {
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: true })
+    });
+    applyLayoutLibrary(library, name);
+  } catch (error) {
+    boardHelp.textContent = `无法保存布局文件：${error.message}`;
+    return;
+  }
+  state = cloneGameState(activeInitialState);
   customEditor = null;
   previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
   closePieceEditor();
-  boardHelp.textContent = '自定义双面棋盘已保存，A 面朝上，由白方先行。';
+  boardHelp.textContent = `布局“${name}”已保存为本地文件、设为启用布局并开局。`;
   render();
 }
 
@@ -776,7 +868,13 @@ function layoutSnapshotFromEditor(name, layout = customEditor) {
   };
 }
 
-function saveLayoutToLibrary() {
+function nextCustomLayoutName() {
+  let sequence = 1;
+  while (savedLayouts.some(layout => layout.name === `自定义布局 ${sequence}`)) sequence += 1;
+  return `自定义布局 ${sequence}`;
+}
+
+async function saveLayoutToLibrary() {
   if (!customEditor) return;
   const name = layoutNameInput.value.trim();
   if (!name) {
@@ -793,15 +891,19 @@ function saveLayoutToLibrary() {
     return;
   }
   const snapshot = layoutSnapshotFromEditor(name, validation);
-  const existingIndex = savedLayouts.findIndex(item => item.name === name);
-  if (existingIndex >= 0) savedLayouts[existingIndex] = snapshot;
-  else savedLayouts.push(snapshot);
-  savedLayouts.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
-  if (!persistSavedLayouts()) return;
-  refreshSavedLayoutOptions(name);
-  boardHelp.textContent = existingIndex >= 0
-    ? `已覆盖保存布局“${name}”。`
-    : `已保存布局“${name}”。`;
+  const existed = savedLayouts.some(item => item.name === name);
+  try {
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: false })
+    });
+    applyLayoutLibrary(library, name);
+    boardHelp.textContent = existed
+      ? `已覆盖本地布局文件“${name}”。`
+      : `已保存本地布局文件“${name}”。`;
+  } catch (error) {
+    boardHelp.textContent = `布局不能保存：${error.message}`;
+  }
 }
 
 function loadLayoutFromLibrary() {
@@ -833,14 +935,41 @@ function loadLayoutFromLibrary() {
   render();
 }
 
-function deleteLayoutFromLibrary() {
+async function activateLayoutFromLibrary() {
   if (!customEditor || !savedLayoutSelect.value) return;
   const name = savedLayoutSelect.value;
-  savedLayouts = savedLayouts.filter(item => item.name !== name);
-  if (!persistSavedLayouts()) return;
-  refreshSavedLayoutOptions();
-  if (layoutNameInput.value.trim() === name) layoutNameInput.value = '';
-  boardHelp.textContent = `已删除布局“${name}”。`;
+  try {
+    const library = await requestLayoutLibrary('/api/layouts/active', {
+      method: 'PUT',
+      body: JSON.stringify({ name })
+    });
+    applyLayoutLibrary(library, name);
+    state = cloneGameState(activeInitialState);
+    customEditor = null;
+    previewSide = null;
+    selectedPieceId = null;
+    selectedMoves = new Map();
+    closePieceEditor();
+    boardHelp.textContent = `已启用布局“${name}”并开局；以后重新开局也从该布局开始。`;
+    render();
+  } catch (error) {
+    boardHelp.textContent = `无法启用布局：${error.message}`;
+  }
+}
+
+async function deleteLayoutFromLibrary() {
+  if (!customEditor || !savedLayoutSelect.value) return;
+  const name = savedLayoutSelect.value;
+  try {
+    const library = await requestLayoutLibrary(`/api/layouts/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    });
+    applyLayoutLibrary(library);
+    if (layoutNameInput.value.trim() === name) layoutNameInput.value = '';
+    boardHelp.textContent = `已删除本地布局文件“${name}”。`;
+  } catch (error) {
+    boardHelp.textContent = `无法删除布局：${error.message}`;
+  }
 }
 
 function setEditorMode(mode) {
@@ -943,13 +1072,13 @@ function beginPanelSwap() {
 function resetGame() {
   if (customEditor) return;
   stopAutoSimulation();
-  state = createInitialState();
+  state = cloneGameState(activeInitialState);
   previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
-  boardHelp.textContent = '点击己方棋子，查看合法移动位置。';
+  boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
 }
 
@@ -1048,11 +1177,10 @@ rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
 saveLayoutButton.addEventListener('click', saveLayoutToLibrary);
 loadLayoutButton.addEventListener('click', loadLayoutFromLibrary);
+activateLayoutButton.addEventListener('click', activateLayoutFromLibrary);
 deleteLayoutButton.addEventListener('click', deleteLayoutFromLibrary);
 savedLayoutSelect.addEventListener('change', () => {
-  const hasSelection = Boolean(savedLayoutSelect.value);
-  loadLayoutButton.disabled = !hasSelection;
-  deleteLayoutButton.disabled = !hasSelection;
+  refreshSavedLayoutOptions(savedLayoutSelect.value);
 });
 pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
   button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));
@@ -1099,6 +1227,5 @@ document.addEventListener('keydown', event => {
 });
 
 drawStaticBoard();
-savedLayouts = loadSavedLayouts();
-refreshSavedLayoutOptions();
 render();
+initializeLayoutLibrary();
