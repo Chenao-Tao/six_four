@@ -83,3 +83,15 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(app, /state = cloneGameState\(activeInitialState\)/);
   assert.match(html, /布局保存到项目的本地 JSON 文件/);
 });
+
+test('平面六块三角板可组成立体并保留棋子布局', () => {
+  assert.match(html, /id="assembleSolidButton"/);
+  assert.match(html, /id="solidViewer"/);
+  assert.match(html, /id="solidBoardCanvas"/);
+  assert.match(html, /id="closeSolidViewButton"/);
+  assert.match(app, /createSolidBoardViewer/);
+  assert.match(app, /function solidBoardModel\(\)/);
+  assert.match(app, /function openSolidBoard\(\)/);
+  assert.match(app, /function closeSolidBoard\(\)/);
+  assert.match(app, /pieces: displayedPieces\(\)\.map/);
+});

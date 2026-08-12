@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形平面棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=rotating-pieces-save-1">
+  <link rel="stylesheet" href="styles.css?v=solid-board-assembly-1">
 </head>
 <body>
   <main class="app-shell">
@@ -31,6 +31,7 @@
             <button id="stepButton">算法演示一步</button>
             <button id="autoButton">连续模拟</button>
             <button id="customizeButton">自定义棋盘</button>
+            <button id="assembleSolidButton">组成立体</button>
           </div>
           <div class="active-layout" id="activeLayoutStatus">当前启用布局：默认布局</div>
           <div class="editor-controls hidden" id="customEditorControls">
@@ -130,6 +131,18 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=file-layout-library-1"></script>
+  <div class="solid-viewer hidden" id="solidViewer" role="dialog" aria-modal="true" aria-labelledby="solidViewerTitle">
+    <canvas id="solidBoardCanvas" aria-label="由六块三角板组成的双锥六面体"></canvas>
+    <section class="solid-viewer-panel">
+      <h2 id="solidViewerTitle">六面体组装预览</h2>
+      <p id="solidViewerStatus">六块三角板及其棋子已组装成立体。</p>
+      <div class="buttons">
+        <button id="resetSolidViewButton">复位视角</button>
+        <button id="closeSolidViewButton" class="primary">展开回平面</button>
+      </div>
+      <small>拖动旋转 · 滚轮缩放 · 此视图不修改棋局</small>
+    </section>
+  </div>
+  <script type="module" src="app.js?v=solid-board-assembly-1"></script>
 </body>
 </html>

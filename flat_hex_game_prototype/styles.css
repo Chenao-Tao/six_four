@@ -77,6 +77,14 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .selected { margin-top: 12px; padding: 10px; color: #adc0d2; border-radius: 9px; background: #0e151e; font-size: 13px; }
 .active-layout { margin-top: 10px; color: var(--gold); font-size: 12px; }
+.solid-viewer { position: fixed; inset: 0; z-index: 40; background: radial-gradient(circle at 50% 40%, #26384b, #080c12 72%); }
+.solid-viewer.hidden { display: none; }
+#solidBoardCanvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#solidBoardCanvas:active { cursor: grabbing; }
+.solid-viewer-panel { position: absolute; top: 18px; left: 18px; width: min(360px, calc(100vw - 36px)); padding: 16px; border: 1px solid rgba(255,255,255,.16); border-radius: 14px; background: rgba(10,17,24,.88); backdrop-filter: blur(12px); }
+.solid-viewer-panel h2 { margin-bottom: 8px; color: var(--cyan); }
+.solid-viewer-panel p, .solid-viewer-panel small { color: #aebfce; line-height: 1.5; }
+.solid-viewer-panel small { display: block; margin-top: 10px; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }

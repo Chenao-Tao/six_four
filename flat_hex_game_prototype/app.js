@@ -22,7 +22,8 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=file-layout-library-1';
+} from './game.js?v=solid-board-assembly-1';
+import { createSolidBoardViewer } from './solid-board.js?v=solid-board-assembly-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -40,6 +41,7 @@ const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
 const customizeButton = document.getElementById('customizeButton');
+const assembleSolidButton = document.getElementById('assembleSolidButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
 const editorStatus = document.getElementById('editorStatus');
@@ -62,6 +64,11 @@ const savedLayoutSelect = document.getElementById('savedLayoutSelect');
 const loadLayoutButton = document.getElementById('loadLayoutButton');
 const activateLayoutButton = document.getElementById('activateLayoutButton');
 const deleteLayoutButton = document.getElementById('deleteLayoutButton');
+const solidViewer = document.getElementById('solidViewer');
+const solidBoardCanvas = document.getElementById('solidBoardCanvas');
+const solidViewerStatus = document.getElementById('solidViewerStatus');
+const resetSolidViewButton = document.getElementById('resetSolidViewButton');
+const closeSolidViewButton = document.getElementById('closeSolidViewButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -80,6 +87,7 @@ let draftPieceSequence = 0;
 let savedLayouts = [];
 let activeLayoutName = '默认布局';
 let activeInitialState = createInitialState();
+let solidBoardViewer = null;
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -320,6 +328,37 @@ function isPreviewing() {
   return previewSide !== null;
 }
 
+function solidBoardModel() {
+  const side = displayedBoardSide();
+  return {
+    side,
+    pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
+    faceLabels: [...displayedFaceLabels()[side]],
+    panelRotations: [...displayedPanelRotations()[side]]
+  };
+}
+
+function openSolidBoard() {
+  if (animationLock || simulationLock || pendingPromotion || solidBoardViewer) return;
+  stopAutoSimulation();
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  const model = solidBoardModel();
+  solidViewer.classList.remove('hidden');
+  solidViewerStatus.textContent = `${model.side === 'front' ? 'A' : 'B'} 面的六块三角板已组装；${model.pieces.length} 枚棋子随所属板块保留。`;
+  solidBoardViewer = createSolidBoardViewer(solidBoardCanvas, model);
+  render();
+}
+
+function closeSolidBoard() {
+  if (!solidBoardViewer) return;
+  solidBoardViewer.destroy();
+  solidBoardViewer = null;
+  solidViewer.classList.add('hidden');
+  boardHelp.textContent = '六块三角板已展开回平面，棋子与板块布局保持不变。';
+  render();
+}
+
 function renderFaceLabels(side) {
   const layer = document.getElementById('faceLabelLayer');
   layer.replaceChildren();
@@ -519,6 +558,7 @@ function render() {
   resetButton.disabled = editing;
   previewButton.disabled = editing;
   customizeButton.disabled = editing;
+  assembleSolidButton.disabled = animationLock || simulationLock || Boolean(pendingPromotion);
   customEditorControls.classList.toggle('hidden', !editing);
   if (editing) {
     const pieceCount = customEditor.boardStates[boardSide].length;
@@ -1166,6 +1206,9 @@ resetButton.addEventListener('click', resetGame);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
+assembleSolidButton.addEventListener('click', openSolidBoard);
+resetSolidViewButton.addEventListener('click', () => solidBoardViewer?.resetView());
+closeSolidViewButton.addEventListener('click', closeSolidBoard);
 switchEditorFaceButton.addEventListener('click', switchEditorFace);
 clearEditorFaceButton.addEventListener('click', clearEditorFace);
 saveCustomButton.addEventListener('click', saveCustomBoard);
@@ -1223,6 +1266,10 @@ svg.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && solidBoardViewer) {
+    closeSolidBoard();
+    return;
+  }
   if (event.key === 'Escape' && !pieceEditorModal.classList.contains('hidden')) closePieceEditor();
 });
 
