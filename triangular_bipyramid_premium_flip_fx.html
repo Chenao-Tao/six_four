@@ -247,7 +247,7 @@
   <div class="tip">
     <span class="dot"></span>每块板：黑色正面 + 白色反面 · 两面均为 15 点<br>
     左键点击板：原位交换正反面<br>
-    拖动：旋转视角 + 流光　滚轮：缩放
+    拖动：旋转视角　滚轮：缩放
   </div>
 
   <!-- PROTOTYPE：三种棋谱表达通过 ?variant=A|B|C 切换。 -->
@@ -509,21 +509,6 @@
   controls.minDistance = 5;
   controls.maxDistance = 18;
 
-  let rotationPointerDown = false;
-  let rotationFlowActive = false;
-  let rotationFlowIntensity = 0;
-  let rotationPointerLast = null;
-
-  controls.addEventListener('start', () => {
-    // 滚轮缩放同样会触发 controls.start，只有按住左键旋转才准备流光。
-    rotationFlowActive = false;
-  });
-
-  controls.addEventListener('end', () => {
-    rotationFlowActive = false;
-    rotationPointerLast = null;
-  });
-
   // ============================================================
   // 灯光
   // ============================================================
@@ -742,79 +727,6 @@
       depthWrite: false,
       sizeAttenuation: true
     });
-  }
-
-  function createRotationFlowFx(localA, localB, localC, thickness) {
-    const root = new THREE.Group();
-    const surfaceOffset = thickness / 2 + 0.018;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute([
-      localA.x, localA.y, surfaceOffset,
-      localB.x, localB.y, surfaceOffset,
-      localC.x, localC.y, surfaceOffset
-    ], 3));
-
-    const material = new THREE.ShaderMaterial({
-      transparent: true,
-      depthTest: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uTime: { value: 0 },
-        uIntensity: { value: 0 },
-        uDirection: { value: new THREE.Vector2(1, 0.35).normalize() }
-      },
-      vertexShader: `
-        varying vec2 vLocal;
-        void main() {
-          vLocal = position.xy;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float uTime;
-        uniform float uIntensity;
-        uniform vec2 uDirection;
-        varying vec2 vLocal;
-
-        void main() {
-          vec2 direction = normalize(uDirection);
-          vec2 tangent = vec2(-direction.y, direction.x);
-          float along = dot(vLocal, direction);
-          float across = dot(vLocal, tangent);
-
-          float mainPhase = fract(along * 0.30 - uTime * 0.62);
-          float mainBand = smoothstep(0.0, 0.11, mainPhase) *
-                           (1.0 - smoothstep(0.11, 0.34, mainPhase));
-
-          float thinPhase = fract(along * 0.48 + across * 0.08 - uTime * 0.92);
-          float thinBand = smoothstep(0.0, 0.025, thinPhase) *
-                           (1.0 - smoothstep(0.025, 0.09, thinPhase));
-
-          float shimmer = 0.72 + 0.28 * sin(across * 13.0 + uTime * 4.2);
-          float alpha = (mainBand * 0.34 + thinBand * 0.46) * shimmer * uIntensity;
-          vec3 color = mix(vec3(0.18, 0.62, 1.0), vec3(0.72, 0.96, 1.0), thinBand);
-          gl_FragColor = vec4(color * alpha, alpha);
-        }
-      `
-    });
-
-    const front = new THREE.Mesh(geometry, material);
-    front.renderOrder = 16;
-    root.add(front);
-
-    const backGeometry = geometry.clone();
-    const backPositions = backGeometry.attributes.position.array;
-    for (let i = 2; i < backPositions.length; i += 3) {
-      backPositions[i] = -surfaceOffset;
-    }
-    backGeometry.attributes.position.needsUpdate = true;
-    const back = new THREE.Mesh(backGeometry, material);
-    back.renderOrder = 16;
-    root.add(back);
-
-    return { root, material };
   }
 
   // ============================================================
@@ -1259,11 +1171,9 @@
 
     const solid = createSolidTriangle(localA, localB, localC, 0.09, panelId);
     const detail = createBoardDetail(localA, localB, localC, 0.09, panelId);
-    const rotationFlow = createRotationFlowFx(localA, localB, localC, 0.09);
 
     flipGroup.add(solid);
     flipGroup.add(detail);
-    flipGroup.add(rotationFlow.root);
 
     const fx = createAdvancedFlipFx(localA, localB, localC);
     root.add(fx.root);
@@ -1272,7 +1182,6 @@
       root,
       flipGroup,
       fx,
-      rotationFlow,
       localVertices: [localA, localB, localC],
 
       side: 1,
@@ -1474,34 +1383,9 @@
 
   renderer.domElement.addEventListener('pointerdown', e => {
     pointerStart = { x: e.clientX, y: e.clientY };
-    rotationPointerDown = e.button === 0;
-    rotationPointerLast = rotationPointerDown
-      ? { x: e.clientX, y: e.clientY }
-      : null;
-  });
-
-  renderer.domElement.addEventListener('pointermove', e => {
-    if (!rotationPointerDown || !rotationPointerLast) return;
-
-    const dx = e.clientX - rotationPointerLast.x;
-    const dy = e.clientY - rotationPointerLast.y;
-    const distance = Math.hypot(dx, dy);
-
-    if (distance > 1) {
-      rotationFlowActive = true;
-      const direction = new THREE.Vector2(dx, -dy).normalize();
-      panels.forEach(state => {
-        state.rotationFlow.material.uniforms.uDirection.value.lerp(direction, 0.35).normalize();
-      });
-    }
-
-    rotationPointerLast = { x: e.clientX, y: e.clientY };
   });
 
   renderer.domElement.addEventListener('pointerup', e => {
-    rotationPointerDown = false;
-    rotationFlowActive = false;
-    rotationPointerLast = null;
     if (!pointerStart) return;
 
     const move = Math.hypot(
@@ -1527,13 +1411,6 @@
 
     const id = getPanelId(hits[0].object);
     if (id) flipPanel(id);
-  });
-
-  renderer.domElement.addEventListener('pointercancel', () => {
-    rotationPointerDown = false;
-    rotationFlowActive = false;
-    rotationPointerLast = null;
-    pointerStart = null;
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
@@ -1592,9 +1469,6 @@
 
     const now = performance.now();
     const globalTime = now * 0.001;
-    const flowTarget = rotationFlowActive ? 1 : 0;
-    const flowResponse = rotationFlowActive ? 0.16 : 0.075;
-    rotationFlowIntensity += (flowTarget - rotationFlowIntensity) * flowResponse;
 
     panels.forEach(state => {
       let p = state.side === -1 ? 1 : 0;
@@ -1741,10 +1615,6 @@
       }
 
       state.fx.particleGeo.attributes.position.needsUpdate = true;
-
-      // 旋转视角流光独立于翻面能量动画，停止拖动后平滑衰减。
-      state.rotationFlow.material.uniforms.uTime.value = globalTime;
-      state.rotationFlow.material.uniforms.uIntensity.value = rotationFlowIntensity;
     });
 
     controls.update();
