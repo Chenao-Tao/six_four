@@ -21,7 +21,7 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=panel-rotation-1';
+} from './game.js?v=rotating-pieces-save-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -54,9 +54,15 @@ const panelSelection = document.getElementById('panelSelection');
 const rotateSelectedPanelButton = document.getElementById('rotateSelectedPanelButton');
 const flipSelectedPanelButton = document.getElementById('flipSelectedPanelButton');
 const swapSelectedPanelButton = document.getElementById('swapSelectedPanelButton');
+const layoutNameInput = document.getElementById('layoutNameInput');
+const saveLayoutButton = document.getElementById('saveLayoutButton');
+const savedLayoutSelect = document.getElementById('savedLayoutSelect');
+const loadLayoutButton = document.getElementById('loadLayoutButton');
+const deleteLayoutButton = document.getElementById('deleteLayoutButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 let state = createInitialState();
 let selectedPieceId = null;
 let selectedMoves = new Map();
@@ -68,11 +74,65 @@ let previewSide = null;
 let customEditor = null;
 let editorPoint = null;
 let draftPieceSequence = 0;
+let savedLayouts = [];
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
   Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
   return element;
+}
+
+function clonePiecesByFace(boardStates) {
+  return {
+    front: boardStates.front.map(item => ({ ...item, position: { ...item.position } })),
+    back: boardStates.back.map(item => ({ ...item, position: { ...item.position } }))
+  };
+}
+
+function loadSavedLayouts() {
+  try {
+    const stored = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) throw new TypeError('存档格式不是数组');
+    return parsed;
+  } catch (error) {
+    boardHelp.textContent = `读取布局存档失败：${error.message}`;
+    return [];
+  }
+}
+
+function persistSavedLayouts() {
+  try {
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(savedLayouts));
+    return true;
+  } catch (error) {
+    boardHelp.textContent = `保存布局失败：${error.message}`;
+    return false;
+  }
+}
+
+function refreshSavedLayoutOptions(selectedName = '') {
+  savedLayoutSelect.replaceChildren();
+  if (savedLayouts.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '暂无已保存布局';
+    savedLayoutSelect.appendChild(option);
+  } else {
+    savedLayouts.forEach(layout => {
+      const option = document.createElement('option');
+      option.value = layout.name;
+      option.textContent = layout.name;
+      savedLayoutSelect.appendChild(option);
+    });
+    savedLayoutSelect.value = selectedName && savedLayouts.some(item => item.name === selectedName)
+      ? selectedName
+      : savedLayouts[0].name;
+  }
+  const hasSelection = Boolean(savedLayoutSelect.value);
+  loadLayoutButton.disabled = !hasSelection;
+  deleteLayoutButton.disabled = !hasSelection;
 }
 
 function toPixel(point) {
@@ -700,6 +760,88 @@ function saveCustomBoard() {
   render();
 }
 
+function layoutSnapshotFromEditor(name) {
+  return {
+    name,
+    boardStates: clonePiecesByFace(customEditor.boardStates),
+    faceLabels: {
+      front: [...customEditor.faceLabels.front],
+      back: [...customEditor.faceLabels.back]
+    },
+    panelRotations: {
+      front: [...customEditor.panelRotations.front],
+      back: [...customEditor.panelRotations.back]
+    }
+  };
+}
+
+function saveLayoutToLibrary() {
+  if (!customEditor) return;
+  const name = layoutNameInput.value.trim();
+  if (!name) {
+    boardHelp.textContent = '请输入布局名称后再保存。';
+    return;
+  }
+  const validation = createCustomState(
+    customEditor.boardStates,
+    customEditor.faceLabels,
+    customEditor.panelRotations
+  );
+  if (validation.error) {
+    boardHelp.textContent = `布局不能保存：${validation.error}`;
+    return;
+  }
+  const snapshot = layoutSnapshotFromEditor(name);
+  const existingIndex = savedLayouts.findIndex(item => item.name === name);
+  if (existingIndex >= 0) savedLayouts[existingIndex] = snapshot;
+  else savedLayouts.push(snapshot);
+  savedLayouts.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  if (!persistSavedLayouts()) return;
+  refreshSavedLayoutOptions(name);
+  boardHelp.textContent = existingIndex >= 0
+    ? `已覆盖保存布局“${name}”。`
+    : `已保存布局“${name}”。`;
+}
+
+function loadLayoutFromLibrary() {
+  if (!customEditor || !savedLayoutSelect.value) return;
+  const layout = savedLayouts.find(item => item.name === savedLayoutSelect.value);
+  if (!layout) {
+    boardHelp.textContent = '选择的布局存档不存在。';
+    return;
+  }
+  const validation = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+  if (validation.error) {
+    boardHelp.textContent = `布局存档无效：${validation.error}`;
+    return;
+  }
+  customEditor.boardStates = clonePiecesByFace(layout.boardStates);
+  customEditor.faceLabels = {
+    front: [...layout.faceLabels.front],
+    back: [...layout.faceLabels.back]
+  };
+  customEditor.panelRotations = {
+    front: [...layout.panelRotations.front],
+    back: [...layout.panelRotations.back]
+  };
+  customEditor.side = 'front';
+  customEditor.selectedPanel = null;
+  customEditor.swapPending = false;
+  layoutNameInput.value = layout.name;
+  boardHelp.textContent = `已载入布局“${layout.name}”，可继续编辑或保存并开局。`;
+  render();
+}
+
+function deleteLayoutFromLibrary() {
+  if (!customEditor || !savedLayoutSelect.value) return;
+  const name = savedLayoutSelect.value;
+  savedLayouts = savedLayouts.filter(item => item.name !== name);
+  if (!persistSavedLayouts()) return;
+  refreshSavedLayoutOptions();
+  if (layoutNameInput.value.trim() === name) layoutNameInput.value = '';
+  boardHelp.textContent = `已删除布局“${name}”。`;
+}
+
 function setEditorMode(mode) {
   if (!customEditor || !['pieces', 'panels'].includes(mode)) return;
   closePieceEditor();
@@ -771,7 +913,8 @@ function rotateSelectedPanel() {
     customEditor.faceLabels,
     customEditor.panelRotations,
     customEditor.side,
-    panelIndex
+    panelIndex,
+    customEditor.boardStates
   );
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -779,6 +922,7 @@ function rotateSelectedPanel() {
   }
   customEditor.faceLabels = result.faceLabels;
   customEditor.panelRotations = result.panelRotations;
+  customEditor.boardStates = result.boardStates;
   const label = customEditor.faceLabels[customEditor.side][panelIndex];
   const rotation = customEditor.panelRotations[customEditor.side][panelIndex];
   boardHelp.textContent = `${label} 板块已顺时针旋转120°，当前方向 ${rotation}°。`;
@@ -901,6 +1045,14 @@ panelModeButton.addEventListener('click', () => setEditorMode('panels'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
 rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
+saveLayoutButton.addEventListener('click', saveLayoutToLibrary);
+loadLayoutButton.addEventListener('click', loadLayoutFromLibrary);
+deleteLayoutButton.addEventListener('click', deleteLayoutFromLibrary);
+savedLayoutSelect.addEventListener('change', () => {
+  const hasSelection = Boolean(savedLayoutSelect.value);
+  loadLayoutButton.disabled = !hasSelection;
+  deleteLayoutButton.disabled = !hasSelection;
+});
 pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
   button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));
 });
@@ -946,4 +1098,6 @@ document.addEventListener('keydown', event => {
 });
 
 drawStaticBoard();
+savedLayouts = loadSavedLayouts();
+refreshSavedLayoutOptions();
 render();

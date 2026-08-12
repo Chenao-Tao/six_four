@@ -65,3 +65,16 @@ test('选中板块后可以单次旋转120度并显示方向标记', () => {
   assert.match(app, /class: 'panel-orientation'/);
   assert.match(app, /rotateSelectedPanelButton\.addEventListener\('click', rotateSelectedPanel\)/);
 });
+
+test('自定义编辑支持命名保存、载入和删除本地布局', () => {
+  assert.match(html, /id="layoutNameInput"/);
+  assert.match(html, /id="saveLayoutButton"/);
+  assert.match(html, /id="savedLayoutSelect"/);
+  assert.match(html, /id="loadLayoutButton"/);
+  assert.match(html, /id="deleteLayoutButton"/);
+  assert.match(app, /const LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1'/);
+  assert.match(app, /function saveLayoutToLibrary\(\)/);
+  assert.match(app, /function loadLayoutFromLibrary\(\)/);
+  assert.match(app, /function deleteLayoutFromLibrary\(\)/);
+  assert.match(app, /localStorage\.setItem\(LAYOUT_STORAGE_KEY/);
+});

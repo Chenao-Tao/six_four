@@ -120,6 +120,62 @@ function validatePanelIndex(index) {
   return Number.isInteger(index) && index >= 0 && index < 6;
 }
 
+function cloneBoardStates(boardStates) {
+  return {
+    front: boardStates.front.map(item => ({
+      ...item,
+      position: { ...item.position }
+    })),
+    back: boardStates.back.map(item => ({
+      ...item,
+      position: { ...item.position }
+    }))
+  };
+}
+
+function panelCoordinates(point, panelIndex) {
+  const first = CORNERS[panelIndex];
+  const second = CORNERS[(panelIndex + 1) % 6];
+  const determinant = first.q * second.r - first.r * second.q;
+  return {
+    first: (point.q * second.r - point.r * second.q) / determinant,
+    second: (first.q * point.r - first.r * point.q) / determinant
+  };
+}
+
+function pointIsOnPanel(point, panelIndex) {
+  const coordinates = panelCoordinates(point, panelIndex);
+  const center = 1 - coordinates.first - coordinates.second;
+  const epsilon = 1e-9;
+  return coordinates.first >= -epsilon && coordinates.second >= -epsilon && center >= -epsilon;
+}
+
+function rotatePointOnPanel(point, panelIndex, clockwise = true) {
+  const firstCorner = CORNERS[panelIndex];
+  const secondCorner = CORNERS[(panelIndex + 1) % 6];
+  const coordinates = panelCoordinates(point, panelIndex);
+  const nextFirst = clockwise
+    ? 1 - coordinates.first - coordinates.second
+    : coordinates.second;
+  const nextSecond = clockwise
+    ? coordinates.first
+    : 1 - coordinates.first - coordinates.second;
+  return {
+    q: Math.round(nextFirst * firstCorner.q + nextSecond * secondCorner.q),
+    r: Math.round(nextFirst * firstCorner.r + nextSecond * secondCorner.r)
+  };
+}
+
+function rotatePiecesOnPanel(pieces, panelIndex, clockwise = true) {
+  const movingIds = new Set(
+    pieces.filter(item => pointIsOnPanel(item.position, panelIndex)).map(item => item.id)
+  );
+  const rotated = pieces.map(item => movingIds.has(item.id)
+    ? { ...item, position: rotatePointOnPanel(item.position, panelIndex, clockwise) }
+    : { ...item, position: { ...item.position } });
+  return { pieces: rotated };
+}
+
 export function flipBoardPanel(
   faceLabels,
   side,
@@ -174,7 +230,13 @@ export function swapBoardPanels(
   return { faceLabels: next, panelRotations: nextRotations };
 }
 
-export function rotateBoardPanel(faceLabels, panelRotations, side, panelIndex) {
+export function rotateBoardPanel(
+  faceLabels,
+  panelRotations,
+  side,
+  panelIndex,
+  boardStates = null
+) {
   if (!['front', 'back'].includes(side) || !validatePanelIndex(panelIndex)) {
     return { error: '板块位置无效' };
   }
@@ -185,12 +247,26 @@ export function rotateBoardPanel(faceLabels, panelRotations, side, panelIndex) {
   const nextRotations = clonePanelRotations(panelRotations);
   const oppositeSide = side === 'front' ? 'back' : 'front';
   const oppositeIndex = 5 - panelIndex;
+  let nextBoardStates = null;
+  if (boardStates) {
+    if (!Array.isArray(boardStates.front) || !Array.isArray(boardStates.back)) {
+      return { error: '双面棋子数据无效' };
+    }
+    nextBoardStates = cloneBoardStates(boardStates);
+    const currentFace = rotatePiecesOnPanel(nextBoardStates[side], panelIndex, true);
+    if (currentFace.error) return { error: currentFace.error };
+    const oppositeFace = rotatePiecesOnPanel(nextBoardStates[oppositeSide], oppositeIndex, false);
+    if (oppositeFace.error) return { error: oppositeFace.error };
+    nextBoardStates[side] = currentFace.pieces;
+    nextBoardStates[oppositeSide] = oppositeFace.pieces;
+  }
   nextRotations[side][panelIndex] = (nextRotations[side][panelIndex] + 120) % 360;
   nextRotations[oppositeSide][oppositeIndex] =
     (nextRotations[oppositeSide][oppositeIndex] + 240) % 360;
   return {
     faceLabels: cloneFaceLabels(faceLabels),
-    panelRotations: nextRotations
+    panelRotations: nextRotations,
+    boardStates: nextBoardStates
   };
 }
 

@@ -491,3 +491,62 @@ test('自定义棋局保存旋转方向并拒绝正反面朝向不成镜像的�
     /板块朝向.*镜像对应/
   );
 });
+
+test('旋转三角板时板内棋子在两面按镜像方向同步旋转', () => {
+  const initial = createInitialState();
+  const boardStates = {
+    front: [
+      piece('front-center', 'white', 'pawn', 0, 0),
+      piece('front-inner', 'black', 'bishop', 1, 1),
+      piece('front-outside', 'white', 'queen', -1, 0)
+    ],
+    back: [
+      piece('back-center', 'white', 'pawn', 0, 0),
+      piece('back-inner', 'black', 'bishop', 2, -1),
+      piece('back-outside', 'white', 'queen', -1, 0)
+    ]
+  };
+
+  const result = rotateBoardPanel(
+    initial.boardFaceLabels,
+    initial.boardPanelRotations,
+    'front',
+    0,
+    boardStates
+  );
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'front-center').position, { q: 4, r: 0 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'front-inner').position, { q: 2, r: 1 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'front-outside').position, { q: -1, r: 0 });
+  assert.deepEqual(result.boardStates.back.find(item => item.id === 'back-center').position, { q: 4, r: 0 });
+  assert.deepEqual(result.boardStates.back.find(item => item.id === 'back-inner').position, { q: 3, r: -1 });
+  assert.deepEqual(result.boardStates.back.find(item => item.id === 'back-outside').position, { q: -1, r: 0 });
+  assert.deepEqual(boardStates.front[0].position, { q: 0, r: 0 });
+});
+
+test('板块三条边上的棋子旋转后仍保持一一对应且不重叠', () => {
+  const initial = createInitialState();
+  const boardStates = {
+    front: [
+      piece('center', 'white', 'pawn', 0, 0),
+      piece('first-corner', 'black', 'pawn', 4, 0),
+      piece('second-corner', 'white', 'bishop', 0, 4)
+    ],
+    back: []
+  };
+
+  const result = rotateBoardPanel(
+    initial.boardFaceLabels,
+    initial.boardPanelRotations,
+    'front',
+    0,
+    boardStates
+  );
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'center').position, { q: 4, r: 0 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'first-corner').position, { q: 0, r: 4 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'second-corner').position, { q: 0, r: 0 });
+  assert.equal(new Set(result.boardStates.front.map(item => keyOf(item.position))).size, 3);
+});
