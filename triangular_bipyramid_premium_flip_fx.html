@@ -100,11 +100,12 @@
 
     .dot {
       display: inline-block;
-      width: 9px;
-      height: 9px;
+      width: 15px;
+      height: 4px;
       margin-right: 6px;
-      border-radius: 50%;
-      background: #ff6a3b;
+      border: 1px solid rgba(255,255,255,.55);
+      border-radius: 2px;
+      background: linear-gradient(90deg, #edf3f9 50%, #111820 50%);
       vertical-align: -1px;
     }
 
@@ -571,17 +572,19 @@
     side: THREE.DoubleSide
   });
 
-  const MAT_POINT = new THREE.MeshStandardMaterial({
-    color: 0xff6a3b,
-    roughness: 0.28,
-    metalness: 0.04
+  const MAT_GRID_FRONT = new THREE.LineBasicMaterial({
+    color: 0xeaf2f8
   });
 
-  const MAT_GRID = new THREE.LineBasicMaterial({
-    color: 0x0d141b
+  const MAT_GRID_BACK = new THREE.LineBasicMaterial({
+    color: 0x111820
   });
 
-  const MAT_EDGE = new THREE.LineBasicMaterial({
+  const MAT_EDGE_FRONT = new THREE.LineBasicMaterial({
+    color: 0xffffff
+  });
+
+  const MAT_EDGE_BACK = new THREE.LineBasicMaterial({
     color: 0x05080c
   });
 
@@ -908,7 +911,6 @@
     const group = new THREE.Group();
     const divisions = 4;
     const detailOffset = thickness / 2 + 0.012;
-    const pointOffset = thickness / 2 + 0.055;
 
     for (const sign of [1, -1]) {
       // 棋盘线
@@ -938,7 +940,9 @@
 
       const gridGeo = new THREE.BufferGeometry();
       gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      const grid = new THREE.LineSegments(gridGeo, MAT_GRID);
+      const gridMaterial = sign === 1 ? MAT_GRID_FRONT : MAT_GRID_BACK;
+      const edgeMaterial = sign === 1 ? MAT_EDGE_FRONT : MAT_EDGE_BACK;
+      const grid = new THREE.LineSegments(gridGeo, gridMaterial);
       grid.userData.panelId = panelId;
       group.add(grid);
 
@@ -953,27 +957,9 @@
 
       const edgeGeo = new THREE.BufferGeometry();
       edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
-      const edge = new THREE.LineSegments(edgeGeo, MAT_EDGE);
+      const edge = new THREE.LineSegments(edgeGeo, edgeMaterial);
       edge.userData.panelId = panelId;
       group.add(edge);
-
-      // 15 个点
-      const pointGeometry = new THREE.SphereGeometry(0.062, 14, 10);
-
-      for (let i = 0; i <= divisions; i++) {
-        for (let j = 0; j <= divisions - i; j++) {
-          const k = divisions - i - j;
-
-          const p = baryPoint(localA, localB, localC, i, j, k, divisions);
-          p.z = sign * pointOffset;
-
-          const dot = new THREE.Mesh(pointGeometry, MAT_POINT);
-          dot.position.copy(p);
-          dot.userData.panelId = panelId;
-          dot.castShadow = true;
-          group.add(dot);
-        }
-      }
     }
 
     return group;
