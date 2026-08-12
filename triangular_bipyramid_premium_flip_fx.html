@@ -1235,7 +1235,12 @@
     throw new Error('原型布局包含不属于 15 点棋盘的坐标');
   }
 
-  function makePieceLabel(mark, sideSign) {
+  const PANEL_HALF_THICKNESS = 0.045;
+  const PIECE_HEIGHT = 0.18;
+  const PIECE_CLEARANCE = 0.025;
+  const PIECE_CENTER_Z = PANEL_HALF_THICKNESS + PIECE_CLEARANCE + PIECE_HEIGHT / 2;
+
+  function makePieceLabel(mark) {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 128;
@@ -1253,20 +1258,20 @@
       depthWrite: false
     }));
     sprite.scale.set(0.34, 0.34, 0.34);
-    sprite.position.z = sideSign * 0.26;
+    sprite.position.z = PANEL_HALF_THICKNESS + PIECE_CLEARANCE + PIECE_HEIGHT + 0.08;
     return sprite;
   }
 
-  function createDemoPiece(mark, sideSign) {
+  function createDemoPiece(mark) {
     const group = new THREE.Group();
     const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.17, 0.23, 0.18, 24),
+      new THREE.CylinderGeometry(0.17, 0.23, PIECE_HEIGHT, 24),
       new THREE.MeshStandardMaterial({ color: 0x171b20, metalness: 0.72, roughness: 0.28 })
     );
     body.rotation.x = Math.PI / 2;
-    body.position.z = sideSign * 0.14;
+    body.position.z = PIECE_CENTER_Z;
     group.add(body);
-    group.add(makePieceLabel(mark, sideSign));
+    group.add(makePieceLabel(mark));
     return group;
   }
 
@@ -1279,6 +1284,9 @@
     const sideSign = layout === 1 ? 1 : -1;
     const layoutRoot = new THREE.Group();
     layoutRoot.name = `PrototypeLayout_${layout}`;
+    // 反面完整复用正面棋子建模，只镜像整个布局的局部法向。
+    // 这样底座、锥度、标签和离板间隙都与正面完全一致。
+    layoutRoot.scale.z = sideSign;
     demoPieceRoot.add(layoutRoot);
 
     layoutPoints[layout].forEach((point, index) => {
@@ -1289,7 +1297,7 @@
       );
       position.z = 0;
 
-      const piece = createDemoPiece(publicPieces[index].mark, sideSign);
+      const piece = createDemoPiece(publicPieces[index].mark);
       piece.position.copy(position);
       layoutRoot.add(piece);
     });
