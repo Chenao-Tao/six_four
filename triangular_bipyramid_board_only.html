@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>纯六面三角双锥棋盘</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body {
+      color: #edf3f9;
+      background: #10141a;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #app, #scene { position: absolute; inset: 0; }
+    .panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 10;
+      width: min(350px, calc(100vw - 32px));
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 14px;
+      background: rgba(14,18,24,.86);
+      backdrop-filter: blur(10px);
+    }
+    h1 { margin: 0 0 7px; font-size: 18px; }
+    p { margin: 0; color: #aebbc8; font-size: 12px; line-height: 1.5; }
+    .controls { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    button {
+      padding: 7px 10px;
+      color: #edf3f9;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      background: rgba(255,255,255,.07);
+      cursor: pointer;
+    }
+    button:hover { background: rgba(255,255,255,.13); }
+    button.active {
+      color: #10141a;
+      border-color: #f2c164;
+      background: #f2c164;
+    }
+    #status {
+      margin-top: 10px;
+      padding-top: 9px;
+      color: #91a0af;
+      border-top: 1px solid rgba(255,255,255,.1);
+      font-size: 12px;
+    }
+    .tip {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10;
+      padding: 9px 11px;
+      color: #aebbc8;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 10px;
+      background: rgba(14,18,24,.8);
+      font-size: 12px;
+      pointer-events: none;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<div id="app">
+  <div id="scene"></div>
+  <section class="panel">
+    <h1>纯六面三角双锥棋盘</h1>
+    <p>六个实体等边三角面组成闭合模型。黑色为正面、白色为反面，点击任意面可在原位置交换正反面。</p>
+    <div class="controls" id="faceButtons"></div>
+    <div class="controls">
+      <button id="frontAll">全部正面</button>
+      <button id="backAll">全部反面</button>
+    </div>
+    <div id="status">等待操作。</div>
+  </section>
+  <div class="tip">点击：翻面　拖动：旋转视角　滚轮：缩放</div>
+</div>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  const host = document.getElementById('scene');
+  const statusElement = document.getElementById('status');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x10141a);
+
+  const camera = new THREE.PerspectiveCamera(
+    45,
+    host.clientWidth / host.clientHeight,
+    0.1,
+    100
+  );
+  camera.position.set(7, -8, 5.2);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(host.clientWidth, host.clientHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  host.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 5;
+  controls.maxDistance = 18;
+
+  scene.add(new THREE.HemisphereLight(0xdbe9ff, 0x1b2027, 1.55));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 2);
+  keyLight.position.set(5, -4, 8);
+  keyLight.castShadow = true;
+  scene.add(keyLight);
+  const fillLight = new THREE.DirectionalLight(0x93bfff, 0.9);
+  fillLight.position.set(-4, 4, 2);
+  scene.add(fillLight);
+
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(10, 96),
+    new THREE.MeshStandardMaterial({ color: 0x171c23, roughness: 0.95 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -4.1;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const gridHelper = new THREE.GridHelper(18, 18, 0x34404d, 0x252d35);
+  gridHelper.position.y = -4.08;
+  scene.add(gridHelper);
+
+  const frontMaterial = new THREE.MeshStandardMaterial({
+    color: 0x050505,
+    roughness: 0.42,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+  const backMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf5f5f5,
+    roughness: 0.42,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+  const sideMaterial = new THREE.MeshStandardMaterial({
+    color: 0x343434,
+    roughness: 0.45,
+    metalness: 0.08,
+    side: THREE.DoubleSide
+  });
+  const frontGridMaterial = new THREE.LineBasicMaterial({ color: 0xeaf2f8 });
+  const backGridMaterial = new THREE.LineBasicMaterial({ color: 0x111820 });
+  const frontEdgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+  const backEdgeMaterial = new THREE.LineBasicMaterial({ color: 0x05080c });
+
+  const sideLength = 4;
+  const centerRadius = sideLength / Math.sqrt(3);
+  const pyramidHeight = sideLength * Math.sqrt(2 / 3);
+  const A = new THREE.Vector3(centerRadius, 0, 0);
+  const B = new THREE.Vector3(-centerRadius / 2, sideLength / 2, 0);
+  const C = new THREE.Vector3(-centerRadius / 2, -sideLength / 2, 0);
+  const top = new THREE.Vector3(0, 0, pyramidHeight);
+  const bottom = new THREE.Vector3(0, 0, -pyramidHeight);
+  const faces = [
+    [top, A, B], [top, B, C], [top, C, A],
+    [bottom, B, A], [bottom, C, B], [bottom, A, C]
+  ];
+
+  function orientOutward(a, b, c) {
+    const vertices = [a.clone(), b.clone(), c.clone()];
+    const normal = new THREE.Vector3()
+      .subVectors(vertices[1], vertices[0])
+      .cross(new THREE.Vector3().subVectors(vertices[2], vertices[0]));
+    const center = vertices[0].clone().add(vertices[1]).add(vertices[2]).multiplyScalar(1 / 3);
+    if (normal.dot(center) < 0) [vertices[1], vertices[2]] = [vertices[2], vertices[1]];
+    return vertices;
+  }
+
+  function faceBasis(a, b, c) {
+    const center = a.clone().add(b).add(c).multiplyScalar(1 / 3);
+    const xAxis = b.clone().sub(a).normalize();
+    const zAxis = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+    const matrix = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+    matrix.setPosition(center);
+    return matrix;
+  }
+
+  function toLocal(point, matrix) {
+    return point.clone().applyMatrix4(matrix.clone().invert());
+  }
+
+  function addSegment(positions, from, to) {
+    positions.push(from.x, from.y, from.z, to.x, to.y, to.z);
+  }
+
+  function makeTriangleGeometry(a, b, c, z, reverse = false) {
+    const vertices = reverse ? [a, c, b] : [a, b, c];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(
+      vertices.flatMap(point => [point.x, point.y, z]),
+      3
+    ));
+    geometry.setIndex([0, 1, 2]);
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  function createSolidFace(a, b, c, thickness, faceId) {
+    const group = new THREE.Group();
+    const half = thickness / 2;
+    const front = new THREE.Mesh(makeTriangleGeometry(a, b, c, half), frontMaterial);
+    const back = new THREE.Mesh(makeTriangleGeometry(a, b, c, -half, true), backMaterial);
+    for (const mesh of [front, back]) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.faceId = faceId;
+      group.add(mesh);
+    }
+
+    for (const [from, to] of [[a, b], [b, c], [c, a]]) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+        from.x, from.y, half, to.x, to.y, half,
+        from.x, from.y, -half, to.x, to.y, -half
+      ], 3));
+      geometry.setIndex([0, 2, 1, 2, 3, 1]);
+      geometry.computeVertexNormals();
+      const wall = new THREE.Mesh(geometry, sideMaterial);
+      wall.userData.faceId = faceId;
+      wall.castShadow = true;
+      group.add(wall);
+    }
+    return group;
+  }
+
+  function createBoardLines(a, b, c, thickness, faceId) {
+    const group = new THREE.Group();
+    const divisions = 4;
+    const offset = thickness / 2 + 0.012;
+    for (const sign of [1, -1]) {
+      const positions = [];
+      for (let index = 1; index < divisions; index++) {
+        const t = index / divisions;
+        const pairs = [
+          [a.clone().lerp(c, t), b.clone().lerp(c, t)],
+          [b.clone().lerp(a, t), c.clone().lerp(a, t)],
+          [c.clone().lerp(b, t), a.clone().lerp(b, t)]
+        ];
+        pairs.forEach(([from, to]) => {
+          from.z = sign * offset;
+          to.z = sign * offset;
+          addSegment(positions, from, to);
+        });
+      }
+      const gridGeometry = new THREE.BufferGeometry();
+      gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const grid = new THREE.LineSegments(
+        gridGeometry,
+        sign === 1 ? frontGridMaterial : backGridMaterial
+      );
+      grid.userData.faceId = faceId;
+      group.add(grid);
+
+      const outline = [];
+      const aa = a.clone().setZ(sign * offset);
+      const bb = b.clone().setZ(sign * offset);
+      const cc = c.clone().setZ(sign * offset);
+      addSegment(outline, aa, bb);
+      addSegment(outline, bb, cc);
+      addSegment(outline, cc, aa);
+      const edgeGeometry = new THREE.BufferGeometry();
+      edgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(outline, 3));
+      const edge = new THREE.LineSegments(
+        edgeGeometry,
+        sign === 1 ? frontEdgeMaterial : backEdgeMaterial
+      );
+      edge.userData.faceId = faceId;
+      group.add(edge);
+    }
+    return group;
+  }
+
+  const faceStates = new Map();
+  faces.forEach((vertices, index) => {
+    const faceId = index + 1;
+    const [worldA, worldB, worldC] = orientOutward(...vertices);
+    const matrix = faceBasis(worldA, worldB, worldC);
+    const localA = toLocal(worldA, matrix);
+    const localB = toLocal(worldB, matrix);
+    const localC = toLocal(worldC, matrix);
+
+    const root = new THREE.Group();
+    root.matrixAutoUpdate = false;
+    root.matrix.copy(matrix);
+    root.userData.faceId = faceId;
+    scene.add(root);
+
+    const flipGroup = new THREE.Group();
+    flipGroup.userData.faceId = faceId;
+    flipGroup.add(createSolidFace(localA, localB, localC, 0.09, faceId));
+    flipGroup.add(createBoardLines(localA, localB, localC, 0.09, faceId));
+    root.add(flipGroup);
+
+    faceStates.set(faceId, {
+      root,
+      flipGroup,
+      side: 1,
+      currentScale: 1,
+      fromScale: 1,
+      targetScale: 1,
+      animationStart: 0,
+      animationDuration: 620,
+      animating: false
+    });
+  });
+
+  function setFaceSide(faceId, side) {
+    const state = faceStates.get(faceId);
+    if (!state || ![1, -1].includes(side)) return;
+    state.side = side;
+    state.fromScale = state.currentScale;
+    state.targetScale = side;
+    state.animationStart = performance.now();
+    state.animating = true;
+    refreshButtons();
+  }
+
+  function toggleFace(faceId) {
+    const state = faceStates.get(faceId);
+    if (!state) return;
+    setFaceSide(faceId, state.side * -1);
+    statusElement.textContent = `第 ${faceId} 面正在切换到${state.side === 1 ? '黑色正面' : '白色反面'}。`;
+  }
+
+  function refreshButtons() {
+    document.querySelectorAll('[data-face]').forEach(button => {
+      const faceId = Number(button.dataset.face);
+      const reversed = faceStates.get(faceId)?.side === -1;
+      button.classList.toggle('active', reversed);
+      button.textContent = `面 ${faceId}${reversed ? ' · 反面' : ''}`;
+    });
+  }
+
+  const buttonHost = document.getElementById('faceButtons');
+  for (let faceId = 1; faceId <= 6; faceId++) {
+    const button = document.createElement('button');
+    button.dataset.face = String(faceId);
+    button.addEventListener('click', () => toggleFace(faceId));
+    buttonHost.appendChild(button);
+  }
+  document.getElementById('frontAll').addEventListener('click', () => {
+    faceStates.forEach((_, faceId) => setFaceSide(faceId, 1));
+    statusElement.textContent = '六个面正在恢复黑色正面。';
+  });
+  document.getElementById('backAll').addEventListener('click', () => {
+    faceStates.forEach((_, faceId) => setFaceSide(faceId, -1));
+    statusElement.textContent = '六个面正在切换到白色反面。';
+  });
+  refreshButtons();
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  let pointerStart = null;
+  renderer.domElement.addEventListener('pointerdown', event => {
+    pointerStart = { x: event.clientX, y: event.clientY };
+  });
+  renderer.domElement.addEventListener('pointerup', event => {
+    if (!pointerStart) return;
+    const distance = Math.hypot(
+      event.clientX - pointerStart.x,
+      event.clientY - pointerStart.y
+    );
+    pointerStart = null;
+    if (distance > 5) return;
+
+    const bounds = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+    pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const roots = [...faceStates.values()].map(state => state.root);
+    const hit = raycaster.intersectObjects(roots, true)[0];
+    if (!hit) return;
+
+    let object = hit.object;
+    while (object && !object.userData.faceId) object = object.parent;
+    if (object?.userData.faceId) toggleFace(object.userData.faceId);
+  });
+
+  function easeInOutQuint(value) {
+    return value < 0.5
+      ? 16 * value ** 5
+      : 1 - ((-2 * value + 2) ** 5) / 2;
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    faceStates.forEach(state => {
+      if (state.animating) {
+        const progress = Math.min(1, (now - state.animationStart) / state.animationDuration);
+        const eased = easeInOutQuint(progress);
+        state.currentScale = THREE.MathUtils.lerp(state.fromScale, state.targetScale, eased);
+        const breathe = 1 + Math.sin(Math.PI * progress) * 0.014;
+        state.flipGroup.scale.x = breathe;
+        state.flipGroup.scale.y = breathe;
+        if (progress >= 1) {
+          state.currentScale = state.targetScale;
+          state.flipGroup.scale.x = 1;
+          state.flipGroup.scale.y = 1;
+          state.animating = false;
+        }
+      }
+      state.flipGroup.scale.z = state.currentScale;
+    });
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  });
+</script>
+</body>
+</html>
