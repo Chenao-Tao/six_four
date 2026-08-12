@@ -107,6 +107,106 @@
       background: #ff6a3b;
       vertical-align: -1px;
     }
+
+    .notation-workbench {
+      position: absolute;
+      right: 16px;
+      top: 16px;
+      z-index: 11;
+      width: min(430px, calc(100vw - 32px));
+      max-height: calc(100vh - 92px);
+      overflow: auto;
+      padding: 15px;
+      border: 1px solid rgba(88,215,255,.28);
+      border-radius: 14px;
+      background: rgba(10,15,22,.91);
+      box-shadow: 0 18px 52px rgba(0,0,0,.34);
+      backdrop-filter: blur(12px);
+    }
+
+    .workbench-head, .layout-row, .piece-row, .field-grid {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .workbench-head { justify-content: space-between; }
+    .workbench-head h2 { margin: 0; font-size: 16px; }
+    .eyebrow { color: #58d7ff; font-size: 11px; letter-spacing: .1em; }
+    .layout-row, .piece-row { margin-top: 12px; }
+    .layout-row button.active, .piece-chip.active {
+      color: #10141a;
+      border-color: #58d7ff;
+      background: #58d7ff;
+    }
+
+    .piece-chip {
+      min-width: 42px;
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .field-grid { margin-top: 12px; align-items: stretch; }
+    .field-grid label { flex: 1 1 46%; color: #aebdcb; font-size: 11px; }
+    select {
+      display: block;
+      width: 100%;
+      margin-top: 5px;
+      padding: 8px;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 8px;
+      color: #edf3f9;
+      background: #19212b;
+    }
+
+    .notation-output {
+      margin-top: 13px;
+      padding: 12px;
+      border-left: 3px solid #ffb84f;
+      border-radius: 8px;
+      background: rgba(255,184,79,.08);
+      color: #fff5e8;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .notation-output code { color: inherit; white-space: normal; }
+    .privacy-check { margin-top: 8px; color: #77e0a5; font-size: 11px; }
+    .prototype-note { margin-top: 10px; color: #8190a0; font-size: 11px; line-height: 1.45; }
+    .token-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; margin-top: 12px; }
+    .token { padding: 9px 5px; border-radius: 9px; background: #192330; text-align: center; }
+    .token strong { display: block; color: #58d7ff; font-size: 17px; }
+    .token small { color: #91a0b0; font-size: 9px; }
+    .reveal-list { margin-top: 12px; padding: 0; list-style: none; }
+    .reveal-list li { margin-top: 6px; padding: 9px 10px; border-radius: 8px; background: #19212b; }
+    .reveal-list li.sealed { color: #718091; background: #141a22; }
+
+    .prototype-switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateX(-50%);
+      padding: 7px 9px;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 999px;
+      background: rgba(4,7,11,.94);
+      box-shadow: 0 8px 30px rgba(0,0,0,.45);
+      font-size: 12px;
+    }
+
+    .prototype-switcher button { padding: 5px 9px; }
+    .prototype-switcher span { min-width: 152px; text-align: center; }
+
+    @media (max-width: 900px) {
+      .panel { width: min(330px, calc(100vw - 32px)); }
+      .notation-workbench { top: auto; bottom: 72px; max-height: 43vh; }
+      .tip { display: none; }
+    }
   </style>
 
   <script type="importmap">
@@ -148,6 +248,33 @@
     左键点击板：原位交换正反面<br>
     拖动：旋转视角　滚轮：缩放
   </div>
+
+  <!-- PROTOTYPE：三种棋谱表达通过 ?variant=A|B|C 切换。 -->
+  <section class="notation-workbench" aria-label="拓扑棋谱原型">
+    <div class="workbench-head">
+      <div>
+        <div class="eyebrow">PROTOTYPE · 不计绝对坐标</div>
+        <h2 id="variantTitle">拓扑棋谱</h2>
+      </div>
+      <button id="copyNotationBtn">复制棋谱</button>
+    </div>
+    <div class="layout-row" aria-label="示例布局">
+      <span>测试布局</span>
+      <button class="layout-btn active" data-layout="1">布局 1</button>
+      <button class="layout-btn" data-layout="2">布局 2</button>
+    </div>
+    <div class="piece-row" id="pieceSelector" aria-label="选择公开暗棋"></div>
+    <div id="notationVariant"></div>
+    <div class="prototype-note">
+      这版只验证棋谱表达和跨布局选子。暗棋真实身份、实际步数、完整合法走法均不会写进棋谱。
+    </div>
+  </section>
+
+  <nav class="prototype-switcher" aria-label="棋谱方案切换">
+    <button id="previousVariantBtn" aria-label="上一方案">←</button>
+    <span id="variantLabel"></span>
+    <button id="nextVariantBtn" aria-label="下一方案">→</button>
+  </nav>
 </div>
 
 <script type="module">
@@ -157,6 +284,204 @@
   const host = document.getElementById('scene');
   const statusEl = document.getElementById('status');
   const buttonsEl = document.getElementById('panelButtons');
+
+  // ============================================================
+  // PROTOTYPE：跨布局拓扑棋谱（不进入正式规则）
+  // ============================================================
+
+  const notationVariants = [
+    { key: 'A', name: '语义指令' },
+    { key: 'B', name: '令牌棋谱' },
+    { key: 'C', name: '逐条揭示' }
+  ];
+
+  const publicPieces = [
+    { mark: '◆', layout1: '靠近日角', layout2: '星角内环' },
+    { mark: '●', layout1: '月边内环', layout2: '靠近日角' },
+    { mark: '▲', layout1: '星角外环', layout2: '月边内环' },
+    { mark: '✦', layout1: '中心区域', layout2: '星角外环' }
+  ];
+
+  const notationState = {
+    layout: 1,
+    piece: '◆',
+    direction: '朝星角',
+    branch: '岔路取靠近日角的一支',
+    stop: '遇到第一枚可交互暗棋时停止',
+    promotion: '成功吃子后保持当前等级',
+    revealed: 1
+  };
+
+  const variantHost = document.getElementById('notationVariant');
+  const variantTitle = document.getElementById('variantTitle');
+  const variantLabel = document.getElementById('variantLabel');
+
+  function currentVariantIndex() {
+    const requested = new URLSearchParams(location.search).get('variant');
+    const index = notationVariants.findIndex(item => item.key === requested);
+    return index >= 0 ? index : 0;
+  }
+
+  function notationSentence() {
+    return `${notationState.piece}｜${notationState.direction}｜` +
+      `${notationState.branch}｜${notationState.stop}｜${notationState.promotion}`;
+  }
+
+  function locationFor(piece) {
+    const item = publicPieces.find(candidate => candidate.mark === piece);
+    return item?.[`layout${notationState.layout}`] ?? '未知区域';
+  }
+
+  function selectMarkup(label, field, values) {
+    return `<label>${label}<select data-field="${field}">` +
+      values.map(value =>
+        `<option${notationState[field] === value ? ' selected' : ''}>${value}</option>`
+      ).join('') + '</select></label>';
+  }
+
+  function privacyCheckMarkup() {
+    return '<div class="privacy-check">✓ 仅含公开符号与拓扑条件；未记录身份、绝对点位或总步数</div>';
+  }
+
+  function renderVariantA() {
+    variantHost.innerHTML = `
+      <div class="field-grid">
+        ${selectMarkup('起始方向', 'direction', ['朝日角', '朝月角', '朝星角', '背离星角'])}
+        ${selectMarkup('岔路规则', 'branch', [
+          '岔路取靠近日角的一支', '岔路取靠近月角的一支', '岔路取靠近星角的一支'
+        ])}
+        ${selectMarkup('停止条件', 'stop', [
+          '遇到第一枚可交互暗棋时停止', '抵达下一处内部顶点时停止', '抵达外部顶点时停止'
+        ])}
+        ${selectMarkup('吃后选择', 'promotion', [
+          '成功吃子后保持当前等级', '成功吃子后选择升级'
+        ])}
+      </div>
+      <div class="notation-output"><code>${notationSentence()}</code></div>
+      ${privacyCheckMarkup()}`;
+  }
+
+  function renderVariantB() {
+    const tokens = [
+      [notationState.piece, '行动者'],
+      [notationState.direction.replace('朝', '→').replace('背离', '↗'), '方向'],
+      [notationState.branch.includes('日') ? '岔·日' : notationState.branch.includes('月') ? '岔·月' : '岔·星', '分支'],
+      [notationState.stop.includes('第一枚') ? '遇·首' : notationState.stop.includes('内部') ? '止·内' : '止·外', '终止'],
+      [notationState.promotion.includes('升级') ? '升' : '守', '吃后']
+    ];
+    variantHost.innerHTML = `
+      <div class="token-board">${tokens.map(([value, label]) =>
+        `<div class="token"><strong>${value}</strong><small>${label}</small></div>`
+      ).join('')}</div>
+      <div class="notation-output"><code>${tokens.map(token => token[0]).join(' / ')}</code></div>
+      <div class="controls"><button id="editTokensBtn">随机演示另一条指令</button></div>
+      ${privacyCheckMarkup()}`;
+    document.getElementById('editTokensBtn').addEventListener('click', () => {
+      const directions = ['朝日角', '朝月角', '朝星角'];
+      notationState.direction = directions[(directions.indexOf(notationState.direction) + 1) % directions.length];
+      renderNotationPrototype();
+    });
+  }
+
+  function renderVariantC() {
+    const steps = [
+      `选择公开标识为 ${notationState.piece} 的暗棋`,
+      notationState.direction,
+      notationState.branch,
+      notationState.stop,
+      notationState.promotion
+    ];
+    variantHost.innerHTML = `
+      <ol class="reveal-list">${steps.map((step, index) =>
+        `<li class="${index < notationState.revealed ? '' : 'sealed'}">` +
+        (index < notationState.revealed ? `${index + 1}. ${step}` : `${index + 1}. 尚未揭示`) + '</li>'
+      ).join('')}</ol>
+      <div class="controls">
+        <button id="revealNextBtn">揭示下一条</button>
+        <button id="sealNotationBtn">重新封存</button>
+      </div>
+      <div class="prototype-note">执行者一次只获得下一条指令，事先无法看到完整路径长度。</div>`;
+    document.getElementById('revealNextBtn').addEventListener('click', () => {
+      notationState.revealed = Math.min(steps.length, notationState.revealed + 1);
+      renderNotationPrototype();
+    });
+    document.getElementById('sealNotationBtn').addEventListener('click', () => {
+      notationState.revealed = 1;
+      renderNotationPrototype();
+    });
+  }
+
+  function renderPieceSelector() {
+    document.getElementById('pieceSelector').innerHTML = publicPieces.map(piece => `
+      <button class="piece-chip ${piece.mark === notationState.piece ? 'active' : ''}"
+        data-piece="${piece.mark}" title="${locationFor(piece.mark)}">${piece.mark}</button>
+    `).join('') + `<span>当前区域：${locationFor(notationState.piece)}</span>`;
+
+    document.querySelectorAll('.piece-chip').forEach(button => {
+      button.addEventListener('click', () => {
+        notationState.piece = button.dataset.piece;
+        notationState.revealed = 1;
+        renderNotationPrototype();
+      });
+    });
+  }
+
+  function renderNotationPrototype() {
+    const variant = notationVariants[currentVariantIndex()];
+    variantTitle.textContent = variant.name;
+    variantLabel.textContent = `${variant.key} — ${variant.name}`;
+    renderPieceSelector();
+    if (variant.key === 'A') renderVariantA();
+    if (variant.key === 'B') renderVariantB();
+    if (variant.key === 'C') renderVariantC();
+
+    variantHost.querySelectorAll('select[data-field]').forEach(select => {
+      select.addEventListener('change', () => {
+        notationState[select.dataset.field] = select.value;
+        renderNotationPrototype();
+      });
+    });
+  }
+
+  function cycleVariant(offset) {
+    const next = (currentVariantIndex() + offset + notationVariants.length) % notationVariants.length;
+    const url = new URL(location.href);
+    url.searchParams.set('variant', notationVariants[next].key);
+    history.replaceState({}, '', url);
+    renderNotationPrototype();
+  }
+
+  document.querySelectorAll('.layout-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      notationState.layout = Number(button.dataset.layout);
+      document.querySelectorAll('.layout-btn').forEach(item =>
+        item.classList.toggle('active', item === button)
+      );
+      updateDemoLayout();
+      renderNotationPrototype();
+    });
+  });
+
+  document.getElementById('previousVariantBtn').addEventListener('click', () => cycleVariant(-1));
+  document.getElementById('nextVariantBtn').addEventListener('click', () => cycleVariant(1));
+  document.getElementById('copyNotationBtn').addEventListener('click', async event => {
+    try {
+      await navigator.clipboard.writeText(notationSentence());
+      event.currentTarget.textContent = '已复制';
+    } catch {
+      event.currentTarget.textContent = '请手动复制';
+    }
+    setTimeout(() => { event.currentTarget.textContent = '复制棋谱'; }, 1000);
+  });
+
+  window.addEventListener('keydown', event => {
+    const tag = document.activeElement?.tagName;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || document.activeElement?.isContentEditable) return;
+    if (event.key === 'ArrowLeft') cycleVariant(-1);
+    if (event.key === 'ArrowRight') cycleVariant(1);
+  });
+
+  renderNotationPrototype();
 
   // ============================================================
   // 场景
@@ -888,6 +1213,76 @@
       animTo: 1
     });
   });
+
+  // PROTOTYPE：四枚外观一致、仅有公开符号的暗棋。
+  // 两套布局只改变站位；棋谱始终通过公开符号选择同一逻辑棋子。
+  const layoutWeights = {
+    1: [
+      [0.68, 0.16, 0.16], [0.40, 0.42, 0.18],
+      [0.22, 0.22, 0.56], [0.34, 0.33, 0.33]
+    ],
+    2: [
+      [0.22, 0.56, 0.22], [0.64, 0.18, 0.18],
+      [0.24, 0.24, 0.52], [0.38, 0.20, 0.42]
+    ]
+  };
+
+  function makePieceLabel(mark) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.font = '700 72px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(mark, 64, 68);
+
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      transparent: true,
+      depthTest: false
+    }));
+    sprite.scale.set(0.34, 0.34, 0.34);
+    sprite.position.z = 0.24;
+    return sprite;
+  }
+
+  const demoPieceRoot = new THREE.Group();
+  const demoFace = ensureOutward(...FACE_LIST[0]);
+  const demoNormal = new THREE.Vector3()
+    .subVectors(demoFace[1], demoFace[0])
+    .cross(new THREE.Vector3().subVectors(demoFace[2], demoFace[0]))
+    .normalize();
+  scene.add(demoPieceRoot);
+
+  const demoPieces = publicPieces.map(piece => {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.23, 0.18, 24),
+      new THREE.MeshStandardMaterial({ color: 0x171b20, metalness: 0.72, roughness: 0.28 })
+    );
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+    group.add(makePieceLabel(piece.mark));
+    demoPieceRoot.add(group);
+    return group;
+  });
+
+  function updateDemoLayout() {
+    layoutWeights[notationState.layout].forEach((weights, index) => {
+      const position = demoFace[0].clone().multiplyScalar(weights[0])
+        .add(demoFace[1].clone().multiplyScalar(weights[1]))
+        .add(demoFace[2].clone().multiplyScalar(weights[2]))
+        .add(demoNormal.clone().multiplyScalar(0.16));
+      demoPieces[index].position.copy(position);
+      demoPieces[index].quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), demoNormal
+      );
+    });
+  }
+
+  updateDemoLayout();
 
   // ============================================================
   // 点击逻辑
