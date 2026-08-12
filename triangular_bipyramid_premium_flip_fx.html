@@ -296,10 +296,10 @@
   ];
 
   const publicPieces = [
-    { mark: '◆', layout1: '靠近日角', layout2: '星角内环' },
-    { mark: '●', layout1: '月边内环', layout2: '靠近日角' },
-    { mark: '▲', layout1: '星角外环', layout2: '月边内环' },
-    { mark: '✦', layout1: '中心区域', layout2: '星角外环' }
+    { mark: '◆', layout1: '日—月边近日角', layout2: '内部近日角' },
+    { mark: '●', layout1: '日—月边近月角', layout2: '内部近月角' },
+    { mark: '▲', layout1: '内部近星角', layout2: '月—星边近星角' },
+    { mark: '✦', layout1: '月—星边中点', layout2: '日—星边中点' }
   ];
 
   const notationState = {
@@ -453,12 +453,7 @@
 
   document.querySelectorAll('.layout-btn').forEach(button => {
     button.addEventListener('click', () => {
-      notationState.layout = Number(button.dataset.layout);
-      document.querySelectorAll('.layout-btn').forEach(item =>
-        item.classList.toggle('active', item === button)
-      );
-      updateDemoLayout();
-      renderNotationPrototype();
+      switchDemoLayout(Number(button.dataset.layout));
     });
   });
 
@@ -1201,6 +1196,7 @@
       root,
       flipGroup,
       fx,
+      localVertices: [localA, localB, localC],
 
       side: 1,
       targetSide: 1,
@@ -1215,19 +1211,31 @@
   });
 
   // PROTOTYPE：四枚外观一致、仅有公开符号的暗棋。
-  // 两套布局只改变站位；棋谱始终通过公开符号选择同一逻辑棋子。
-  const layoutWeights = {
+  // 每个三元组都是四等分三角网格的整数重心坐标，和为 4，
+  // 因此棋子只可能落在棋盘已有的 15 个点上。
+  const DEMO_PANEL_ID = 1;
+  const layoutPoints = {
     1: [
-      [0.68, 0.16, 0.16], [0.40, 0.42, 0.18],
-      [0.22, 0.22, 0.56], [0.34, 0.33, 0.33]
+      [3, 1, 0], [1, 3, 0], [1, 1, 2], [0, 2, 2]
     ],
     2: [
-      [0.22, 0.56, 0.22], [0.64, 0.18, 0.18],
-      [0.24, 0.24, 0.52], [0.38, 0.20, 0.42]
+      [2, 1, 1], [1, 2, 1], [1, 0, 3], [2, 0, 2]
     ]
   };
 
-  function makePieceLabel(mark) {
+  const allLayoutPointsAreValid = Object.values(layoutPoints).every(points =>
+    points.every(point =>
+      point.length === 3 &&
+      point.every(Number.isInteger) &&
+      point.every(value => value >= 0 && value <= 4) &&
+      point.reduce((sum, value) => sum + value, 0) === 4
+    )
+  );
+  if (!allLayoutPointsAreValid) {
+    throw new Error('原型布局包含不属于 15 点棋盘的坐标');
+  }
+
+  function makePieceLabel(mark, sideSign) {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 128;
@@ -1241,48 +1249,74 @@
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: new THREE.CanvasTexture(canvas),
       transparent: true,
-      depthTest: false
+      depthTest: true,
+      depthWrite: false
     }));
     sprite.scale.set(0.34, 0.34, 0.34);
-    sprite.position.z = 0.24;
+    sprite.position.z = sideSign * 0.26;
     return sprite;
   }
 
-  const demoPieceRoot = new THREE.Group();
-  const demoFace = ensureOutward(...FACE_LIST[0]);
-  const demoNormal = new THREE.Vector3()
-    .subVectors(demoFace[1], demoFace[0])
-    .cross(new THREE.Vector3().subVectors(demoFace[2], demoFace[0]))
-    .normalize();
-  scene.add(demoPieceRoot);
-
-  const demoPieces = publicPieces.map(piece => {
+  function createDemoPiece(mark, sideSign) {
     const group = new THREE.Group();
     const body = new THREE.Mesh(
       new THREE.CylinderGeometry(0.17, 0.23, 0.18, 24),
       new THREE.MeshStandardMaterial({ color: 0x171b20, metalness: 0.72, roughness: 0.28 })
     );
     body.rotation.x = Math.PI / 2;
+    body.position.z = sideSign * 0.14;
     group.add(body);
-    group.add(makePieceLabel(piece.mark));
-    demoPieceRoot.add(group);
+    group.add(makePieceLabel(mark, sideSign));
     return group;
-  });
+  }
 
-  function updateDemoLayout() {
-    layoutWeights[notationState.layout].forEach((weights, index) => {
-      const position = demoFace[0].clone().multiplyScalar(weights[0])
-        .add(demoFace[1].clone().multiplyScalar(weights[1]))
-        .add(demoFace[2].clone().multiplyScalar(weights[2]))
-        .add(demoNormal.clone().multiplyScalar(0.16));
-      demoPieces[index].position.copy(position);
-      demoPieces[index].quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), demoNormal
+  const demoPanel = panels.get(DEMO_PANEL_ID);
+  const demoPieceRoot = new THREE.Group();
+  demoPieceRoot.name = 'PrototypePieceLayouts';
+  demoPanel.flipGroup.add(demoPieceRoot);
+
+  for (const layout of [1, 2]) {
+    const sideSign = layout === 1 ? 1 : -1;
+    const layoutRoot = new THREE.Group();
+    layoutRoot.name = `PrototypeLayout_${layout}`;
+    demoPieceRoot.add(layoutRoot);
+
+    layoutPoints[layout].forEach((point, index) => {
+      const [i, j, k] = point;
+      const position = baryPoint(
+        ...demoPanel.localVertices,
+        i, j, k, 4
       );
+      position.z = 0;
+
+      const piece = createDemoPiece(publicPieces[index].mark, sideSign);
+      piece.position.copy(position);
+      layoutRoot.add(piece);
     });
   }
 
-  updateDemoLayout();
+  function setDemoLayoutUi(layout) {
+    notationState.layout = layout;
+    notationState.revealed = 1;
+    document.querySelectorAll('.layout-btn').forEach(button =>
+      button.classList.toggle('active', Number(button.dataset.layout) === layout)
+    );
+    renderNotationPrototype();
+  }
+
+  function switchDemoLayout(layout) {
+    if (layout !== 1 && layout !== 2) return;
+
+    const targetSide = layout === 1 ? 1 : -1;
+    const state = panels.get(DEMO_PANEL_ID);
+    setDemoLayoutUi(layout);
+
+    if (state.side !== targetSide || state.animating) {
+      startFlipAnimation(state, targetSide);
+      statusEl.textContent = `板 ${DEMO_PANEL_ID} 正在翻转到布局 ${layout}。`;
+      refreshButtons();
+    }
+  }
 
   // ============================================================
   // 点击逻辑
@@ -1303,6 +1337,10 @@
   function startFlipAnimation(state, targetSide) {
     state.side = targetSide;
     state.targetSide = targetSide;
+
+    if (state === demoPanel) {
+      setDemoLayoutUi(targetSide === 1 ? 1 : 2);
+    }
 
     state.animFrom = state.currentScaleZ;
     state.animTo = targetSide;
