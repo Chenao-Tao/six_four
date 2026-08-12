@@ -12,7 +12,8 @@ import {
   createInitialState,
   isOnBoard,
   keyOf,
-  legalMoves
+  legalMoves,
+  promotionTypeForMove
 } from './game.js';
 
 const svg = document.getElementById('board');
@@ -33,6 +34,7 @@ let selectedMoves = new Map();
 let pendingPromotion = null;
 let autoTimer = null;
 let animationLock = false;
+let simulationLock = false;
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -194,13 +196,16 @@ function selectPiece(pieceId) {
   render();
 }
 
-async function animatePath(pieceId, path) {
+async function animatePath(pieceId, path, returnToOrigin = false) {
   const pieceElement = document.querySelector(`[data-piece-id="${pieceId}"]`);
   if (!pieceElement || path.length < 2) return;
+  const animationPath = returnToOrigin
+    ? [...path, ...path.slice(0, -1).reverse()]
+    : path;
   animationLock = true;
-  for (let index = 1; index < path.length; index++) {
-    const from = toPixel(path[index - 1]);
-    const to = toPixel(path[index]);
+  for (let index = 1; index < animationPath.length; index++) {
+    const from = toPixel(animationPath[index - 1]);
+    const to = toPixel(animationPath[index]);
     const startedAt = performance.now();
     await new Promise(resolve => {
       function frame(now) {
@@ -220,8 +225,8 @@ async function animatePath(pieceId, path) {
   animationLock = false;
 }
 
-async function commitMove(pieceId, move, promote = false) {
-  await animatePath(pieceId, move.path);
+async function commitMove(pieceId, move, promote = false, decisionNote = '') {
+  await animatePath(pieceId, move.path, Boolean(move.captureId));
   const result = applyMove(state, pieceId, move.target, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -234,17 +239,19 @@ async function commitMove(pieceId, move, promote = false) {
   promotionModal.classList.add('hidden');
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
-    : '移动完成，轮到另一方。';
+    : decisionNote || (move.captureId
+      ? '攻击完成：双方位置不变，被攻击棋子已强制降级或移出。'
+      : '移动完成，轮到另一方。');
   render();
 }
 
 function chooseMove(move) {
   if (animationLock || !selectedPieceId) return;
   const mover = state.pieces.find(item => item.id === selectedPieceId);
-  const captured = move.captureId ? state.pieces.find(item => item.id === move.captureId) : null;
-  if (captured?.type === 'pawn' && ['pawn', 'bishop'].includes(mover.type)) {
+  const promotionType = promotionTypeForMove(state, selectedPieceId, move);
+  if (promotionType) {
     pendingPromotion = { pieceId: selectedPieceId, move };
-    const nextType = mover.type === 'pawn' ? '象' : '皇后';
+    const nextType = PIECE_NAMES[promotionType];
     promotionTitle.textContent = `${PIECE_NAMES[mover.type]}吃兵成功`;
     promotionQuestion.textContent = `是否将这枚${PIECE_NAMES[mover.type]}升级为${nextType}？`;
     promoteButton.textContent = `升级为${nextType}`;
@@ -293,24 +300,32 @@ function loadCaptureDemo() {
 }
 
 async function simulateStep() {
-  if (animationLock || pendingPromotion || state.winner) return;
-  const action = chooseSimulationAction(state);
-  if (!action) {
-    boardHelp.textContent = '当前一方没有合法移动。';
-    return;
+  if (simulationLock || animationLock || pendingPromotion || state.winner) return;
+  simulationLock = true;
+  try {
+    const action = chooseSimulationAction(state);
+    if (!action) {
+      boardHelp.textContent = '当前一方没有合法移动。';
+      return;
+    }
+    selectedPieceId = action.pieceId;
+    selectedMoves = legalMoves(state, action.pieceId);
+    const mover = state.pieces.find(item => item.id === action.pieceId);
+    const promotionType = promotionTypeForMove(state, action.pieceId, action.move);
+    const choice = promotionType
+      ? action.promote
+        ? `并升级为${PIECE_NAMES[promotionType]}`
+        : '且保持原级'
+      : '';
+    selectedInfo.textContent = `Minimax + Alpha-Beta（${action.searchDepth} 层）选择：` +
+      `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}`;
+    render();
+    await new Promise(resolve => setTimeout(resolve, 240));
+    const decisionNote = `算法已搜索 ${action.searchDepth} 层并选择评估值 ${action.score} 的动作。`;
+    await commitMove(action.pieceId, action.move, action.promote, decisionNote);
+  } finally {
+    simulationLock = false;
   }
-  selectedPieceId = action.pieceId;
-  selectedMoves = legalMoves(state, action.pieceId);
-  render();
-  await new Promise(resolve => setTimeout(resolve, 240));
-  const mover = state.pieces.find(item => item.id === action.pieceId);
-  const captured = action.move.captureId
-    ? state.pieces.find(item => item.id === action.move.captureId)
-    : null;
-  const promote = captured?.type === 'pawn' &&
-    ['pawn', 'bishop'].includes(mover.type) &&
-    Math.random() > 0.5;
-  await commitMove(action.pieceId, action.move, promote);
 }
 
 document.getElementById('resetButton').addEventListener('click', resetGame);
