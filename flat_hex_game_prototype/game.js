@@ -53,6 +53,75 @@ export const BOARD_FACE_LABELS = {
   back: ['2B', '1B', '4A', '3B', '6B', '5B']
 };
 
+function cloneFaceLabels(faceLabels = BOARD_FACE_LABELS) {
+  return {
+    front: [...faceLabels.front],
+    back: [...faceLabels.back]
+  };
+}
+
+function oppositePanelFace(label) {
+  return `${label.slice(0, -1)}${label.endsWith('A') ? 'B' : 'A'}`;
+}
+
+function validateFaceLabels(faceLabels) {
+  if (!faceLabels || !Array.isArray(faceLabels.front) || !Array.isArray(faceLabels.back)) {
+    return '板块布局数据无效';
+  }
+  for (const side of ['front', 'back']) {
+    const labels = faceLabels[side];
+    if (labels.length !== 6 || labels.some(label => !/^[1-6][AB]$/.test(label))) {
+      return '板块布局必须由六块编号为 1A 至 6B 的三角板组成';
+    }
+    if (new Set(labels.map(label => label[0])).size !== 6) {
+      return '板块布局的每一面必须各包含 1 至 6 号实体板';
+    }
+  }
+  for (let index = 0; index < 6; index++) {
+    if (faceLabels.back[5 - index] !== oppositePanelFace(faceLabels.front[index])) {
+      return '板块布局的正反面没有保持实体板对应关系';
+    }
+  }
+  return null;
+}
+
+function validatePanelIndex(index) {
+  return Number.isInteger(index) && index >= 0 && index < 6;
+}
+
+export function flipBoardPanel(faceLabels, side, panelIndex) {
+  if (!['front', 'back'].includes(side) || !validatePanelIndex(panelIndex)) {
+    return { error: '板块位置无效' };
+  }
+  const validationError = validateFaceLabels(faceLabels);
+  if (validationError) return { error: validationError };
+  const next = cloneFaceLabels(faceLabels);
+  const oppositeSide = side === 'front' ? 'back' : 'front';
+  const oppositeIndex = 5 - panelIndex;
+  next[side][panelIndex] = oppositePanelFace(next[side][panelIndex]);
+  next[oppositeSide][oppositeIndex] = oppositePanelFace(next[oppositeSide][oppositeIndex]);
+  return { faceLabels: next };
+}
+
+export function swapBoardPanels(faceLabels, side, firstIndex, secondIndex) {
+  if (!['front', 'back'].includes(side) ||
+      !validatePanelIndex(firstIndex) || !validatePanelIndex(secondIndex) ||
+      firstIndex === secondIndex) {
+    return { error: '请选择两个不同的有效板块位置' };
+  }
+  const validationError = validateFaceLabels(faceLabels);
+  if (validationError) return { error: validationError };
+  const next = cloneFaceLabels(faceLabels);
+  [next[side][firstIndex], next[side][secondIndex]] =
+    [next[side][secondIndex], next[side][firstIndex]];
+  const oppositeSide = side === 'front' ? 'back' : 'front';
+  const firstOppositeIndex = 5 - firstIndex;
+  const secondOppositeIndex = 5 - secondIndex;
+  [next[oppositeSide][firstOppositeIndex], next[oppositeSide][secondOppositeIndex]] =
+    [next[oppositeSide][secondOppositeIndex], next[oppositeSide][firstOppositeIndex]];
+  return { faceLabels: next };
+}
+
 function piece(id, side, type, q, r) {
   return { id, side, type, position: { q, r } };
 }
@@ -103,6 +172,7 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
     boardSide: 'front',
     flipCount: 0,
     boardStates,
+    boardFaceLabels: cloneFaceLabels(),
     pieces: boardStates.front,
     ...extra
   };
@@ -171,16 +241,21 @@ function normalizeCustomFace(face, pieces) {
   return { pieces: normalized };
 }
 
-export function createCustomState(boardStates) {
+export function createCustomState(boardStates, faceLabels = BOARD_FACE_LABELS) {
   const front = normalizeCustomFace('front', boardStates?.front);
   if (front.error) return { error: front.error };
   const back = normalizeCustomFace('back', boardStates?.back);
   if (back.error) return { error: back.error };
+  const faceLabelsError = validateFaceLabels(faceLabels);
+  if (faceLabelsError) return { error: faceLabelsError };
   return {
     state: withInitialPositionHistory(doubleSidedState(
       front.pieces,
       back.pieces,
-      { history: ['自定义棋盘已保存：白方先行'] }
+      {
+        boardFaceLabels: cloneFaceLabels(faceLabels),
+        history: ['自定义棋盘已保存：白方先行']
+      }
     ))
   };
 }

@@ -12,12 +12,14 @@ import {
   captureMoveForClickedPiece,
   createCustomState,
   createInitialState,
+  flipBoardPanel,
   isOnBoard,
   keyOf,
   legalMoves,
   promotionTypeForMove,
-  stepwiseGameSearch
-} from './game.js?v=custom-board-1';
+  stepwiseGameSearch,
+  swapBoardPanels
+} from './game.js?v=detachable-panels-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -43,6 +45,12 @@ const saveCustomButton = document.getElementById('saveCustomButton');
 const cancelCustomButton = document.getElementById('cancelCustomButton');
 const pieceEditorModal = document.getElementById('pieceEditorModal');
 const pieceEditorPoint = document.getElementById('pieceEditorPoint');
+const pieceModeButton = document.getElementById('pieceModeButton');
+const panelModeButton = document.getElementById('panelModeButton');
+const panelEditorActions = document.getElementById('panelEditorActions');
+const panelSelection = document.getElementById('panelSelection');
+const flipSelectedPanelButton = document.getElementById('flipSelectedPanelButton');
+const swapSelectedPanelButton = document.getElementById('swapSelectedPanelButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -138,6 +146,7 @@ function drawStaticBoard() {
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
   svg.appendChild(svgElement('g', { id: 'editorTargetLayer' }));
+  svg.appendChild(svgElement('g', { id: 'panelTargetLayer' }));
 }
 
 function oppositeBoardSide(side) {
@@ -159,6 +168,11 @@ function displayedPieces() {
   return state.boardStates?.[side] ?? state.pieces;
 }
 
+function displayedFaceLabels() {
+  if (customEditor) return customEditor.faceLabels;
+  return state.boardFaceLabels ?? BOARD_FACE_LABELS;
+}
+
 function isPreviewing() {
   return previewSide !== null;
 }
@@ -166,7 +180,7 @@ function isPreviewing() {
 function renderFaceLabels(side) {
   const layer = document.getElementById('faceLabelLayer');
   layer.replaceChildren();
-  BOARD_FACE_LABELS[side].forEach((label, index) => {
+  displayedFaceLabels()[side].forEach((label, index) => {
     const corner = CORNERS[index];
     const next = CORNERS[(index + 1) % 6];
     const point = {
@@ -188,6 +202,32 @@ function renderFaceLabels(side) {
     textElement.textContent = label;
     group.appendChild(textElement);
     layer.appendChild(group);
+  });
+}
+
+function renderPanelTargets() {
+  const layer = document.getElementById('panelTargetLayer');
+  layer.replaceChildren();
+  if (!customEditor || customEditor.mode !== 'panels') return;
+  CORNERS.forEach((corner, index) => {
+    const target = svgElement('polygon', {
+      class: `panel-target ${customEditor.selectedPanel === index ? 'selected' : ''} ` +
+        `${customEditor.swapPending && customEditor.selectedPanel !== index ? 'swap-candidate' : ''}`,
+      points: pointList([{ q: 0, r: 0 }, corner, CORNERS[(index + 1) % 6]]),
+      'data-panel-index': index,
+      tabindex: 0,
+      role: 'button',
+      'aria-label': `选择${displayedFaceLabels()[customEditor.side][index]}板块`
+    });
+    const choosePanel = event => {
+      event.stopPropagation();
+      selectEditorPanel(index);
+    };
+    target.addEventListener('click', choosePanel);
+    target.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') choosePanel(event);
+    });
+    layer.appendChild(target);
   });
 }
 
@@ -237,7 +277,7 @@ function renderPiece(piece) {
 function renderEditorTargets() {
   const layer = document.getElementById('editorTargetLayer');
   layer.replaceChildren();
-  if (!customEditor) return;
+  if (!customEditor || customEditor.mode !== 'pieces') return;
   const occupiedKeys = new Set(displayedPieces().map(item => keyOf(item.position)));
   BOARD_POINTS.forEach(point => {
     const pixel = toPixel(point);
@@ -299,6 +339,7 @@ function render() {
   pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
   renderFaceLabels(boardSide);
   renderEditorTargets();
+  renderPanelTargets();
   if (previewing || editing) {
     document.getElementById('movePathLayer').replaceChildren();
     document.getElementById('moveTargetLayer').replaceChildren();
@@ -326,8 +367,27 @@ function render() {
   customEditorControls.classList.toggle('hidden', !editing);
   if (editing) {
     const pieceCount = customEditor.boardStates[boardSide].length;
-    editorStatus.textContent = `正在编辑 ${boardSide === 'front' ? 'A' : 'B'} 面 · ${pieceCount} 枚棋子`;
+    editorStatus.textContent = customEditor.mode === 'pieces'
+      ? `棋子摆放 · ${boardSide === 'front' ? 'A' : 'B'} 面 · ${pieceCount} 枚棋子`
+      : `板块拆装 · ${boardSide === 'front' ? 'A' : 'B'} 面`;
     switchEditorFaceButton.textContent = `切换到 ${boardSide === 'front' ? 'B' : 'A'} 面`;
+    pieceModeButton.classList.toggle('active', customEditor.mode === 'pieces');
+    panelModeButton.classList.toggle('active', customEditor.mode === 'panels');
+    pieceModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'pieces'));
+    panelModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'panels'));
+    panelEditorActions.classList.toggle('hidden', customEditor.mode !== 'panels');
+    clearEditorFaceButton.disabled = customEditor.mode !== 'pieces';
+    const selectedLabel = customEditor.selectedPanel === null
+      ? null
+      : customEditor.faceLabels[boardSide][customEditor.selectedPanel];
+    panelSelection.textContent = customEditor.swapPending
+      ? `已选择 ${selectedLabel}，请点击另一块板完成交换`
+      : selectedLabel
+        ? `已选择 ${selectedLabel} 板块`
+        : '请选择一块三角板';
+    flipSelectedPanelButton.disabled = customEditor.selectedPanel === null || customEditor.swapPending;
+    swapSelectedPanelButton.disabled = customEditor.selectedPanel === null;
+    swapSelectedPanelButton.textContent = customEditor.swapPending ? '取消交换' : '与另一块交换';
   }
   turnBadge.classList.toggle('winner-glow', Boolean(state.winner && !editing));
   historyElement.replaceChildren(...state.history.slice().reverse().map(item => {
@@ -336,7 +396,11 @@ function render() {
     return line;
   }));
   if (editing) {
-    selectedInfo.textContent = '点击任意交点设置或替换棋子；每个面都需要一枚白王和一枚黑王。';
+    selectedInfo.textContent = customEditor.mode === 'pieces'
+      ? '点击任意交点设置或替换棋子；每个面都需要一枚白王和一枚黑王。'
+      : customEditor.swapPending
+        ? '点击另一块三角板交换两个实体板的位置；另一面会同步更新。'
+        : '选择三角板后可以翻转该板正反面，或与另一块板交换位置。';
   } else if (!selectedPieceId) {
     selectedInfo.textContent = state.winner ? '整局结束。' : '尚未选择棋子';
   }
@@ -491,7 +555,7 @@ function closePieceEditor() {
 }
 
 function openPieceEditor(point) {
-  if (!customEditor) return;
+  if (!customEditor || customEditor.mode !== 'pieces') return;
   editorPoint = { q: point.q, r: point.r };
   const existing = customEditor.boardStates[customEditor.side]
     .find(item => keyOf(item.position) === keyOf(editorPoint));
@@ -540,7 +604,14 @@ function enterCustomEditor() {
   selectedMoves = new Map();
   customEditor = {
     side: 'front',
-    boardStates: { front: [], back: [] }
+    mode: 'pieces',
+    selectedPanel: null,
+    swapPending: false,
+    boardStates: { front: [], back: [] },
+    faceLabels: {
+      front: [...(state.boardFaceLabels?.front ?? BOARD_FACE_LABELS.front)],
+      back: [...(state.boardFaceLabels?.back ?? BOARD_FACE_LABELS.back)]
+    }
   };
   boardHelp.textContent = '已进入空白棋盘编辑：点击交点设置棋子，A、B 两面分别编辑。';
   render();
@@ -554,6 +625,8 @@ async function switchEditorFace() {
   boardHelp.textContent = '正在翻到另一面继续编辑……';
   await new Promise(resolve => setTimeout(resolve, 430));
   customEditor.side = oppositeBoardSide(customEditor.side);
+  customEditor.selectedPanel = null;
+  customEditor.swapPending = false;
   render();
   await new Promise(resolve => setTimeout(resolve, 470));
   boardShell.classList.remove('flipping');
@@ -562,7 +635,7 @@ async function switchEditorFace() {
 }
 
 function clearEditorFace() {
-  if (!customEditor) return;
+  if (!customEditor || customEditor.mode !== 'pieces') return;
   customEditor.boardStates[customEditor.side] = [];
   closePieceEditor();
   boardHelp.textContent = `已清空 ${customEditor.side === 'front' ? 'A' : 'B'} 面；取消编辑仍可返回原棋局。`;
@@ -579,7 +652,7 @@ function cancelCustomBoard() {
 
 function saveCustomBoard() {
   if (!customEditor) return;
-  const result = createCustomState(customEditor.boardStates);
+  const result = createCustomState(customEditor.boardStates, customEditor.faceLabels);
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
     selectedInfo.textContent = result.error;
@@ -592,6 +665,72 @@ function saveCustomBoard() {
   selectedMoves = new Map();
   closePieceEditor();
   boardHelp.textContent = '自定义双面棋盘已保存，A 面朝上，由白方先行。';
+  render();
+}
+
+function setEditorMode(mode) {
+  if (!customEditor || !['pieces', 'panels'].includes(mode)) return;
+  closePieceEditor();
+  customEditor.mode = mode;
+  customEditor.selectedPanel = null;
+  customEditor.swapPending = false;
+  boardHelp.textContent = mode === 'pieces'
+    ? '棋子摆放模式：点击交点设置或替换棋子。'
+    : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
+  render();
+}
+
+function selectEditorPanel(panelIndex) {
+  if (!customEditor || customEditor.mode !== 'panels') return;
+  if (customEditor.swapPending && customEditor.selectedPanel !== panelIndex) {
+    const firstLabel = customEditor.faceLabels[customEditor.side][customEditor.selectedPanel];
+    const secondLabel = customEditor.faceLabels[customEditor.side][panelIndex];
+    const result = swapBoardPanels(
+      customEditor.faceLabels,
+      customEditor.side,
+      customEditor.selectedPanel,
+      panelIndex
+    );
+    if (result.error) {
+      boardHelp.textContent = result.error;
+      return;
+    }
+    customEditor.faceLabels = result.faceLabels;
+    customEditor.selectedPanel = panelIndex;
+    customEditor.swapPending = false;
+    boardHelp.textContent = `已交换 ${firstLabel} 与 ${secondLabel}，另一面已同步更新。`;
+    render();
+    return;
+  }
+  customEditor.selectedPanel = panelIndex;
+  customEditor.swapPending = false;
+  const label = customEditor.faceLabels[customEditor.side][panelIndex];
+  boardHelp.textContent = `已选中 ${label} 板块，可翻转正反面或与另一块板交换。`;
+  render();
+}
+
+function flipSelectedPanel() {
+  if (!customEditor || customEditor.mode !== 'panels' || customEditor.selectedPanel === null) return;
+  const panelIndex = customEditor.selectedPanel;
+  const previousLabel = customEditor.faceLabels[customEditor.side][panelIndex];
+  const result = flipBoardPanel(customEditor.faceLabels, customEditor.side, panelIndex);
+  if (result.error) {
+    boardHelp.textContent = result.error;
+    return;
+  }
+  customEditor.faceLabels = result.faceLabels;
+  const nextLabel = customEditor.faceLabels[customEditor.side][panelIndex];
+  boardHelp.textContent = `${previousLabel} 板块已翻转为 ${nextLabel}，背面对应板块同步翻转。`;
+  render();
+}
+
+function beginPanelSwap() {
+  if (!customEditor || customEditor.mode !== 'panels' || customEditor.selectedPanel === null) return;
+  customEditor.swapPending = !customEditor.swapPending;
+  const label = customEditor.faceLabels[customEditor.side][customEditor.selectedPanel];
+  boardHelp.textContent = customEditor.swapPending
+    ? `已选择 ${label}，请点击另一块三角板完成交换。`
+    : `已取消交换，仍选中 ${label} 板块。`;
   render();
 }
 
@@ -696,6 +835,10 @@ switchEditorFaceButton.addEventListener('click', switchEditorFace);
 clearEditorFaceButton.addEventListener('click', clearEditorFace);
 saveCustomButton.addEventListener('click', saveCustomBoard);
 cancelCustomButton.addEventListener('click', cancelCustomBoard);
+pieceModeButton.addEventListener('click', () => setEditorMode('pieces'));
+panelModeButton.addEventListener('click', () => setEditorMode('panels'));
+flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
+swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
 pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
   button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));
 });

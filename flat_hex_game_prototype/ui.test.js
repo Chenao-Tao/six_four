@@ -45,3 +45,15 @@ test('编辑态使用隔离草稿并锁定普通走棋与算法入口', () => {
   assert.match(app, /stepButton\.disabled = previewing \|\| editing/);
   assert.match(app, /autoButton\.disabled = previewing \|\| editing/);
 });
+
+test('自定义编辑提供棋子摆放和板块拆装两种工具', () => {
+  assert.match(html, /id="pieceModeButton"/);
+  assert.match(html, /id="panelModeButton"/);
+  assert.match(html, /id="panelEditorActions"/);
+  assert.match(html, /id="flipSelectedPanelButton"/);
+  assert.match(html, /id="swapSelectedPanelButton"/);
+  assert.match(app, /function renderPanelTargets\(\)/);
+  assert.match(app, /function selectEditorPanel\(panelIndex\)/);
+  assert.match(app, /function flipSelectedPanel\(\)/);
+  assert.match(app, /function beginPanelSwap\(\)/);
+});

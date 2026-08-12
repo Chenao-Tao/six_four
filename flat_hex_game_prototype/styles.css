@@ -79,6 +79,11 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }
+.editor-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.editor-modes button.active { color: #071015; background: var(--cyan); }
+.panel-editor-actions { margin-bottom: 10px; padding: 10px; border: 1px solid rgba(255,201,106,.25); border-radius: 9px; background: rgba(22,25,25,.65); }
+.panel-editor-actions.hidden { display: none; }
+.panel-selection { margin-bottom: 8px; color: var(--gold); font-size: 12px; }
 .rules ul { margin: 0; padding-left: 20px; color: #adbdcb; font-size: 13px; line-height: 1.6; }
 .history-card { flex: 1; min-height: 220px; }
 #history { max-height: 260px; margin: 0; padding-left: 24px; overflow: auto; color: #9fb1c1; font-size: 12px; line-height: 1.6; }
@@ -105,6 +110,11 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .editor-target { fill: rgba(97,231,255,.06); stroke: rgba(97,231,255,.58); stroke-width: 1.5; cursor: crosshair; }
 .editor-target:hover, .editor-target:focus { fill: rgba(97,231,255,.3); stroke: var(--cyan); stroke-width: 3; outline: none; }
 .editor-target.occupied { fill: rgba(255,201,106,.08); stroke: rgba(255,201,106,.72); }
+.panel-target { fill: rgba(97,231,255,.05); stroke: rgba(97,231,255,.55); stroke-width: 2; cursor: grab; }
+.panel-target:hover, .panel-target:focus { fill: rgba(97,231,255,.16); stroke: var(--cyan); stroke-width: 4; outline: none; }
+.panel-target.selected { fill: rgba(255,201,106,.2); stroke: var(--gold); stroke-width: 6; filter: drop-shadow(0 0 8px rgba(255,201,106,.65)); }
+.panel-target.swap-candidate { cursor: copy; stroke-dasharray: 9 7; animation: panel-candidate-pulse .8s ease-in-out infinite alternate; }
+@keyframes panel-candidate-pulse { from { fill: rgba(97,231,255,.04); } to { fill: rgba(97,231,255,.2); } }
 .board-shell.editing .piece { pointer-events: none; filter: drop-shadow(0 0 6px rgba(255,201,106,.34)); }
 .piece { cursor: pointer; transition: filter .15s ease; }
 .piece:hover { filter: drop-shadow(0 0 7px rgba(97,231,255,.85)); }

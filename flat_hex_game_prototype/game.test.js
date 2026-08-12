@@ -9,11 +9,13 @@ import {
   createCaptureDemoState,
   createCustomState,
   createInitialState,
+  flipBoardPanel,
   keyOf,
   legalMoves,
   positionSignature,
   promotionTypeForMove,
-  stepwiseGameSearch
+  stepwiseGameSearch,
+  swapBoardPanels
 } from './game.js';
 
 function stateOf(pieces, turn = 'white') {
@@ -368,4 +370,50 @@ test('自定义棋盘拒绝重叠、越界和缺少双方王的布局', () => {
     ],
     back: validBack
   }).error, /A 面.*王只能放在中心或六个外角/);
+});
+
+test('单块三角板翻面时同步更新整板另一面的镜像槽位', () => {
+  const original = createInitialState().boardFaceLabels;
+
+  const result = flipBoardPanel(original, 'front', 0);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.faceLabels.front[0], '5B');
+  assert.equal(result.faceLabels.back[5], '5A');
+  assert.deepEqual(result.faceLabels.front.slice(1), original.front.slice(1));
+  assert.equal(original.front[0], '5A');
+  assert.equal(original.back[5], '5B');
+});
+
+test('交换两块三角板时同步交换另一面的镜像位置', () => {
+  const original = createInitialState().boardFaceLabels;
+
+  const fromFront = swapBoardPanels(original, 'front', 0, 2);
+  assert.equal(fromFront.error, undefined);
+  assert.equal(fromFront.faceLabels.front[0], '3A');
+  assert.equal(fromFront.faceLabels.front[2], '5A');
+  assert.equal(fromFront.faceLabels.back[5], '3B');
+  assert.equal(fromFront.faceLabels.back[3], '5B');
+
+  const fromBack = swapBoardPanels(original, 'back', 0, 2);
+  assert.equal(fromBack.faceLabels.back[0], '4A');
+  assert.equal(fromBack.faceLabels.back[2], '2B');
+  assert.equal(fromBack.faceLabels.front[5], '4B');
+  assert.equal(fromBack.faceLabels.front[3], '2A');
+});
+
+test('自定义棋局保存拆装后的板块布局并拒绝不成对的双面数据', () => {
+  const pieces = {
+    front: [piece('', 'white', 'king', 0, 0), piece('', 'black', 'king', 4, 0)],
+    back: [piece('', 'white', 'king', -4, 0), piece('', 'black', 'king', 0, 4)]
+  };
+  const swapped = swapBoardPanels(createInitialState().boardFaceLabels, 'front', 1, 4);
+
+  const saved = createCustomState(pieces, swapped.faceLabels);
+
+  assert.deepEqual(saved.state.boardFaceLabels, swapped.faceLabels);
+  assert.match(createCustomState(pieces, {
+    front: swapped.faceLabels.front,
+    back: [...swapped.faceLabels.back].reverse()
+  }).error, /板块布局.*对应/);
 });
