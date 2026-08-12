@@ -22,6 +22,7 @@
           <h2>模拟控制</h2>
           <div class="buttons">
             <button id="resetButton">重新开局</button>
+            <button id="captureDemoButton">载入吃子演示</button>
             <button id="stepButton">算法演示一步</button>
             <button id="autoButton">连续模拟</button>
           </div>
@@ -32,9 +33,10 @@
           <ul>
             <li><b>王</b>：只在中心与六个外角之间，沿大三角边移动。</li>
             <li><b>皇后</b>：连续走1～3格，每步可改变方向，不能穿子。</li>
-            <li><b>象</b>：沿三角网格的一条直线移动，遇子停止。</li>
+            <li><b>象</b>：每回合只移动一个菱形长对角线的长度。</li>
             <li><b>兵</b>：沿任意相邻线路移动1格。</li>
-            <li><b>吃子</b>：当前仅兵可吃敌兵或敌王；吃兵可选择升象，吃王获胜。</li>
+            <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
+            <li><b>升降级</b>：兵吃兵可升象，象吃兵可升后；被吃的象降兵、后降象，并退到攻击者原位。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -46,11 +48,11 @@
   </main>
   <div class="modal hidden" id="promotionModal">
     <div class="modal-card">
-      <h2>兵吃兵成功</h2>
-      <p>是否将这枚兵升级为象？</p>
+      <h2 id="promotionTitle">吃子成功</h2>
+      <p id="promotionQuestion">是否升级？</p>
       <div class="buttons">
-        <button data-promote="true">升级为象</button>
-        <button data-promote="false">保持为兵</button>
+        <button data-promote="true" id="promoteButton">升级</button>
+        <button data-promote="false">保持原级</button>
       </div>
     </div>
   </div>

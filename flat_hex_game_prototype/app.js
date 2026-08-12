@@ -6,8 +6,9 @@ import {
   KING_POINTS,
   PIECE_NAMES,
   add,
-  allLegalActions,
   applyMove,
+  chooseSimulationAction,
+  createCaptureDemoState,
   createInitialState,
   isOnBoard,
   keyOf,
@@ -20,6 +21,9 @@ const selectedInfo = document.getElementById('selectedInfo');
 const historyElement = document.getElementById('history');
 const boardHelp = document.getElementById('boardHelp');
 const promotionModal = document.getElementById('promotionModal');
+const promotionTitle = document.getElementById('promotionTitle');
+const promotionQuestion = document.getElementById('promotionQuestion');
+const promoteButton = document.getElementById('promoteButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -238,8 +242,12 @@ function chooseMove(move) {
   if (animationLock || !selectedPieceId) return;
   const mover = state.pieces.find(item => item.id === selectedPieceId);
   const captured = move.captureId ? state.pieces.find(item => item.id === move.captureId) : null;
-  if (mover.type === 'pawn' && captured?.type === 'pawn') {
+  if (captured?.type === 'pawn' && ['pawn', 'bishop'].includes(mover.type)) {
     pendingPromotion = { pieceId: selectedPieceId, move };
+    const nextType = mover.type === 'pawn' ? '象' : '皇后';
+    promotionTitle.textContent = `${PIECE_NAMES[mover.type]}吃兵成功`;
+    promotionQuestion.textContent = `是否将这枚${PIECE_NAMES[mover.type]}升级为${nextType}？`;
+    promoteButton.textContent = `升级为${nextType}`;
     promotionModal.classList.remove('hidden');
     return;
   }
@@ -270,17 +278,27 @@ function resetGame() {
   render();
 }
 
+function loadCaptureDemo() {
+  clearInterval(autoTimer);
+  autoTimer = null;
+  document.getElementById('autoButton').classList.remove('active');
+  document.getElementById('autoButton').textContent = '连续模拟';
+  state = createCaptureDemoState();
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  pendingPromotion = null;
+  promotionModal.classList.add('hidden');
+  boardHelp.textContent = '演示局面：选择白象、白后、白王或白兵，红圈即对应吃子。';
+  render();
+}
+
 async function simulateStep() {
   if (animationLock || pendingPromotion || state.winner) return;
-  const actions = allLegalActions(state);
-  if (!actions.length) {
+  const action = chooseSimulationAction(state);
+  if (!action) {
     boardHelp.textContent = '当前一方没有合法移动。';
     return;
   }
-  const capturesKing = actions.filter(action => action.move.capturesKing);
-  const captures = actions.filter(action => action.move.captureId);
-  const pool = capturesKing.length ? capturesKing : captures.length ? captures : actions;
-  const action = pool[Math.floor(Math.random() * pool.length)];
   selectedPieceId = action.pieceId;
   selectedMoves = legalMoves(state, action.pieceId);
   render();
@@ -289,11 +307,14 @@ async function simulateStep() {
   const captured = action.move.captureId
     ? state.pieces.find(item => item.id === action.move.captureId)
     : null;
-  const promote = mover.type === 'pawn' && captured?.type === 'pawn' && Math.random() > 0.5;
+  const promote = captured?.type === 'pawn' &&
+    ['pawn', 'bishop'].includes(mover.type) &&
+    Math.random() > 0.5;
   await commitMove(action.pieceId, action.move, promote);
 }
 
 document.getElementById('resetButton').addEventListener('click', resetGame);
+document.getElementById('captureDemoButton').addEventListener('click', loadCaptureDemo);
 document.getElementById('stepButton').addEventListener('click', simulateStep);
 document.getElementById('autoButton').addEventListener('click', event => {
   if (autoTimer) {

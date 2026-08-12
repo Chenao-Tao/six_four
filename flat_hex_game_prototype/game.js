@@ -3,6 +3,12 @@ export const DIRECTIONS = [
   [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]
 ];
 
+// 两个相邻小三角形组成一个菱形；象沿菱形长对角线移动。
+// 每个向量等于两条相邻网格边向量之和。
+export const BISHOP_DIRECTIONS = [
+  [1, 1], [-1, 2], [-2, 1], [-1, -1], [1, -2], [2, -1]
+];
+
 export const PIECE_NAMES = {
   king: '王', queen: '皇后', bishop: '象', pawn: '兵'
 };
@@ -67,14 +73,46 @@ export function createInitialState() {
   };
 }
 
+export function createCaptureDemoState() {
+  return {
+    turn: 'white',
+    winner: null,
+    moveNumber: 1,
+    history: ['吃子演示局面：白方有四种可立即执行的吃子'],
+    pieces: [
+      piece('wK', 'white', 'king', 4, 0),
+      piece('wQ', 'white', 'queen', -2, 0),
+      piece('wB1', 'white', 'bishop', 0, 0),
+      piece('wB2', 'white', 'bishop', -3, 2),
+      piece('wP1', 'white', 'pawn', 0, -3),
+      piece('wP2', 'white', 'pawn', -3, 3),
+      piece('bK', 'black', 'king', 0, -4),
+      piece('bQ', 'black', 'queen', 0, 4),
+      piece('bB1', 'black', 'bishop', -1, 0),
+      piece('bB2', 'black', 'bishop', 3, -2),
+      piece('bP1', 'black', 'pawn', 1, 1),
+      piece('bP2', 'black', 'pawn', -2, 3)
+    ]
+  };
+}
+
 function occupants(state) {
   return new Map(state.pieces.map(item => [keyOf(item.position), item]));
+}
+
+function canCapture(attackerType, defenderType) {
+  return (
+    (attackerType === 'pawn' && ['pawn', 'king'].includes(defenderType)) ||
+    (attackerType === 'bishop' && defenderType === 'pawn') ||
+    (attackerType === 'queen' && defenderType === 'bishop') ||
+    (attackerType === 'king' && defenderType === 'queen')
+  );
 }
 
 function canLand(pieceToMove, occupant) {
   if (!occupant) return true;
   if (occupant.side === pieceToMove.side) return false;
-  return pieceToMove.type === 'pawn' && ['pawn', 'king'].includes(occupant.type);
+  return canCapture(pieceToMove.type, occupant.type);
 }
 
 function addMove(moves, pieceToMove, target, path, occupied) {
@@ -100,14 +138,10 @@ function pawnMoves(pieceToMove, occupied) {
 
 function bishopMoves(pieceToMove, occupied) {
   const moves = new Map();
-  DIRECTIONS.forEach(direction => {
-    const path = [pieceToMove.position];
-    for (let distance = 1; distance <= BOARD_RADIUS * 2; distance++) {
-      const target = add(pieceToMove.position, direction, distance);
-      if (!isOnBoard(target)) break;
-      path.push(target);
-      if (!addMove(moves, pieceToMove, target, [...path], occupied)) break;
-    }
+  BISHOP_DIRECTIONS.forEach(direction => {
+    const target = add(pieceToMove.position, direction);
+    if (!isOnBoard(target)) return;
+    addMove(moves, pieceToMove, target, [pieceToMove.position, target], occupied);
   });
   return moves;
 }
@@ -191,20 +225,37 @@ export function applyMove(state, pieceId, target, promote = false) {
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
-  const nextPieces = state.pieces
-    .filter(item => item.id !== move.captureId)
-    .map(item => item.id === pieceId
-      ? {
-          ...item,
-          type: promote && captured?.type === 'pawn' && item.type === 'pawn' ? 'bishop' : item.type,
-          position: { ...target }
-        }
-      : item
-    );
+  const origin = { ...movingPiece.position };
+  const promotedType = promote && captured?.type === 'pawn'
+    ? movingPiece.type === 'pawn'
+      ? 'bishop'
+      : movingPiece.type === 'bishop'
+        ? 'queen'
+        : movingPiece.type
+    : movingPiece.type;
+  const capturedType = captured?.type === 'bishop'
+    ? 'pawn'
+    : captured?.type === 'queen'
+      ? 'bishop'
+      : null;
+  const nextPieces = state.pieces.flatMap(item => {
+    if (item.id === pieceId) {
+      return [{ ...item, type: promotedType, position: { ...target } }];
+    }
+    if (item.id !== move.captureId) return [item];
+    if (!capturedType) return [];
+    return [{ ...item, type: capturedType, position: origin }];
+  });
+  const captureResult = captured
+    ? capturedType
+      ? `，${PIECE_NAMES[captured.type]}降级为${PIECE_NAMES[capturedType]}并退到攻击者原位`
+      : `，${PIECE_NAMES[captured.type]}移出棋盘`
+    : '';
   const description = `${movingPiece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[movingPiece.type]} ` +
     `${keyOf(movingPiece.position)} → ${keyOf(target)}` +
-    (captured ? `，吃掉${PIECE_NAMES[captured.type]}` : '') +
-    (promote && captured?.type === 'pawn' ? '并升级为象' : '');
+    (captured ? `，吃${PIECE_NAMES[captured.type]}` : '') +
+    captureResult +
+    (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
   return {
     state: {
       ...state,
@@ -216,7 +267,8 @@ export function applyMove(state, pieceId, target, promote = false) {
     },
     move,
     captured,
-    needsPromotionChoice: movingPiece.type === 'pawn' && captured?.type === 'pawn'
+    needsPromotionChoice:
+      captured?.type === 'pawn' && ['pawn', 'bishop'].includes(movingPiece.type)
   };
 }
 
@@ -228,4 +280,17 @@ export function allLegalActions(state) {
       legalMoves(state, item.id).forEach(move => actions.push({ pieceId: item.id, move }));
     });
   return actions;
+}
+
+export function chooseSimulationAction(state, random = Math.random) {
+  const actions = allLegalActions(state);
+  if (!actions.length) return null;
+  const kingCaptures = actions.filter(action => action.move.capturesKing);
+  const captures = actions.filter(action => action.move.captureId);
+  const candidates = kingCaptures.length
+    ? kingCaptures
+    : captures.length
+      ? captures
+      : actions;
+  return candidates[Math.floor(random() * candidates.length)];
 }
