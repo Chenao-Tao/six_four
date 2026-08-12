@@ -247,7 +247,8 @@
   <div class="tip">
     <span class="dot"></span>每块板：黑色正面 + 白色反面 · 两面均为 15 点<br>
     左键点击板：原位交换正反面<br>
-    拖动：旋转视角　滚轮：缩放
+    点击棋子：显示相邻方向　点击光圈：移动一步<br>
+    拖动：旋转视角 + 周身光　滚轮：缩放
   </div>
 
   <!-- PROTOTYPE：三种棋谱表达通过 ?variant=A|B|C 切换。 -->
@@ -751,6 +752,70 @@
     [BOTTOM, C, B],
     [BOTTOM, A, C]
   ];
+
+  const BODY_EDGE_KEYS = [
+    ['A', 'B'], ['B', 'C'], ['C', 'A'],
+    ['TOP', 'A'], ['TOP', 'B'], ['TOP', 'C'],
+    ['BOTTOM', 'A'], ['BOTTOM', 'B'], ['BOTTOM', 'C']
+  ];
+
+  if (BODY_EDGE_KEYS.length !== 9) {
+    throw new Error('三角双锥的周身棱边数量必须为 9');
+  }
+
+  function createBodyAura() {
+    const root = new THREE.Group();
+    root.name = 'TriangularBipyramidBodyAura';
+    const vertices = { A, B, C, TOP, BOTTOM };
+    const materials = {
+      outer: new THREE.MeshBasicMaterial({
+        color: 0x267dff,
+        transparent: true,
+        opacity: 0.10,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }),
+      middle: new THREE.MeshBasicMaterial({
+        color: 0x54d9ff,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }),
+      core: new THREE.MeshBasicMaterial({
+        color: 0xdffbff,
+        transparent: true,
+        opacity: 0.62,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    };
+
+    BODY_EDGE_KEYS.forEach(([fromKey, toKey]) => {
+      const curve = new THREE.LineCurve3(vertices[fromKey], vertices[toKey]);
+      const layers = [
+        [0.082, materials.outer],
+        [0.040, materials.middle],
+        [0.013, materials.core]
+      ];
+
+      layers.forEach(([radius, material]) => {
+        const glow = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 12, radius, 8, false),
+          material
+        );
+        glow.renderOrder = 14;
+        root.add(glow);
+      });
+    });
+
+    scene.add(root);
+    return { root, materials };
+  }
+
+  const bodyAura = createBodyAura();
+  let bodyAuraActive = false;
+  let bodyAuraIntensity = 0;
 
   // ============================================================
   // 工具函数
@@ -1265,6 +1330,126 @@
   const demoPieceRoot = new THREE.Group();
   demoPieceRoot.name = 'PrototypePieceLayouts';
   demoPanel.flipGroup.add(demoPieceRoot);
+  const demoLayouts = new Map();
+  const demoPieces = [];
+  const moveMarkerRoot = new THREE.Group();
+  moveMarkerRoot.name = 'PieceMoveDirections';
+  demoPanel.flipGroup.add(moveMarkerRoot);
+  let selectedDemoPiece = null;
+
+  function pointKey(point) {
+    return point.join(',');
+  }
+
+  function gridNeighbors(point) {
+    const neighbors = [];
+    for (let from = 0; from < 3; from++) {
+      if (point[from] === 0) continue;
+      for (let to = 0; to < 3; to++) {
+        if (from === to || point[to] === 4) continue;
+        const neighbor = [...point];
+        neighbor[from] -= 1;
+        neighbor[to] += 1;
+        neighbors.push(neighbor);
+      }
+    }
+    return neighbors;
+  }
+
+  function gridPointToLocal(point) {
+    return baryPoint(...demoPanel.localVertices, ...point, 4).setZ(0);
+  }
+
+  function clearMoveMarkers() {
+    selectedDemoPiece = null;
+    moveMarkerRoot.traverse(object => {
+      object.geometry?.dispose();
+      if (Array.isArray(object.material)) {
+        object.material.forEach(material => material.dispose());
+      } else {
+        object.material?.dispose();
+      }
+    });
+    moveMarkerRoot.clear();
+  }
+
+  function createMoveMarker(sourcePoint, targetPoint, sideSign) {
+    const marker = new THREE.Group();
+    marker.userData.moveTarget = targetPoint;
+    marker.userData.isMoveMarker = true;
+
+    const source = gridPointToLocal(sourcePoint);
+    const target = gridPointToLocal(targetPoint);
+    const direction = target.clone().sub(source);
+    const distance = direction.length();
+    direction.normalize();
+    const surfaceZ = sideSign * (PANEL_HALF_THICKNESS + 0.035);
+
+    const arrow = new THREE.ArrowHelper(
+      direction,
+      source.clone().add(direction.clone().multiplyScalar(0.24)).setZ(surfaceZ),
+      Math.max(0.24, distance - 0.40),
+      0x65f2ff,
+      0.20,
+      0.12
+    );
+    arrow.line.material.transparent = true;
+    arrow.line.material.opacity = 0.88;
+    arrow.cone.material.transparent = true;
+    arrow.cone.material.opacity = 0.92;
+    marker.add(arrow);
+
+    const targetRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.12, 0.20, 28),
+      new THREE.MeshBasicMaterial({
+        color: 0x65f2ff,
+        transparent: true,
+        opacity: 0.92,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    targetRing.position.copy(target).setZ(surfaceZ);
+    targetRing.renderOrder = 25;
+    marker.add(targetRing);
+    return marker;
+  }
+
+  function selectDemoPiece(pieceState) {
+    if (pieceState.movement) return;
+    clearMoveMarkers();
+    selectedDemoPiece = pieceState;
+    const layoutState = demoLayouts.get(pieceState.layout);
+    const occupied = new Set(layoutState.pieces.map(piece => pointKey(piece.point)));
+    const neighbors = gridNeighbors(pieceState.point)
+      .filter(point => !occupied.has(pointKey(point)));
+
+    neighbors.forEach(point => {
+      moveMarkerRoot.add(createMoveMarker(
+        pieceState.point,
+        point,
+        layoutState.sideSign
+      ));
+    });
+
+    statusEl.textContent = `${pieceState.mark}：请选择一个发光方向，沿线路移动一步。`;
+  }
+
+  function moveSelectedPiece(targetPoint) {
+    if (!selectedDemoPiece) return;
+    const pieceState = selectedDemoPiece;
+    const from = pieceState.group.position.clone();
+    const to = gridPointToLocal(targetPoint);
+    pieceState.point = [...targetPoint];
+    pieceState.movement = {
+      from,
+      to,
+      start: performance.now(),
+      duration: 260
+    };
+    clearMoveMarkers();
+    statusEl.textContent = `${pieceState.mark} 正沿棋盘线路移动一步。`;
+  }
 
   for (const layout of [1, 2]) {
     const sideSign = layout === 1 ? 1 : -1;
@@ -1274,6 +1459,9 @@
     // 这样底座、锥度、标签和离板间隙都与正面完全一致。
     layoutRoot.scale.z = sideSign;
     demoPieceRoot.add(layoutRoot);
+
+    const layoutState = { layout, sideSign, root: layoutRoot, pieces: [] };
+    demoLayouts.set(layout, layoutState);
 
     layoutPoints[layout].forEach((point, index) => {
       const [i, j, k] = point;
@@ -1285,11 +1473,23 @@
 
       const piece = createDemoPiece(publicPieces[index].mark);
       piece.position.copy(position);
+      piece.userData.isDemoPiece = true;
+      const pieceState = {
+        layout,
+        mark: publicPieces[index].mark,
+        point: [...point],
+        group: piece,
+        movement: null
+      };
+      piece.userData.pieceState = pieceState;
       layoutRoot.add(piece);
+      layoutState.pieces.push(pieceState);
+      demoPieces.push(piece);
     });
   }
 
   function setDemoLayoutUi(layout) {
+    clearMoveMarkers();
     notationState.layout = layout;
     notationState.revealed = 1;
     document.querySelectorAll('.layout-btn').forEach(button =>
@@ -1328,6 +1528,17 @@
     return null;
   }
 
+  function findUserData(object, key) {
+    let current = object;
+    while (current) {
+      if (current.userData?.[key] !== undefined) {
+        return current.userData[key];
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
+
   function startFlipAnimation(state, targetSide) {
     state.side = targetSide;
     state.targetSide = targetSide;
@@ -1346,6 +1557,7 @@
     const state = panels.get(panelId);
     if (!state) return;
 
+    clearMoveMarkers();
     const next = state.side * -1;
     startFlipAnimation(state, next);
 
@@ -1380,12 +1592,28 @@
   }
 
   let pointerStart = null;
+  let auraPointerLast = null;
 
   renderer.domElement.addEventListener('pointerdown', e => {
     pointerStart = { x: e.clientX, y: e.clientY };
+    auraPointerLast = e.button === 0
+      ? { x: e.clientX, y: e.clientY }
+      : null;
+  });
+
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (!auraPointerLast) return;
+    const distance = Math.hypot(
+      e.clientX - auraPointerLast.x,
+      e.clientY - auraPointerLast.y
+    );
+    if (distance > 1) bodyAuraActive = true;
+    auraPointerLast = { x: e.clientX, y: e.clientY };
   });
 
   renderer.domElement.addEventListener('pointerup', e => {
+    bodyAuraActive = false;
+    auraPointerLast = null;
     if (!pointerStart) return;
 
     const move = Math.hypot(
@@ -1409,8 +1637,26 @@
 
     if (!hits.length) return;
 
+    const moveTarget = findUserData(hits[0].object, 'moveTarget');
+    if (moveTarget) {
+      moveSelectedPiece(moveTarget);
+      return;
+    }
+
+    const pieceState = findUserData(hits[0].object, 'pieceState');
+    if (pieceState) {
+      selectDemoPiece(pieceState);
+      return;
+    }
+
     const id = getPanelId(hits[0].object);
     if (id) flipPanel(id);
+  });
+
+  renderer.domElement.addEventListener('pointercancel', () => {
+    pointerStart = null;
+    auraPointerLast = null;
+    bodyAuraActive = false;
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
@@ -1469,6 +1715,31 @@
 
     const now = performance.now();
     const globalTime = now * 0.001;
+    const auraTarget = bodyAuraActive ? 1 : 0;
+    bodyAuraIntensity += (auraTarget - bodyAuraIntensity) *
+      (bodyAuraActive ? 0.18 : 0.055);
+    const auraBreath = 0.86 + Math.sin(globalTime * 2.2) * 0.14;
+    bodyAura.materials.outer.opacity = 0.07 + auraBreath * 0.04 + bodyAuraIntensity * 0.20;
+    bodyAura.materials.middle.opacity = 0.16 + auraBreath * 0.07 + bodyAuraIntensity * 0.34;
+    bodyAura.materials.core.opacity = 0.48 + auraBreath * 0.14 + bodyAuraIntensity * 0.38;
+    bodyAura.root.scale.setScalar(1 + auraBreath * 0.002 + bodyAuraIntensity * 0.006);
+
+    demoLayouts.forEach(layoutState => {
+      layoutState.pieces.forEach(pieceState => {
+        if (!pieceState.movement) return;
+        const movement = pieceState.movement;
+        const progress = Math.min(1, (now - movement.start) / movement.duration);
+        const eased = progress < 0.5
+          ? 2 * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        pieceState.group.position.lerpVectors(movement.from, movement.to, eased);
+        if (progress >= 1) {
+          pieceState.group.position.copy(movement.to);
+          pieceState.movement = null;
+          statusEl.textContent = `${pieceState.mark} 已沿棋盘线路移动一步。`;
+        }
+      });
+    });
 
     panels.forEach(state => {
       let p = state.side === -1 ? 1 : 0;
