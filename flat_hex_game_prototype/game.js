@@ -50,8 +50,19 @@ function piece(id, side, type, q, r) {
   return { id, side, type, position: { q, r } };
 }
 
+export function positionSignature(state) {
+  const pieces = state.pieces
+    .map(item => `${item.id}:${item.side}:${item.type}:${keyOf(item.position)}`)
+    .join('|');
+  return `${state.turn}:${state.winner ?? '-'}:${pieces}`;
+}
+
+function withInitialPositionHistory(state) {
+  return { ...state, positionHistory: [positionSignature(state)] };
+}
+
 export function createInitialState() {
-  return {
+  return withInitialPositionHistory({
     turn: 'white',
     winner: null,
     moveNumber: 1,
@@ -70,11 +81,11 @@ export function createInitialState() {
       piece('bP1', 'black', 'pawn', 3, -4),
       piece('bP2', 'black', 'pawn', -2, -2)
     ]
-  };
+  });
 }
 
 export function createCaptureDemoState() {
-  return {
+  return withInitialPositionHistory({
     turn: 'white',
     winner: null,
     moveNumber: 1,
@@ -93,7 +104,7 @@ export function createCaptureDemoState() {
       piece('bP1', 'black', 'pawn', 1, 1),
       piece('bP2', 'black', 'pawn', -2, 3)
     ]
-  };
+  });
 }
 
 function occupants(state) {
@@ -234,7 +245,7 @@ export function promotionTypeForMove(state, pieceId, move) {
   return null;
 }
 
-export function applyMove(state, pieceId, target, promote = false) {
+export function applyMove(state, pieceId, target, promote = false, recordHistory = true) {
   const moves = legalMoves(state, pieceId);
   const move = moves.get(keyOf(target));
   if (!move) return { state, error: '非法移动' };
@@ -249,12 +260,13 @@ export function applyMove(state, pieceId, target, promote = false) {
     : captured?.type === 'queen'
       ? 'bishop'
       : null;
+  const capturedIsEliminated = Boolean(captured && !capturedType);
   const nextPieces = state.pieces.flatMap(item => {
     if (item.id === pieceId) {
       return [{
         ...item,
         type: promotedType,
-        position: captured ? { ...item.position } : { ...target }
+        position: captured && !capturedIsEliminated ? { ...item.position } : { ...target }
       }];
     }
     if (item.id !== move.captureId) return [item];
@@ -271,16 +283,23 @@ export function applyMove(state, pieceId, target, promote = false) {
       ? `在 ${keyOf(movingPiece.position)} 攻击 ${keyOf(target)}，吃${PIECE_NAMES[captured.type]}`
       : `${keyOf(movingPiece.position)} → ${keyOf(target)}`) +
     captureResult +
+    (capturedIsEliminated ? '，攻击者占据目标点' : '') +
     (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
+  const nextState = {
+    ...state,
+    turn: state.turn === 'white' ? 'black' : 'white',
+    winner: move.capturesKing ? movingPiece.side : null,
+    moveNumber: state.moveNumber + 1,
+    pieces: nextPieces,
+    history: recordHistory ? [...state.history, description] : state.history
+  };
+  const previousPositions = state.positionHistory ?? [positionSignature(state)];
+  nextState.positionHistory = [
+    ...previousPositions.slice(-11),
+    positionSignature(nextState)
+  ];
   return {
-    state: {
-      ...state,
-      turn: state.turn === 'white' ? 'black' : 'white',
-      winner: move.capturesKing ? movingPiece.side : null,
-      moveNumber: state.moveNumber + 1,
-      pieces: nextPieces,
-      history: [...state.history, description]
-    },
+    state: nextState,
     move,
     captured,
     needsPromotionChoice: Boolean(promotionType)
@@ -334,14 +353,35 @@ function orderedActions(state) {
   });
 }
 
+function priorRepetitionCount(state) {
+  const signature = positionSignature(state);
+  const historyBeforeCurrent = (state.positionHistory ?? []).slice(0, -1);
+  return historyBeforeCurrent.filter(item => item === signature).length;
+}
+
+function repetitionAwareActions(state) {
+  const candidates = orderedActions(state).map(action => {
+    const result = applyMove(
+      state,
+      action.pieceId,
+      action.move.target,
+      action.promote,
+      false
+    );
+    return { action, result, repetitionCount: priorRepetitionCount(result.state) };
+  });
+  if (!candidates.length) return candidates;
+  const lowestRepetition = Math.min(...candidates.map(item => item.repetitionCount));
+  return candidates.filter(item => item.repetitionCount === lowestRepetition);
+}
+
 function minimax(state, depth, alpha, beta, perspective) {
   if (depth === 0 || state.winner) return evaluateState(state, perspective);
-  const actions = orderedActions(state);
-  if (!actions.length) return evaluateState(state, perspective);
+  const candidates = repetitionAwareActions(state);
+  if (!candidates.length) return evaluateState(state, perspective);
   const maximizing = state.turn === perspective;
   let bestScore = maximizing ? -Infinity : Infinity;
-  for (const action of actions) {
-    const result = applyMove(state, action.pieceId, action.move.target, action.promote);
+  for (const { result } of candidates) {
     const score = minimax(result.state, depth - 1, alpha, beta, perspective);
     if (maximizing) {
       bestScore = Math.max(bestScore, score);
@@ -356,13 +396,13 @@ function minimax(state, depth, alpha, beta, perspective) {
 }
 
 export function chooseSimulationAction(state, searchDepth = 3) {
-  const actions = orderedActions(state);
-  if (!actions.length) return null;
+  const candidates = repetitionAwareActions(state);
+  if (!candidates.length) return null;
   const perspective = state.turn;
   let bestAction = null;
   let bestScore = -Infinity;
-  for (const action of actions) {
-    const result = applyMove(state, action.pieceId, action.move.target, action.promote);
+  let bestRepetitionCount = Infinity;
+  for (const { action, result, repetitionCount } of candidates) {
     const score = minimax(
       result.state,
       Math.max(0, searchDepth - 1),
@@ -373,7 +413,13 @@ export function chooseSimulationAction(state, searchDepth = 3) {
     if (score > bestScore) {
       bestScore = score;
       bestAction = action;
+      bestRepetitionCount = repetitionCount;
     }
   }
-  return { ...bestAction, score: bestScore, searchDepth };
+  return {
+    ...bestAction,
+    score: bestScore,
+    searchDepth,
+    repetitionCount: bestRepetitionCount
+  };
 }

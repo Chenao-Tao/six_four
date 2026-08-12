@@ -7,6 +7,7 @@ import {
   chooseSimulationAction,
   keyOf,
   legalMoves,
+  positionSignature,
   promotionTypeForMove
 } from './game.js';
 
@@ -42,19 +43,19 @@ test('吃子是原地攻击：攻击者和降级后的防守者均不换位', ()
   assert.equal(findPiece(result.state, 'bB').type, 'pawn');
 });
 
-test('兵被吃后死亡，王被兵吃后结束对局', () => {
+test('消灭棋子后攻击者占据目标点，兵吃王后结束对局', () => {
   const bishopAttack = applyMove(stateOf([
     piece('wB', 'white', 'bishop', 0, 0),
     piece('bP', 'black', 'pawn', 1, 1)
   ]), 'wB', { q: 1, r: 1 });
-  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 1, r: 1 });
   assert.equal(findPiece(bishopAttack.state, 'bP'), undefined);
 
   const kingAttack = applyMove(stateOf([
     piece('wP', 'white', 'pawn', 0, -3),
     piece('bK', 'black', 'king', 0, -4)
   ]), 'wP', { q: 0, r: -4 });
-  assert.deepEqual(findPiece(kingAttack.state, 'wP').position, { q: 0, r: -3 });
+  assert.deepEqual(findPiece(kingAttack.state, 'wP').position, { q: 0, r: -4 });
   assert.equal(findPiece(kingAttack.state, 'bK'), undefined);
   assert.equal(kingAttack.state.winner, 'white');
 });
@@ -141,4 +142,38 @@ test('算法演示优先一步吃王，并自主选择有利升级', () => {
   assert.equal(promotionAction.pieceId, 'wB');
   assert.equal(promotionAction.move.captureId, 'bP');
   assert.equal(promotionAction.promote, true);
+});
+
+test('算法避开会回到近期相同局面的往返动作', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, 0),
+    piece('bP', 'black', 'pawn', 4, -4)
+  ]);
+  const baseline = chooseSimulationAction(state, 1);
+  const repeatedResult = applyMove(
+    state,
+    baseline.pieceId,
+    baseline.move.target,
+    baseline.promote
+  ).state;
+  const withRepeatHistory = {
+    ...state,
+    positionHistory: [positionSignature(state), positionSignature(repeatedResult)]
+  };
+
+  const avoided = chooseSimulationAction(withRepeatHistory, 1);
+
+  assert.notEqual(keyOf(avoided.move.target), keyOf(baseline.move.target));
+  assert.equal(avoided.repetitionCount, 0);
+});
+
+test('局面指纹只保留最近十二个状态', () => {
+  const state = stateOf([piece('wP', 'white', 'pawn', 0, 0)]);
+  state.positionHistory = Array.from({ length: 20 }, (_, index) => `old-${index}`);
+
+  const result = applyMove(state, 'wP', { q: 1, r: 0 });
+
+  assert.equal(result.state.positionHistory.length, 12);
+  assert.equal(result.state.positionHistory[0], 'old-9');
+  assert.equal(result.state.positionHistory.at(-1), positionSignature(result.state));
 });

@@ -15,7 +15,7 @@ import {
   keyOf,
   legalMoves,
   promotionTypeForMove
-} from './game.js?v=capture-interaction-1';
+} from './game.js?v=capture-occupy-repeat-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -237,7 +237,11 @@ async function animatePath(pieceId, path, returnToOrigin = false) {
 }
 
 async function commitMove(pieceId, move, promote = false, decisionNote = '') {
-  await animatePath(pieceId, move.path, Boolean(move.captureId));
+  const captured = move.captureId
+    ? state.pieces.find(item => item.id === move.captureId)
+    : null;
+  const defenderSurvives = ['bishop', 'queen'].includes(captured?.type);
+  await animatePath(pieceId, move.path, Boolean(captured && defenderSurvives));
   const result = applyMove(state, pieceId, move.target, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -251,7 +255,9 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
     : decisionNote || (move.captureId
-      ? '攻击完成：双方位置不变，被攻击棋子已强制降级或移出。'
+      ? defenderSurvives
+        ? '攻击完成：双方位置不变，被攻击棋子已强制降级。'
+        : '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
       : '移动完成，轮到另一方。');
   render();
 }
@@ -328,8 +334,11 @@ async function simulateStep() {
         ? `并升级为${PIECE_NAMES[promotionType]}`
         : '且保持原级'
       : '';
+    const repetitionNote = action.repetitionCount > 0
+      ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
+      : '，已避开近期重复局面';
     selectedInfo.textContent = `Minimax + Alpha-Beta（${action.searchDepth} 层）选择：` +
-      `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}`;
+      `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     render();
     await new Promise(resolve => setTimeout(resolve, 240));
     const decisionNote = `算法已搜索 ${action.searchDepth} 层并选择评估值 ${action.score} 的动作。`;

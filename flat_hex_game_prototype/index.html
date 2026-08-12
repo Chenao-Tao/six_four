@@ -36,9 +36,9 @@
             <li><b>象</b>：每回合只移动一个菱形长对角线的长度。</li>
             <li><b>兵</b>：沿任意相邻线路移动1格。</li>
             <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
-            <li><b>吃子位置</b>：吃子视为原地攻击，双方都不换位；兵被吃后死亡，象强制降兵、后强制降象。</li>
+            <li><b>吃子位置</b>：兵或王被消灭时，攻击者占据其位置；象降兵、后降象时双方仍留在原位。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
-            <li><b>最优演示</b>：算法用3层 Minimax + Alpha-Beta 同时比较移动、吃子及升/不升级分支。</li>
+            <li><b>最优演示</b>：算法用3层 Minimax + Alpha-Beta 比较各分支，并优先避开近期重复局面。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -58,6 +58,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=capture-interaction-1"></script>
+  <script type="module" src="app.js?v=capture-occupy-repeat-1"></script>
 </body>
 </html>
