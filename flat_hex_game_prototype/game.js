@@ -245,6 +245,12 @@ export function promotionTypeForMove(state, pieceId, move) {
   return null;
 }
 
+export function capturePositionEffect(attackerType, defenderType) {
+  if (attackerType === 'queen' && defenderType === 'bishop') return 'swap';
+  if (attackerType === 'pawn' && ['pawn', 'king'].includes(defenderType)) return 'occupy';
+  return 'hold';
+}
+
 export function applyMove(state, pieceId, target, promote = false, recordHistory = true) {
   const moves = legalMoves(state, pieceId);
   const move = moves.get(keyOf(target));
@@ -261,21 +267,34 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
       ? 'bishop'
       : null;
   const capturedIsEliminated = Boolean(captured && !capturedType);
+  const positionEffect = captured
+    ? capturePositionEffect(movingPiece.type, captured.type)
+    : 'move';
   const nextPieces = state.pieces.flatMap(item => {
     if (item.id === pieceId) {
       return [{
         ...item,
         type: promotedType,
-        position: captured && !capturedIsEliminated ? { ...item.position } : { ...target }
+        position: ['move', 'occupy', 'swap'].includes(positionEffect)
+          ? { ...target }
+          : { ...item.position }
       }];
     }
     if (item.id !== move.captureId) return [item];
     if (!capturedType) return [];
-    return [{ ...item, type: capturedType, position: { ...item.position } }];
+    return [{
+      ...item,
+      type: capturedType,
+      position: positionEffect === 'swap'
+        ? { ...movingPiece.position }
+        : { ...item.position }
+    }];
   });
   const captureResult = captured
     ? capturedType
-      ? `，${PIECE_NAMES[captured.type]}在原位降级为${PIECE_NAMES[capturedType]}`
+      ? positionEffect === 'swap'
+        ? `，${PIECE_NAMES[captured.type]}降级为${PIECE_NAMES[capturedType]}并与攻击者换位`
+        : `，${PIECE_NAMES[captured.type]}在原位降级为${PIECE_NAMES[capturedType]}`
       : `，${PIECE_NAMES[captured.type]}移出棋盘`
     : '';
   const description = `${movingPiece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[movingPiece.type]} ` +
@@ -283,7 +302,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
       ? `在 ${keyOf(movingPiece.position)} 攻击 ${keyOf(target)}，吃${PIECE_NAMES[captured.type]}`
       : `${keyOf(movingPiece.position)} → ${keyOf(target)}`) +
     captureResult +
-    (capturedIsEliminated ? '，攻击者占据目标点' : '') +
+    (capturedIsEliminated && positionEffect === 'occupy' ? '，攻击者占据目标点' : '') +
+    (capturedIsEliminated && positionEffect === 'hold' ? '，攻击者留在原位' : '') +
     (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
   const nextState = {
     ...state,
@@ -302,6 +322,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     state: nextState,
     move,
     captured,
+    positionEffect,
     needsPromotionChoice: Boolean(promotionType)
   };
 }

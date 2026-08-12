@@ -7,6 +7,7 @@ import {
   PIECE_NAMES,
   add,
   applyMove,
+  capturePositionEffect,
   captureMoveForClickedPiece,
   createCaptureDemoState,
   createInitialState,
@@ -15,7 +16,7 @@ import {
   legalMoves,
   promotionTypeForMove,
   stepwiseGameSearch
-} from './game.js?v=stepwise-game-search-1';
+} from './game.js?v=capture-position-rules-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -207,16 +208,12 @@ function selectPiece(pieceId) {
   render();
 }
 
-async function animatePath(pieceId, path, returnToOrigin = false) {
+async function animateElementPath(pieceId, path) {
   const pieceElement = document.querySelector(`[data-piece-id="${pieceId}"]`);
   if (!pieceElement || path.length < 2) return;
-  const animationPath = returnToOrigin
-    ? [...path, ...path.slice(0, -1).reverse()]
-    : path;
-  animationLock = true;
-  for (let index = 1; index < animationPath.length; index++) {
-    const from = toPixel(animationPath[index - 1]);
-    const to = toPixel(animationPath[index]);
+  for (let index = 1; index < path.length; index++) {
+    const from = toPixel(path[index - 1]);
+    const to = toPixel(path[index]);
     const startedAt = performance.now();
     await new Promise(resolve => {
       function frame(now) {
@@ -233,6 +230,21 @@ async function animatePath(pieceId, path, returnToOrigin = false) {
       requestAnimationFrame(frame);
     });
   }
+}
+
+async function animateMove(pieceId, path, positionEffect, defenderId = null) {
+  const attackerPath = positionEffect === 'hold'
+    ? [...path, ...path.slice(0, -1).reverse()]
+    : path;
+  animationLock = true;
+  if (positionEffect === 'swap' && defenderId) {
+    await Promise.all([
+      animateElementPath(pieceId, attackerPath),
+      animateElementPath(defenderId, [...path].reverse())
+    ]);
+  } else {
+    await animateElementPath(pieceId, attackerPath);
+  }
   animationLock = false;
 }
 
@@ -240,8 +252,11 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
-  const defenderSurvives = ['bishop', 'queen'].includes(captured?.type);
-  await animatePath(pieceId, move.path, Boolean(captured && defenderSurvives));
+  const mover = state.pieces.find(item => item.id === pieceId);
+  const positionEffect = captured
+    ? capturePositionEffect(mover.type, captured.type)
+    : 'move';
+  await animateMove(pieceId, move.path, positionEffect, captured?.id);
   const result = applyMove(state, pieceId, move.target, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -255,9 +270,11 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
     : decisionNote || (move.captureId
-      ? defenderSurvives
-        ? '攻击完成：双方位置不变，被攻击棋子已强制降级。'
-        : '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
+      ? positionEffect === 'swap'
+        ? '吃子完成：攻击者与降级后的防守棋子交换位置。'
+        : positionEffect === 'occupy'
+          ? '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
+          : '攻击完成：攻击者留在原位，被攻击棋子已降级或移出。'
       : '移动完成，轮到另一方。');
   render();
 }

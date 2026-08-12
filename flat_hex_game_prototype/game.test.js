@@ -30,7 +30,7 @@ function findPiece(state, id) {
   return state.pieces.find(item => item.id === id);
 }
 
-test('吃子是原地攻击：攻击者和降级后的防守者均不换位', () => {
+test('后吃象后双方换位，象强制降级为兵', () => {
   const state = stateOf([
     piece('wQ', 'white', 'queen', -3, 0),
     piece('bB', 'black', 'bishop', 0, 0)
@@ -39,18 +39,27 @@ test('吃子是原地攻击：攻击者和降级后的防守者均不换位', ()
   const result = applyMove(state, 'wQ', { q: 0, r: 0 });
 
   assert.equal(result.error, undefined);
-  assert.deepEqual(findPiece(result.state, 'wQ').position, { q: -3, r: 0 });
-  assert.deepEqual(findPiece(result.state, 'bB').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(result.state, 'wQ').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(result.state, 'bB').position, { q: -3, r: 0 });
   assert.equal(findPiece(result.state, 'bB').type, 'pawn');
 });
 
-test('消灭棋子后攻击者占据目标点，兵吃王后结束对局', () => {
+test('象吃兵时兵被消灭但象留在原位', () => {
   const bishopAttack = applyMove(stateOf([
     piece('wB', 'white', 'bishop', 0, 0),
     piece('bP', 'black', 'pawn', 1, 1)
   ]), 'wB', { q: 1, r: 1 });
-  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 1, r: 1 });
+  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 0, r: 0 });
   assert.equal(findPiece(bishopAttack.state, 'bP'), undefined);
+});
+
+test('兵消灭兵或王后占据目标点，吃王结束对局', () => {
+  const pawnAttack = applyMove(stateOf([
+    piece('wP', 'white', 'pawn', 0, 0),
+    piece('bP', 'black', 'pawn', 1, 0)
+  ]), 'wP', { q: 1, r: 0 });
+  assert.deepEqual(findPiece(pawnAttack.state, 'wP').position, { q: 1, r: 0 });
+  assert.equal(findPiece(pawnAttack.state, 'bP'), undefined);
 
   const kingAttack = applyMove(stateOf([
     piece('wP', 'white', 'pawn', 0, -3),
