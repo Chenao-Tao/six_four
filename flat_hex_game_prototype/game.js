@@ -59,36 +59,37 @@ function piece(id, side, type, q, r) {
 
 function layoutThreeFrontPieces() {
   return [
-    // 棋子按参考合成图中的最近网格交点落位；圆形标记本身存在少量排版偏移。
-    piece('wK', 'white', 'king', 4, 0),
-    piece('wQ', 'white', 'queen', 3, -4),
-    piece('wB1', 'white', 'bishop', 1, -2),
-    piece('wB2', 'white', 'bishop', -3, -1),
-    piece('wP1', 'white', 'pawn', -3, 1),
-    piece('wP2', 'white', 'pawn', -1, 3),
-    piece('bK', 'black', 'king', -4, 4),
-    piece('bQ', 'black', 'queen', 0, 4),
-    piece('bB1', 'black', 'bishop', 4, -3),
-    piece('bB2', 'black', 'bishop', 3, -1),
-    piece('bP1', 'black', 'pawn', -1, 0),
-    piece('bP2', 'black', 'pawn', 2, 1)
+    // 实拍图一：1 面在上，2/3 面在左，4/5 面在右。
+    piece('wK', 'white', 'king', 0, -4),
+    piece('wQ', 'white', 'queen', -4, 1),
+    piece('wB1', 'white', 'bishop', 2, -2),
+    piece('wB2', 'white', 'bishop', 2, -3),
+    piece('wP1', 'white', 'pawn', -1, -3),
+    piece('wP2', 'white', 'pawn', 3, -1),
+    piece('bK', 'black', 'king', -4, 0),
+    piece('bQ', 'black', 'queen', 0, -1),
+    piece('bB1', 'black', 'bishop', -2, -2),
+    piece('bB2', 'black', 'bishop', 1, -2),
+    piece('bP1', 'black', 'pawn', -3, 0),
+    piece('bP2', 'black', 'pawn', 1, -3)
   ];
 }
 
 function layoutThreeBackPieces() {
   return [
-    piece('wK', 'white', 'king', -4, 0),
-    piece('wQ', 'white', 'queen', -2, 4),
-    piece('wB1', 'white', 'bishop', -1, 2),
-    piece('wB2', 'white', 'bishop', -3, 2),
-    piece('wP1', 'white', 'pawn', 0, 1),
-    piece('wP2', 'white', 'pawn', 1, -4),
-    piece('bK', 'black', 'king', 4, 0),
-    piece('bQ', 'black', 'queen', 3, -3),
-    piece('bB1', 'black', 'bishop', 4, -4),
-    piece('bB2', 'black', 'bishop', -3, 1),
-    piece('bP1', 'black', 'pawn', 2, -1),
-    piece('bP2', 'black', 'pawn', -2, 1)
+    // 实拍图二：翻面后 1 面仍在上，2/3 面位于右侧。
+    piece('wK', 'white', 'king', 0, 2),
+    piece('wQ', 'white', 'queen', 0, 1),
+    piece('wB1', 'white', 'bishop', -2, -1),
+    piece('wB2', 'white', 'bishop', 1, 0),
+    piece('wP1', 'white', 'pawn', -1, -2),
+    piece('wP2', 'white', 'pawn', -2, 1),
+    piece('bK', 'black', 'king', -1, -1),
+    piece('bQ', 'black', 'queen', 2, 0),
+    piece('bB1', 'black', 'bishop', -1, 0),
+    piece('bB2', 'black', 'bishop', -2, -1),
+    piece('bP1', 'black', 'pawn', -3, 0),
+    piece('bP2', 'black', 'pawn', 1, 1)
   ];
 }
 
