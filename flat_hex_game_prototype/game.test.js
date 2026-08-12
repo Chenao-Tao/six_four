@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  BOARD_FACE_LABELS,
   applyMove,
   captureMoveForClickedPiece,
   chooseSimulationAction,
+  createCaptureDemoState,
+  createInitialState,
   keyOf,
   legalMoves,
   positionSignature,
@@ -207,4 +210,58 @@ test('分步博弈依次给出一至三层结论，最终结果等同三层搜�
     assert.ok(item.searchedNodes > 0);
     assert.ok(item.prunedBranches >= 0);
   });
+});
+
+test('布局三由参考图的互补面拼成正反六边形', () => {
+  assert.deepEqual(BOARD_FACE_LABELS.front, ['5A', '6A', '3A', '4B', '1A', '2A']);
+  assert.deepEqual(BOARD_FACE_LABELS.back, ['2B', '1B', '4A', '3B', '6B', '5B']);
+
+  const state = createInitialState();
+  assert.equal(state.boardSide, 'front');
+  assert.equal(state.boardStates.front.length, 12);
+  assert.equal(state.boardStates.back.length, 12);
+  assert.strictEqual(state.pieces, state.boardStates.front);
+  assert.deepEqual(state.boardStates.front.find(item => item.id === 'wK').position, { q: 4, r: 0 });
+  assert.deepEqual(state.boardStates.front.find(item => item.id === 'bK').position, { q: -4, r: 4 });
+  assert.equal(new Set(state.boardStates.front.map(item => keyOf(item.position))).size, 12);
+  assert.equal(new Set(state.boardStates.back.map(item => keyOf(item.position))).size, 12);
+});
+
+test('双面棋盘仅在吃子后翻面，并保存原面结算后的局面', () => {
+  const initial = createInitialState();
+  const movablePawn = initial.pieces.find(item => item.id === 'wP2');
+  const normalMove = [...legalMoves(initial, movablePawn.id).values()]
+    .find(move => !move.captureId);
+  const moved = applyMove(initial, movablePawn.id, normalMove.target).state;
+  assert.equal(moved.boardSide, 'front');
+
+  const demo = createCaptureDemoState();
+  const captured = applyMove(demo, 'wP1', { q: 0, r: -4 }).state;
+  assert.equal(captured.boardSide, 'back');
+  assert.strictEqual(captured.pieces, captured.boardStates.back);
+  assert.equal(captured.boardStates.front.some(item => item.id === 'bK'), false);
+  assert.deepEqual(
+    captured.boardStates.front.find(item => item.id === 'wP1').position,
+    { q: 0, r: -4 }
+  );
+  assert.equal(captured.history.at(-1).includes('棋盘翻到B反面'), true);
+});
+
+test('连续两次吃子翻回原面时保留两面的结算结果', () => {
+  const initial = createCaptureDemoState();
+  initial.boardStates.back = [
+    piece('bK', 'black', 'king', 4, 0),
+    piece('wQ', 'white', 'queen', 0, 4)
+  ];
+  const afterFrontCapture = applyMove(initial, 'wB1', { q: 1, r: 1 }).state;
+  assert.equal(afterFrontCapture.boardSide, 'back');
+  assert.equal(afterFrontCapture.boardStates.front.some(item => item.id === 'bP1'), false);
+
+  const afterBackCapture = applyMove(afterFrontCapture, 'bK', { q: 0, r: 4 }).state;
+
+  assert.equal(afterBackCapture.boardSide, 'front');
+  assert.equal(afterBackCapture.flipCount, 2);
+  assert.equal(afterBackCapture.boardStates.front.some(item => item.id === 'bP1'), false);
+  assert.equal(afterBackCapture.boardStates.back.find(item => item.id === 'wQ').type, 'bishop');
+  assert.strictEqual(afterBackCapture.pieces, afterBackCapture.boardStates.front);
 });

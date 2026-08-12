@@ -46,15 +46,74 @@ export const CORNERS = DIRECTIONS.map(direction => ({
 }));
 export const KING_POINTS = [{ q: 0, r: 0 }, ...CORNERS];
 
+// 顺序与 UI 六个扇区一致：右下、下、左下、左上、上、右上。
+// 布局三正面使用参考拼图中的 1A/2A/3A/5A/6A/4B，反面为实体板互补面。
+export const BOARD_FACE_LABELS = {
+  front: ['5A', '6A', '3A', '4B', '1A', '2A'],
+  back: ['2B', '1B', '4A', '3B', '6B', '5B']
+};
+
 function piece(id, side, type, q, r) {
   return { id, side, type, position: { q, r } };
 }
 
+function layoutThreeFrontPieces() {
+  return [
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wQ', 'white', 'queen', 3, -4),
+    piece('wB1', 'white', 'bishop', 1, -2),
+    piece('wB2', 'white', 'bishop', -3, -1),
+    piece('wP1', 'white', 'pawn', -3, 1),
+    piece('wP2', 'white', 'pawn', -1, 3),
+    piece('bK', 'black', 'king', -4, 4),
+    piece('bQ', 'black', 'queen', 0, 4),
+    piece('bB1', 'black', 'bishop', 4, -3),
+    piece('bB2', 'black', 'bishop', 3, -1),
+    piece('bP1', 'black', 'pawn', -1, -1),
+    piece('bP2', 'black', 'pawn', 2, 1)
+  ];
+}
+
+function layoutThreeBackPieces() {
+  return [
+    piece('wK', 'white', 'king', -4, 0),
+    piece('wQ', 'white', 'queen', -2, 4),
+    piece('wB1', 'white', 'bishop', -1, 2),
+    piece('wB2', 'white', 'bishop', -3, 2),
+    piece('wP1', 'white', 'pawn', 0, 1),
+    piece('wP2', 'white', 'pawn', 1, -4),
+    piece('bK', 'black', 'king', 4, 0),
+    piece('bQ', 'black', 'queen', 3, -3),
+    piece('bB1', 'black', 'bishop', 2, 1),
+    piece('bB2', 'black', 'bishop', -2, 1),
+    piece('bP1', 'black', 'pawn', 1, -2),
+    piece('bP2', 'black', 'pawn', -3, -1)
+  ];
+}
+
+function doubleSidedState(frontPieces, backPieces, extra = {}) {
+  const boardStates = { front: frontPieces, back: backPieces };
+  return {
+    turn: 'white',
+    winner: null,
+    moveNumber: 1,
+    history: [],
+    boardSide: 'front',
+    flipCount: 0,
+    boardStates,
+    pieces: boardStates.front,
+    ...extra
+  };
+}
+
 export function positionSignature(state) {
-  const pieces = state.pieces
+  const serializePieces = pieces => pieces
     .map(item => `${item.id}:${item.side}:${item.type}:${keyOf(item.position)}`)
     .join('|');
-  return `${state.turn}:${state.winner ?? '-'}:${pieces}`;
+  const position = state.boardStates
+    ? `front[${serializePieces(state.boardStates.front)}]:back[${serializePieces(state.boardStates.back)}]`
+    : serializePieces(state.pieces);
+  return `${state.boardSide ?? 'single'}:${state.turn}:${state.winner ?? '-'}:${position}`;
 }
 
 function withInitialPositionHistory(state) {
@@ -62,35 +121,15 @@ function withInitialPositionHistory(state) {
 }
 
 export function createInitialState() {
-  return withInitialPositionHistory({
-    turn: 'white',
-    winner: null,
-    moveNumber: 1,
-    history: [],
-    pieces: [
-      piece('wK', 'white', 'king', 0, 4),
-      piece('wQ', 'white', 'queen', -1, 3),
-      piece('wB1', 'white', 'bishop', -2, 4),
-      piece('wB2', 'white', 'bishop', 1, 3),
-      piece('wP1', 'white', 'pawn', -3, 4),
-      piece('wP2', 'white', 'pawn', 2, 2),
-      piece('bK', 'black', 'king', 0, -4),
-      piece('bQ', 'black', 'queen', 1, -3),
-      piece('bB1', 'black', 'bishop', 2, -4),
-      piece('bB2', 'black', 'bishop', -1, -3),
-      piece('bP1', 'black', 'pawn', 3, -4),
-      piece('bP2', 'black', 'pawn', -2, -2)
-    ]
-  });
+  return withInitialPositionHistory(doubleSidedState(
+    layoutThreeFrontPieces(),
+    layoutThreeBackPieces()
+  ));
 }
 
 export function createCaptureDemoState() {
-  return withInitialPositionHistory({
-    turn: 'white',
-    winner: null,
-    moveNumber: 1,
-    history: ['吃子演示局面：白方有四种可立即执行的吃子'],
-    pieces: [
+  return withInitialPositionHistory(doubleSidedState(
+    [
       piece('wK', 'white', 'king', 4, 0),
       piece('wQ', 'white', 'queen', -2, 0),
       piece('wB1', 'white', 'bishop', 0, 0),
@@ -103,8 +142,10 @@ export function createCaptureDemoState() {
       piece('bB2', 'black', 'bishop', 3, -2),
       piece('bP1', 'black', 'pawn', 1, 1),
       piece('bP2', 'black', 'pawn', -2, 3)
-    ]
-  });
+    ],
+    layoutThreeBackPieces(),
+    { history: ['吃子演示局面：白方有四种可立即执行的吃子'] }
+  ));
 }
 
 function occupants(state) {
@@ -305,13 +346,30 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     (capturedIsEliminated && positionEffect === 'occupy' ? '，攻击者占据目标点' : '') +
     (capturedIsEliminated && positionEffect === 'hold' ? '，攻击者留在原位' : '') +
     (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
+  const nextTurn = state.turn === 'white' ? 'black' : 'white';
+  const nextWinner = move.capturesKing ? movingPiece.side : null;
+  const shouldFlip = Boolean(captured && state.boardStates);
+  const nextBoardSide = shouldFlip
+    ? state.boardSide === 'front' ? 'back' : 'front'
+    : state.boardSide;
+  const boardStates = state.boardStates
+    ? { ...state.boardStates, [state.boardSide]: nextPieces }
+    : undefined;
+  const flipResult = shouldFlip
+    ? `，六边形棋盘翻到${nextBoardSide === 'front' ? 'A正面' : 'B反面'}`
+    : '';
   const nextState = {
     ...state,
-    turn: state.turn === 'white' ? 'black' : 'white',
-    winner: move.capturesKing ? movingPiece.side : null,
+    turn: nextTurn,
+    winner: nextWinner,
     moveNumber: state.moveNumber + 1,
-    pieces: nextPieces,
-    history: recordHistory ? [...state.history, description] : state.history
+    boardSide: nextBoardSide,
+    flipCount: (state.flipCount ?? 0) + (shouldFlip ? 1 : 0),
+    boardStates,
+    pieces: shouldFlip ? boardStates[nextBoardSide] : nextPieces,
+    history: recordHistory
+      ? [...state.history, description + flipResult]
+      : state.history
   };
   const previousPositions = state.positionHistory ?? [positionSignature(state)];
   nextState.positionHistory = [

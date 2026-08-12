@@ -1,4 +1,5 @@
 import {
+  BOARD_FACE_LABELS,
   BOARD_POINTS,
   BOARD_RADIUS,
   CORNERS,
@@ -16,7 +17,7 @@ import {
   legalMoves,
   promotionTypeForMove,
   stepwiseGameSearch
-} from './game.js?v=capture-position-rules-1';
+} from './game.js?v=layout3-double-sided-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -27,6 +28,8 @@ const promotionModal = document.getElementById('promotionModal');
 const promotionTitle = document.getElementById('promotionTitle');
 const promotionQuestion = document.getElementById('promotionQuestion');
 const promoteButton = document.getElementById('promoteButton');
+const boardShell = document.getElementById('boardShell');
+const faceBadge = document.getElementById('faceBadge');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -113,9 +116,39 @@ function drawStaticBoard() {
     }));
   });
   svg.appendChild(nodes);
+  svg.appendChild(svgElement('g', { id: 'faceLabelLayer' }));
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
+}
+
+function renderFaceLabels() {
+  const layer = document.getElementById('faceLabelLayer');
+  layer.replaceChildren();
+  const side = state.boardSide ?? 'front';
+  BOARD_FACE_LABELS[side].forEach((label, index) => {
+    const corner = CORNERS[index];
+    const next = CORNERS[(index + 1) % 6];
+    const point = {
+      q: (corner.q + next.q) / 3,
+      r: (corner.r + next.r) / 3
+    };
+    const pixel = toPixel(point);
+    const group = svgElement('g', { class: 'face-label' });
+    group.appendChild(svgElement('circle', {
+      cx: pixel.x,
+      cy: pixel.y,
+      r: 24
+    }));
+    const textElement = svgElement('text', {
+      x: pixel.x,
+      y: pixel.y + 5,
+      'text-anchor': 'middle'
+    });
+    textElement.textContent = label;
+    group.appendChild(textElement);
+    layer.appendChild(group);
+  });
 }
 
 function pieceSymbol(type) {
@@ -178,12 +211,19 @@ function renderMoves() {
 }
 
 function render() {
+  const boardSide = state.boardSide ?? 'front';
+  svg.dataset.side = boardSide;
+  boardShell.dataset.side = boardSide;
   const pieceLayer = document.getElementById('pieceLayer');
   pieceLayer.replaceChildren(...state.pieces.map(renderPiece));
+  renderFaceLabels();
   renderMoves();
   turnBadge.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
     : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
+  faceBadge.textContent = boardSide === 'front'
+    ? `A 正面 · 布局三 · 已翻 ${state.flipCount ?? 0} 次`
+    : `B 反面 · 互补拼图 · 已翻 ${state.flipCount ?? 0} 次`;
   turnBadge.classList.toggle('winner-glow', Boolean(state.winner));
   historyElement.replaceChildren(...state.history.slice().reverse().map(item => {
     const line = document.createElement('li');
@@ -248,6 +288,18 @@ async function animateMove(pieceId, path, positionEffect, defenderId = null) {
   animationLock = false;
 }
 
+async function animateBoardFlip(nextState) {
+  animationLock = true;
+  boardShell.classList.add('flipping');
+  boardHelp.textContent = '发生吃子：六边形棋盘正在整体翻面……';
+  await new Promise(resolve => setTimeout(resolve, 430));
+  state = nextState;
+  render();
+  await new Promise(resolve => setTimeout(resolve, 470));
+  boardShell.classList.remove('flipping');
+  animationLock = false;
+}
+
 async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
@@ -262,11 +314,15 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
     boardHelp.textContent = result.error;
     return;
   }
-  state = result.state;
   selectedPieceId = null;
   selectedMoves = new Map();
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
+  if (move.captureId && result.state.boardSide !== state.boardSide) {
+    await animateBoardFlip(result.state);
+  } else {
+    state = result.state;
+  }
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
     : decisionNote || (move.captureId
