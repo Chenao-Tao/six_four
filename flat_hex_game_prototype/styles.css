@@ -98,8 +98,11 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .face-label { opacity: .54; }
 .face-label circle { fill: rgba(6,14,22,.52); stroke: rgba(194,225,255,.28); stroke-width: 1.2; pointer-events: none; }
 .face-label text { fill: #dceaf5; font-size: 12px; font-weight: 750; pointer-events: none; }
+.panel-orientation { pointer-events: none; transition: transform .25s ease; }
+.panel-orientation path { fill: var(--gold); stroke: rgba(6,14,22,.7); stroke-width: 1.2; }
 #board[data-side="back"] .face-label circle { fill: rgba(250,252,254,.82); stroke: #7890a2; }
 #board[data-side="back"] .face-label text { fill: #253b4b; }
+#board[data-side="back"] .panel-orientation path { fill: #31566d; stroke: rgba(255,255,255,.72); }
 .grid-edge { stroke: var(--line); stroke-width: 1.35; }
 .major-edge { stroke: #7593ad; stroke-width: 2.6; }
 .node { fill: #7990a4; opacity: .42; }

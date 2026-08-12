@@ -14,6 +14,7 @@ import {
   legalMoves,
   positionSignature,
   promotionTypeForMove,
+  rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
 } from './game.js';
@@ -416,4 +417,77 @@ test('自定义棋局保存拆装后的板块布局并拒绝不成对的双面�
     front: swapped.faceLabels.front,
     back: [...swapped.faceLabels.back].reverse()
   }).error, /板块布局.*对应/);
+});
+
+test('单块三角板每次顺时针旋转120度且三次回到原方向', () => {
+  const initial = createInitialState();
+
+  const first = rotateBoardPanel(initial.boardFaceLabels, initial.boardPanelRotations, 'front', 0);
+  const second = rotateBoardPanel(first.faceLabels, first.panelRotations, 'front', 0);
+  const third = rotateBoardPanel(second.faceLabels, second.panelRotations, 'front', 0);
+
+  assert.equal(first.error, undefined);
+  assert.equal(first.panelRotations.front[0], 120);
+  assert.equal(first.panelRotations.back[5], 240);
+  assert.equal(second.panelRotations.front[0], 240);
+  assert.equal(second.panelRotations.back[5], 120);
+  assert.equal(third.panelRotations.front[0], 0);
+  assert.equal(third.panelRotations.back[5], 0);
+  assert.deepEqual(initial.boardPanelRotations.front, [0, 0, 0, 0, 0, 0]);
+});
+
+test('交换板块时朝向随实体板移动，翻面不丢失朝向', () => {
+  const initial = createInitialState();
+  const rotated = rotateBoardPanel(
+    initial.boardFaceLabels,
+    initial.boardPanelRotations,
+    'front',
+    0
+  );
+
+  const swapped = swapBoardPanels(
+    rotated.faceLabels,
+    'front',
+    0,
+    2,
+    rotated.panelRotations
+  );
+  const flipped = flipBoardPanel(
+    swapped.faceLabels,
+    'front',
+    2,
+    swapped.panelRotations
+  );
+
+  assert.equal(swapped.panelRotations.front[2], 120);
+  assert.equal(swapped.panelRotations.back[3], 240);
+  assert.equal(flipped.panelRotations.front[2], 120);
+  assert.equal(flipped.panelRotations.back[3], 240);
+});
+
+test('自定义棋局保存旋转方向并拒绝正反面朝向不成镜像的数据', () => {
+  const initial = createInitialState();
+  const rotated = rotateBoardPanel(
+    initial.boardFaceLabels,
+    initial.boardPanelRotations,
+    'front',
+    4
+  );
+  const pieces = {
+    front: [piece('', 'white', 'king', 0, 0), piece('', 'black', 'king', 4, 0)],
+    back: [piece('', 'white', 'king', -4, 0), piece('', 'black', 'king', 0, 4)]
+  };
+
+  const saved = createCustomState(pieces, rotated.faceLabels, rotated.panelRotations);
+  assert.deepEqual(saved.state.boardPanelRotations, rotated.panelRotations);
+
+  const invalidRotations = {
+    front: [...rotated.panelRotations.front],
+    back: [...rotated.panelRotations.back]
+  };
+  invalidRotations.back[1] = 120;
+  assert.match(
+    createCustomState(pieces, rotated.faceLabels, invalidRotations).error,
+    /板块朝向.*镜像对应/
+  );
 });

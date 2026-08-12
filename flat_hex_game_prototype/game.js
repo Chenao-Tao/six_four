@@ -53,10 +53,22 @@ export const BOARD_FACE_LABELS = {
   back: ['2B', '1B', '4A', '3B', '6B', '5B']
 };
 
+export const BOARD_PANEL_ROTATIONS = {
+  front: [0, 0, 0, 0, 0, 0],
+  back: [0, 0, 0, 0, 0, 0]
+};
+
 function cloneFaceLabels(faceLabels = BOARD_FACE_LABELS) {
   return {
     front: [...faceLabels.front],
     back: [...faceLabels.back]
+  };
+}
+
+function clonePanelRotations(panelRotations = BOARD_PANEL_ROTATIONS) {
+  return {
+    front: [...panelRotations.front],
+    back: [...panelRotations.back]
   };
 }
 
@@ -85,25 +97,58 @@ function validateFaceLabels(faceLabels) {
   return null;
 }
 
+function validatePanelRotations(panelRotations) {
+  if (!panelRotations || !Array.isArray(panelRotations.front) || !Array.isArray(panelRotations.back)) {
+    return '板块朝向数据无效';
+  }
+  for (const side of ['front', 'back']) {
+    if (panelRotations[side].length !== 6 ||
+        panelRotations[side].some(rotation => ![0, 120, 240].includes(rotation))) {
+      return '板块朝向只能是 0°、120° 或 240°';
+    }
+  }
+  for (let index = 0; index < 6; index++) {
+    const mirroredRotation = (360 - panelRotations.front[index]) % 360;
+    if (panelRotations.back[5 - index] !== mirroredRotation) {
+      return '板块朝向的正反面没有保持镜像对应关系';
+    }
+  }
+  return null;
+}
+
 function validatePanelIndex(index) {
   return Number.isInteger(index) && index >= 0 && index < 6;
 }
 
-export function flipBoardPanel(faceLabels, side, panelIndex) {
+export function flipBoardPanel(
+  faceLabels,
+  side,
+  panelIndex,
+  panelRotations = BOARD_PANEL_ROTATIONS
+) {
   if (!['front', 'back'].includes(side) || !validatePanelIndex(panelIndex)) {
     return { error: '板块位置无效' };
   }
   const validationError = validateFaceLabels(faceLabels);
   if (validationError) return { error: validationError };
+  const rotationsError = validatePanelRotations(panelRotations);
+  if (rotationsError) return { error: rotationsError };
   const next = cloneFaceLabels(faceLabels);
+  const nextRotations = clonePanelRotations(panelRotations);
   const oppositeSide = side === 'front' ? 'back' : 'front';
   const oppositeIndex = 5 - panelIndex;
   next[side][panelIndex] = oppositePanelFace(next[side][panelIndex]);
   next[oppositeSide][oppositeIndex] = oppositePanelFace(next[oppositeSide][oppositeIndex]);
-  return { faceLabels: next };
+  return { faceLabels: next, panelRotations: nextRotations };
 }
 
-export function swapBoardPanels(faceLabels, side, firstIndex, secondIndex) {
+export function swapBoardPanels(
+  faceLabels,
+  side,
+  firstIndex,
+  secondIndex,
+  panelRotations = BOARD_PANEL_ROTATIONS
+) {
   if (!['front', 'back'].includes(side) ||
       !validatePanelIndex(firstIndex) || !validatePanelIndex(secondIndex) ||
       firstIndex === secondIndex) {
@@ -111,7 +156,10 @@ export function swapBoardPanels(faceLabels, side, firstIndex, secondIndex) {
   }
   const validationError = validateFaceLabels(faceLabels);
   if (validationError) return { error: validationError };
+  const rotationsError = validatePanelRotations(panelRotations);
+  if (rotationsError) return { error: rotationsError };
   const next = cloneFaceLabels(faceLabels);
+  const nextRotations = clonePanelRotations(panelRotations);
   [next[side][firstIndex], next[side][secondIndex]] =
     [next[side][secondIndex], next[side][firstIndex]];
   const oppositeSide = side === 'front' ? 'back' : 'front';
@@ -119,7 +167,31 @@ export function swapBoardPanels(faceLabels, side, firstIndex, secondIndex) {
   const secondOppositeIndex = 5 - secondIndex;
   [next[oppositeSide][firstOppositeIndex], next[oppositeSide][secondOppositeIndex]] =
     [next[oppositeSide][secondOppositeIndex], next[oppositeSide][firstOppositeIndex]];
-  return { faceLabels: next };
+  [nextRotations[side][firstIndex], nextRotations[side][secondIndex]] =
+    [nextRotations[side][secondIndex], nextRotations[side][firstIndex]];
+  [nextRotations[oppositeSide][firstOppositeIndex], nextRotations[oppositeSide][secondOppositeIndex]] =
+    [nextRotations[oppositeSide][secondOppositeIndex], nextRotations[oppositeSide][firstOppositeIndex]];
+  return { faceLabels: next, panelRotations: nextRotations };
+}
+
+export function rotateBoardPanel(faceLabels, panelRotations, side, panelIndex) {
+  if (!['front', 'back'].includes(side) || !validatePanelIndex(panelIndex)) {
+    return { error: '板块位置无效' };
+  }
+  const validationError = validateFaceLabels(faceLabels);
+  if (validationError) return { error: validationError };
+  const rotationsError = validatePanelRotations(panelRotations);
+  if (rotationsError) return { error: rotationsError };
+  const nextRotations = clonePanelRotations(panelRotations);
+  const oppositeSide = side === 'front' ? 'back' : 'front';
+  const oppositeIndex = 5 - panelIndex;
+  nextRotations[side][panelIndex] = (nextRotations[side][panelIndex] + 120) % 360;
+  nextRotations[oppositeSide][oppositeIndex] =
+    (nextRotations[oppositeSide][oppositeIndex] + 240) % 360;
+  return {
+    faceLabels: cloneFaceLabels(faceLabels),
+    panelRotations: nextRotations
+  };
 }
 
 function piece(id, side, type, q, r) {
@@ -173,6 +245,7 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
     flipCount: 0,
     boardStates,
     boardFaceLabels: cloneFaceLabels(),
+    boardPanelRotations: clonePanelRotations(),
     pieces: boardStates.front,
     ...extra
   };
@@ -241,19 +314,26 @@ function normalizeCustomFace(face, pieces) {
   return { pieces: normalized };
 }
 
-export function createCustomState(boardStates, faceLabels = BOARD_FACE_LABELS) {
+export function createCustomState(
+  boardStates,
+  faceLabels = BOARD_FACE_LABELS,
+  panelRotations = BOARD_PANEL_ROTATIONS
+) {
   const front = normalizeCustomFace('front', boardStates?.front);
   if (front.error) return { error: front.error };
   const back = normalizeCustomFace('back', boardStates?.back);
   if (back.error) return { error: back.error };
   const faceLabelsError = validateFaceLabels(faceLabels);
   if (faceLabelsError) return { error: faceLabelsError };
+  const rotationsError = validatePanelRotations(panelRotations);
+  if (rotationsError) return { error: rotationsError };
   return {
     state: withInitialPositionHistory(doubleSidedState(
       front.pieces,
       back.pieces,
       {
         boardFaceLabels: cloneFaceLabels(faceLabels),
+        boardPanelRotations: clonePanelRotations(panelRotations),
         history: ['自定义棋盘已保存：白方先行']
       }
     ))

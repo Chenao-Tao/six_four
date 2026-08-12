@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形平面棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=detachable-panels-1">
+  <link rel="stylesheet" href="styles.css?v=panel-rotation-1">
 </head>
 <body>
   <main class="app-shell">
@@ -41,6 +41,7 @@
             <div class="panel-editor-actions hidden" id="panelEditorActions">
               <div class="panel-selection" id="panelSelection">请选择一块三角板</div>
               <div class="buttons">
+                <button id="rotateSelectedPanelButton" disabled>旋转120°</button>
                 <button id="flipSelectedPanelButton" disabled>翻转正反面</button>
                 <button id="swapSelectedPanelButton" disabled>与另一块交换</button>
               </div>
@@ -66,7 +67,7 @@
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
             <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
             <li><b>双面棋盘</b>：当前朝上面才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后整块六边形实际翻面，原背面成为新的可操作面。</li>
-            <li><b>板块拆装</b>：自定义编辑中可将任意三角板单独翻面，或选择两块板交换位置；另一整面的对应位置会同步更新。</li>
+            <li><b>板块拆装</b>：自定义编辑中可将任意三角板顺时针旋转120°、单独翻面，或选择两块板交换位置；另一整面的对应位置会同步更新。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -112,6 +113,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=detachable-panels-1"></script>
+  <script type="module" src="app.js?v=panel-rotation-1"></script>
 </body>
 </html>

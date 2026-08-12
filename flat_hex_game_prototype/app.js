@@ -1,5 +1,6 @@
 import {
   BOARD_FACE_LABELS,
+  BOARD_PANEL_ROTATIONS,
   BOARD_POINTS,
   BOARD_RADIUS,
   CORNERS,
@@ -17,9 +18,10 @@ import {
   keyOf,
   legalMoves,
   promotionTypeForMove,
+  rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=detachable-panels-1';
+} from './game.js?v=panel-rotation-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -49,6 +51,7 @@ const pieceModeButton = document.getElementById('pieceModeButton');
 const panelModeButton = document.getElementById('panelModeButton');
 const panelEditorActions = document.getElementById('panelEditorActions');
 const panelSelection = document.getElementById('panelSelection');
+const rotateSelectedPanelButton = document.getElementById('rotateSelectedPanelButton');
 const flipSelectedPanelButton = document.getElementById('flipSelectedPanelButton');
 const swapSelectedPanelButton = document.getElementById('swapSelectedPanelButton');
 const size = 72;
@@ -173,6 +176,11 @@ function displayedFaceLabels() {
   return state.boardFaceLabels ?? BOARD_FACE_LABELS;
 }
 
+function displayedPanelRotations() {
+  if (customEditor) return customEditor.panelRotations;
+  return state.boardPanelRotations ?? BOARD_PANEL_ROTATIONS;
+}
+
 function isPreviewing() {
   return previewSide !== null;
 }
@@ -201,6 +209,17 @@ function renderFaceLabels(side) {
     });
     textElement.textContent = label;
     group.appendChild(textElement);
+    const rotation = displayedPanelRotations()[side][index];
+    const baseAngle = Math.atan2(pixel.y - center.y, pixel.x - center.x) * 180 / Math.PI + 90;
+    const orientation = svgElement('g', {
+      class: 'panel-orientation',
+      transform: `translate(${pixel.x} ${pixel.y}) rotate(${baseAngle + rotation})`,
+      'data-panel-rotation': rotation
+    });
+    orientation.appendChild(svgElement('path', {
+      d: 'M 0 -39 L 7 -28 L 0 -31 L -7 -28 Z'
+    }));
+    group.appendChild(orientation);
     layer.appendChild(group);
   });
 }
@@ -353,7 +372,8 @@ function render() {
       : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
   const sideName = boardSide === 'front' ? 'A 面 · 布局三' : 'B 面 · 互补拼图';
   faceBadge.textContent = editing
-    ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · 点击交点设子`
+    ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · ` +
+      (customEditor.mode === 'pieces' ? '点击交点设子' : '选择三角板拆装')
     : previewing
       ? `背面预览 · ${sideName} · 禁止移动`
       : `当前朝上 · ${sideName} · 已翻 ${state.flipCount ?? 0} 次`;
@@ -380,12 +400,16 @@ function render() {
     const selectedLabel = customEditor.selectedPanel === null
       ? null
       : customEditor.faceLabels[boardSide][customEditor.selectedPanel];
+    const selectedRotation = customEditor.selectedPanel === null
+      ? null
+      : customEditor.panelRotations[boardSide][customEditor.selectedPanel];
     panelSelection.textContent = customEditor.swapPending
       ? `已选择 ${selectedLabel}，请点击另一块板完成交换`
       : selectedLabel
-        ? `已选择 ${selectedLabel} 板块`
+        ? `已选择 ${selectedLabel} 板块 · 方向 ${selectedRotation}°`
         : '请选择一块三角板';
     flipSelectedPanelButton.disabled = customEditor.selectedPanel === null || customEditor.swapPending;
+    rotateSelectedPanelButton.disabled = customEditor.selectedPanel === null || customEditor.swapPending;
     swapSelectedPanelButton.disabled = customEditor.selectedPanel === null;
     swapSelectedPanelButton.textContent = customEditor.swapPending ? '取消交换' : '与另一块交换';
   }
@@ -611,6 +635,10 @@ function enterCustomEditor() {
     faceLabels: {
       front: [...(state.boardFaceLabels?.front ?? BOARD_FACE_LABELS.front)],
       back: [...(state.boardFaceLabels?.back ?? BOARD_FACE_LABELS.back)]
+    },
+    panelRotations: {
+      front: [...(state.boardPanelRotations?.front ?? BOARD_PANEL_ROTATIONS.front)],
+      back: [...(state.boardPanelRotations?.back ?? BOARD_PANEL_ROTATIONS.back)]
     }
   };
   boardHelp.textContent = '已进入空白棋盘编辑：点击交点设置棋子，A、B 两面分别编辑。';
@@ -652,7 +680,11 @@ function cancelCustomBoard() {
 
 function saveCustomBoard() {
   if (!customEditor) return;
-  const result = createCustomState(customEditor.boardStates, customEditor.faceLabels);
+  const result = createCustomState(
+    customEditor.boardStates,
+    customEditor.faceLabels,
+    customEditor.panelRotations
+  );
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
     selectedInfo.textContent = result.error;
@@ -689,13 +721,15 @@ function selectEditorPanel(panelIndex) {
       customEditor.faceLabels,
       customEditor.side,
       customEditor.selectedPanel,
-      panelIndex
+      panelIndex,
+      customEditor.panelRotations
     );
     if (result.error) {
       boardHelp.textContent = result.error;
       return;
     }
     customEditor.faceLabels = result.faceLabels;
+    customEditor.panelRotations = result.panelRotations;
     customEditor.selectedPanel = panelIndex;
     customEditor.swapPending = false;
     boardHelp.textContent = `已交换 ${firstLabel} 与 ${secondLabel}，另一面已同步更新。`;
@@ -713,14 +747,41 @@ function flipSelectedPanel() {
   if (!customEditor || customEditor.mode !== 'panels' || customEditor.selectedPanel === null) return;
   const panelIndex = customEditor.selectedPanel;
   const previousLabel = customEditor.faceLabels[customEditor.side][panelIndex];
-  const result = flipBoardPanel(customEditor.faceLabels, customEditor.side, panelIndex);
+  const result = flipBoardPanel(
+    customEditor.faceLabels,
+    customEditor.side,
+    panelIndex,
+    customEditor.panelRotations
+  );
   if (result.error) {
     boardHelp.textContent = result.error;
     return;
   }
   customEditor.faceLabels = result.faceLabels;
+  customEditor.panelRotations = result.panelRotations;
   const nextLabel = customEditor.faceLabels[customEditor.side][panelIndex];
   boardHelp.textContent = `${previousLabel} 板块已翻转为 ${nextLabel}，背面对应板块同步翻转。`;
+  render();
+}
+
+function rotateSelectedPanel() {
+  if (!customEditor || customEditor.mode !== 'panels' || customEditor.selectedPanel === null) return;
+  const panelIndex = customEditor.selectedPanel;
+  const result = rotateBoardPanel(
+    customEditor.faceLabels,
+    customEditor.panelRotations,
+    customEditor.side,
+    panelIndex
+  );
+  if (result.error) {
+    boardHelp.textContent = result.error;
+    return;
+  }
+  customEditor.faceLabels = result.faceLabels;
+  customEditor.panelRotations = result.panelRotations;
+  const label = customEditor.faceLabels[customEditor.side][panelIndex];
+  const rotation = customEditor.panelRotations[customEditor.side][panelIndex];
+  boardHelp.textContent = `${label} 板块已顺时针旋转120°，当前方向 ${rotation}°。`;
   render();
 }
 
@@ -838,6 +899,7 @@ cancelCustomButton.addEventListener('click', cancelCustomBoard);
 pieceModeButton.addEventListener('click', () => setEditorMode('pieces'));
 panelModeButton.addEventListener('click', () => setEditorMode('panels'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
+rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
 pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
   button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));

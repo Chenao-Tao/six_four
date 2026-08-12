@@ -57,3 +57,11 @@ test('自定义编辑提供棋子摆放和板块拆装两种工具', () => {
   assert.match(app, /function flipSelectedPanel\(\)/);
   assert.match(app, /function beginPanelSwap\(\)/);
 });
+
+test('选中板块后可以单次旋转120度并显示方向标记', () => {
+  assert.match(html, /id="rotateSelectedPanelButton"/);
+  assert.match(html, />旋转120°</);
+  assert.match(app, /function rotateSelectedPanel\(\)/);
+  assert.match(app, /class: 'panel-orientation'/);
+  assert.match(app, /rotateSelectedPanelButton\.addEventListener\('click', rotateSelectedPanel\)/);
+});
