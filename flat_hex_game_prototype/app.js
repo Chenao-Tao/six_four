@@ -24,6 +24,10 @@ import {
   stepwiseGameSearch,
   swapBoardPanels
 } from './game.js?v=panel-piece-ownership-1';
+import {
+  createBrowserLayoutStore,
+  LEGACY_LAYOUT_STORAGE_KEY
+} from './layout-storage.js?v=vercel-layout-fallback-1';
 import { createSolidBoardViewer } from './solid-board.js?v=solid-operation-effects-1';
 
 const svg = document.getElementById('board');
@@ -77,7 +81,6 @@ const closeSolidViewButton = document.getElementById('closeSolidViewButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 let state = createInitialState();
 let selectedPieceId = null;
 let selectedMoves = new Map();
@@ -95,6 +98,8 @@ let activeInitialState = createInitialState();
 let solidBoardViewer = null;
 let solidSelectedPanel = null;
 let solidSwapPending = false;
+let layoutStorageMode = 'server';
+const browserLayoutStore = createBrowserLayoutStore(localStorage);
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -130,7 +135,7 @@ function cloneGameState(source) {
 
 function legacySavedLayouts() {
   try {
-    const stored = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    const stored = localStorage.getItem(LEGACY_LAYOUT_STORAGE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) throw new TypeError('存档格式不是数组');
@@ -142,13 +147,22 @@ function legacySavedLayouts() {
 }
 
 async function requestLayoutLibrary(path = '/api/layouts', options = {}) {
+  if (layoutStorageMode === 'browser') return browserLayoutStore.request(path, options);
   const response = await fetch(path, {
     ...options,
     headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers
   });
   const body = await response.json().catch(() => ({ error: `服务器返回 ${response.status}` }));
+  if (response.status === 404) {
+    layoutStorageMode = 'browser';
+    return browserLayoutStore.request(path, options);
+  }
   if (!response.ok) throw new Error(body.error || `布局文件操作失败（${response.status}）`);
   return body;
+}
+
+function layoutStorageLabel() {
+  return layoutStorageMode === 'browser' ? '当前浏览器' : '项目本地文件';
 }
 
 function applyLayoutLibrary(library, selectedName = '') {
@@ -167,13 +181,20 @@ function applyLayoutLibrary(library, selectedName = '') {
   } else {
     activeInitialState = createInitialState();
   }
-  activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName}`;
+  activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName} · 保存位置：${layoutStorageLabel()}`;
   refreshSavedLayoutOptions(selectedName || activeLayoutName);
 }
 
 async function initializeLayoutLibrary() {
   try {
     let library = await requestLayoutLibrary();
+    if (layoutStorageMode === 'browser') {
+      applyLayoutLibrary(library);
+      state = cloneGameState(activeInitialState);
+      boardHelp.textContent = '服务器布局接口不可用，布局将保存在当前浏览器中。';
+      render();
+      return;
+    }
     const legacyLayouts = legacySavedLayouts();
     let migrationFailed = false;
     for (const layout of legacyLayouts) {
@@ -188,7 +209,7 @@ async function initializeLayoutLibrary() {
         }
       }
     }
-    if (legacyLayouts.length && !migrationFailed) localStorage.removeItem(LAYOUT_STORAGE_KEY);
+    if (legacyLayouts.length && !migrationFailed) localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY);
     applyLayoutLibrary(library);
     state = cloneGameState(activeInitialState);
     if (migrationFailed) {
@@ -196,7 +217,7 @@ async function initializeLayoutLibrary() {
     }
     render();
   } catch (error) {
-    boardHelp.textContent = `读取本地布局文件失败：${error.message}`;
+    boardHelp.textContent = `读取布局失败：${error.message}`;
   }
 }
 
@@ -1029,7 +1050,7 @@ async function saveCustomBoard() {
   selectedPieceId = null;
   selectedMoves = new Map();
   closePieceEditor();
-  boardHelp.textContent = `布局“${name}”已保存为本地文件、设为启用布局并开局。`;
+  boardHelp.textContent = `布局“${name}”已保存到${layoutStorageLabel()}、设为启用布局并开局。`;
   render();
 }
 
@@ -1079,8 +1100,8 @@ async function saveLayoutToLibrary() {
     });
     applyLayoutLibrary(library, name);
     boardHelp.textContent = existed
-      ? `已覆盖本地布局文件“${name}”。`
-      : `已保存本地布局文件“${name}”。`;
+      ? `已覆盖${layoutStorageLabel()}中的布局“${name}”。`
+      : `已保存布局“${name}”到${layoutStorageLabel()}。`;
   } catch (error) {
     boardHelp.textContent = `布局不能保存：${error.message}`;
   }
@@ -1146,7 +1167,7 @@ async function deleteLayoutFromLibrary() {
     });
     applyLayoutLibrary(library);
     if (layoutNameInput.value.trim() === name) layoutNameInput.value = '';
-    boardHelp.textContent = `已删除本地布局文件“${name}”。`;
+    boardHelp.textContent = `已从${layoutStorageLabel()}删除布局“${name}”。`;
   } catch (error) {
     boardHelp.textContent = `无法删除布局：${error.message}`;
   }

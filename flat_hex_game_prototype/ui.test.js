@@ -73,7 +73,7 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(html, /id="loadLayoutButton"/);
   assert.match(html, /id="activateLayoutButton"/);
   assert.match(html, /id="deleteLayoutButton"/);
-  assert.match(app, /const LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1'/);
+  assert.match(app, /createBrowserLayoutStore/);
   assert.match(app, /async function saveLayoutToLibrary\(\)/);
   assert.match(app, /function loadLayoutFromLibrary\(\)/);
   assert.match(app, /async function activateLayoutFromLibrary\(\)/);
@@ -81,7 +81,14 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(app, /const validation = createCustomLayout\(/);
   assert.match(app, /requestLayoutLibrary\('\/api\/layouts'/);
   assert.match(app, /state = cloneGameState\(activeInitialState\)/);
-  assert.match(html, /布局保存到项目的本地 JSON 文件/);
+  assert.match(html, /静态部署时自动保存在当前浏览器/);
+});
+
+test('布局接口返回404时自动使用浏览器存储且保留其他错误', () => {
+  assert.match(app, /if \(response\.status === 404\) \{[\s\S]*?layoutStorageMode = 'browser'/);
+  assert.match(app, /return browserLayoutStore\.request\(path, options\)/);
+  assert.match(app, /if \(!response\.ok\) throw new Error/);
+  assert.match(app, /服务器布局接口不可用，布局将保存在当前浏览器中/);
 });
 
 test('平面六块三角板可组成立体并保留棋子布局', () => {
