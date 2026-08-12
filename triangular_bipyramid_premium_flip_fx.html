@@ -550,19 +550,25 @@
   // ============================================================
 
   // 正面统一黑色
-  const MAT_FACE_FRONT = new THREE.MeshLambertMaterial({
+  const MAT_FACE_FRONT = new THREE.MeshStandardMaterial({
     color: 0x050505,
+    roughness: 0.42,
+    metalness: 0.02,
     side: THREE.DoubleSide
   });
 
   // 反面统一白色
-  const MAT_FACE_BACK = new THREE.MeshLambertMaterial({
+  const MAT_FACE_BACK = new THREE.MeshStandardMaterial({
     color: 0xf5f5f5,
+    roughness: 0.42,
+    metalness: 0.02,
     side: THREE.DoubleSide
   });
 
-  const MAT_SIDE = new THREE.MeshLambertMaterial({
+  const MAT_SIDE = new THREE.MeshStandardMaterial({
     color: 0x343434,
+    roughness: 0.45,
+    metalness: 0.08,
     side: THREE.DoubleSide
   });
 
