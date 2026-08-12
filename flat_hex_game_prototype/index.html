@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形平面棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=solid-board-assembly-1">
+  <link rel="stylesheet" href="styles.css?v=solid-board-editing-1">
 </head>
 <body>
   <main class="app-shell">
@@ -134,15 +134,21 @@
   <div class="solid-viewer hidden" id="solidViewer" role="dialog" aria-modal="true" aria-labelledby="solidViewerTitle">
     <canvas id="solidBoardCanvas" aria-label="由六块三角板组成的双锥六面体"></canvas>
     <section class="solid-viewer-panel">
-      <h2 id="solidViewerTitle">六面体组装预览</h2>
-      <p id="solidViewerStatus">六块三角板及其棋子已组装成立体。</p>
+      <h2 id="solidViewerTitle">六面体板块编辑</h2>
+      <p id="solidViewerStatus">点击一个立体面进行板块操作。</p>
+      <div class="solid-panel-selection" id="solidPanelSelection">尚未选择立体面</div>
+      <div class="buttons solid-panel-actions">
+        <button id="rotateSolidPanelButton" disabled>旋转120°</button>
+        <button id="flipSolidPanelButton" disabled>翻转正反面</button>
+        <button id="swapSolidPanelButton" disabled>交换面</button>
+      </div>
       <div class="buttons">
         <button id="resetSolidViewButton">复位视角</button>
         <button id="closeSolidViewButton" class="primary">展开回平面</button>
       </div>
-      <small>拖动旋转 · 滚轮缩放 · 此视图不修改棋局</small>
+      <small>点击选面 · 拖动旋转视角 · 滚轮缩放 · 棋子只能来自平面布局</small>
     </section>
   </div>
-  <script type="module" src="app.js?v=solid-board-assembly-1"></script>
+  <script type="module" src="app.js?v=solid-board-editing-1"></script>
 </body>
 </html>

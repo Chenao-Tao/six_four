@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
-import { mapPiecesToPanels } from './solid-board.js';
+import { findPanelAtPoint, mapPiecesToPanels } from './solid-board.js';
 
 test('平面棋子映射到六块立体板时不丢失、不复制且不修改原数据', () => {
   const pieces = [
@@ -47,4 +47,15 @@ test('板块旋转后的当前棋子位置映射到立体面时不会被二次�
   assert.deepEqual(rotated.boardStates.front[0].position, { q: 2, r: 1 });
   assert.equal(mapped.panelIndex, 0);
   assert.deepEqual(mapped.local, { center: 0.25, u: 0.5, v: 0.25 });
+});
+
+test('立体面点击按绘制层级选中最靠近观察者的三角板', () => {
+  const faces = [
+    { panelIndex: 1, projected: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }] },
+    { panelIndex: 4, projected: [{ x: 10, y: 10 }, { x: 90, y: 10 }, { x: 10, y: 90 }] }
+  ];
+
+  assert.equal(findPanelAtPoint(faces, { x: 20, y: 20 }), 4);
+  assert.equal(findPanelAtPoint(faces, { x: 5, y: 5 }), 1);
+  assert.equal(findPanelAtPoint(faces, { x: 120, y: 120 }), null);
 });

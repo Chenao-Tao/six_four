@@ -95,3 +95,17 @@ test('平面六块三角板可组成立体并保留棋子布局', () => {
   assert.match(app, /function closeSolidBoard\(\)/);
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
 });
+
+test('六面体可选择已有板块并同步旋转、翻面和交换操作', () => {
+  assert.match(html, /id="solidPanelSelection"/);
+  assert.match(html, /id="rotateSolidPanelButton"/);
+  assert.match(html, /id="flipSolidPanelButton"/);
+  assert.match(html, /id="swapSolidPanelButton"/);
+  assert.match(app, /function selectSolidPanel\(/);
+  assert.match(app, /function rotateSolidPanel\(/);
+  assert.match(app, /function flipSolidPanel\(/);
+  assert.match(app, /function beginSolidPanelSwap\(/);
+  assert.match(app, /solidBoardViewer\.update\(model\)/);
+  const solidMarkup = html.match(/<div class="solid-viewer[\s\S]*?<\/div>\s*<script/)[0];
+  assert.doesNotMatch(solidMarkup, /data-editor-type|清空该点|棋子摆放/);
+});

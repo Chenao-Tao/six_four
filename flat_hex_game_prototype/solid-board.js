@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS } from './game.js?v=solid-board-assembly-1';
+import { BOARD_RADIUS, CORNERS } from './game.js?v=solid-board-editing-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -14,6 +14,24 @@ function panelCoordinates(point, panelIndex) {
 
 function isInsidePanel(local) {
   return local.center >= -EPSILON && local.u >= -EPSILON && local.v >= -EPSILON;
+}
+
+function triangleContainsPoint(vertices, point) {
+  const signs = vertices.map((vertex, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    return (point.x - next.x) * (vertex.y - next.y) -
+      (vertex.x - next.x) * (point.y - next.y);
+  });
+  return signs.every(sign => sign >= -EPSILON) || signs.every(sign => sign <= EPSILON);
+}
+
+export function findPanelAtPoint(renderFaces, point) {
+  for (let index = renderFaces.length - 1; index >= 0; index -= 1) {
+    if (triangleContainsPoint(renderFaces[index].projected, point)) {
+      return renderFaces[index].panelIndex;
+    }
+  }
+  return null;
 }
 
 export function mapPiecesToPanels(pieces) {
@@ -123,7 +141,7 @@ function gridSegments(vertices) {
   return segments;
 }
 
-export function createSolidBoardViewer(canvas, initialModel) {
+export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = () => {} } = {}) {
   const context = canvas.getContext('2d');
   const faces = modelFaces();
   let model = initialModel;
@@ -132,7 +150,9 @@ export function createSolidBoardViewer(canvas, initialModel) {
   let zoom = 1;
   let dragging = false;
   let previousPointer = null;
+  let dragDistance = 0;
   let animationFrame = 0;
+  let lastRenderFaces = [];
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -185,6 +205,7 @@ export function createSolidBoardViewer(canvas, initialModel) {
         depth: projected.reduce((sum, point) => sum + point.z, 0) / 3
       };
     }).sort((left, right) => left.depth - right.depth);
+    lastRenderFaces = renderFaces;
 
     renderFaces.forEach(face => {
       const { panelIndex, vertices, projected } = face;
@@ -196,7 +217,9 @@ export function createSolidBoardViewer(canvas, initialModel) {
       const base = isBackFace ? 190 + light : 25 + light;
       const fill = `rgb(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18})`;
       const lineColor = isBackFace ? 'rgba(15,28,38,.55)' : 'rgba(190,235,255,.52)';
-      drawPath(projected, fill, isBackFace ? '#263d4d' : '#a8d8ee', 2);
+      const isSelected = model.selectedPanel === panelIndex;
+      drawPath(projected, fill, isSelected ? '#ffc96a' : isBackFace ? '#263d4d' : '#a8d8ee', isSelected ? 5 : 2);
+      if (isSelected) drawPath(projected, 'rgba(255,201,106,.14)', null);
 
       context.lineWidth = 1;
       context.strokeStyle = lineColor;
@@ -237,20 +260,33 @@ export function createSolidBoardViewer(canvas, initialModel) {
 
   function pointerMove(event) {
     if (!dragging || !previousPointer) return;
-    rotationY += (event.clientX - previousPointer.x) * 0.009;
-    rotationX = Math.max(-1.45, Math.min(1.45, rotationX + (event.clientY - previousPointer.y) * 0.009));
+    const deltaX = event.clientX - previousPointer.x;
+    const deltaY = event.clientY - previousPointer.y;
+    dragDistance += Math.hypot(deltaX, deltaY);
+    rotationY += deltaX * 0.009;
+    rotationX = Math.max(-1.45, Math.min(1.45, rotationX + deltaY * 0.009));
     previousPointer = { x: event.clientX, y: event.clientY };
   }
 
   function pointerDown(event) {
     dragging = true;
     previousPointer = { x: event.clientX, y: event.clientY };
+    dragDistance = 0;
     canvas.setPointerCapture(event.pointerId);
   }
 
-  function pointerEnd() {
+  function pointerEnd(event) {
+    if (dragging && dragDistance < 5 && event.type === 'pointerup') {
+      const bounds = canvas.getBoundingClientRect();
+      const panelIndex = findPanelAtPoint(lastRenderFaces, {
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top
+      });
+      if (panelIndex !== null) onPanelSelect(panelIndex);
+    }
     dragging = false;
     previousPointer = null;
+    dragDistance = 0;
   }
 
   function wheel(event) {
