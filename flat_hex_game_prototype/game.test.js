@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   applyMove,
+  captureMoveForClickedPiece,
   chooseSimulationAction,
   keyOf,
   legalMoves,
@@ -95,6 +96,19 @@ test('兵或象吃兵时提供保持原级和升级两种结算', () => {
   ]);
   const bishopMove = legalMoves(bishopState, 'wB').get('1,1');
   assert.equal(promotionTypeForMove(bishopState, 'wB', bishopMove), 'queen');
+});
+
+test('已选择攻击者时点击可吃的敌棋会解析为吃子动作', () => {
+  const state = stateOf([
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+
+  const move = captureMoveForClickedPiece(state, 'wB', 'bP');
+
+  assert.equal(move.captureId, 'bP');
+  assert.deepEqual(move.target, { q: 1, r: 1 });
+  assert.equal(captureMoveForClickedPiece(state, 'wB', 'missing'), null);
 });
 
 test('皇后的每个合法动作都必须完整走三步', () => {

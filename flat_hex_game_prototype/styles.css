@@ -57,9 +57,9 @@ button.active { color: #071015; background: var(--cyan); }
 .major-edge { stroke: #7593ad; stroke-width: 2.6; }
 .node { fill: #7990a4; opacity: .42; }
 .king-node { fill: var(--gold); opacity: .72; }
-.move-path { fill: none; stroke: var(--cyan); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; opacity: .42; }
+.move-path { fill: none; stroke: var(--cyan); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; opacity: .42; pointer-events: none; }
 .move-target { fill: rgba(97,231,255,.19); stroke: var(--cyan); stroke-width: 3; cursor: pointer; }
-.move-target.capture { fill: rgba(255,99,86,.23); stroke: #ff766c; }
+.move-target.capture { fill: rgba(255,99,86,.16); stroke: #ff766c; stroke-width: 4; r: 29px; }
 .piece { cursor: pointer; transition: filter .15s ease; }
 .piece:hover { filter: drop-shadow(0 0 7px rgba(97,231,255,.85)); }
 .piece.selected { filter: drop-shadow(0 0 12px var(--gold)); }

@@ -217,6 +217,13 @@ export function legalMoves(state, pieceId) {
   return kingMoves(pieceToMove, occupied);
 }
 
+export function captureMoveForClickedPiece(state, attackerId, defenderId) {
+  const defender = state.pieces.find(item => item.id === defenderId);
+  if (!defender) return null;
+  const move = legalMoves(state, attackerId).get(keyOf(defender.position));
+  return move?.captureId === defenderId ? move : null;
+}
+
 export function promotionTypeForMove(state, pieceId, move) {
   if (!move?.captureId) return null;
   const movingPiece = state.pieces.find(item => item.id === pieceId);

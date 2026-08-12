@@ -7,6 +7,7 @@ import {
   PIECE_NAMES,
   add,
   applyMove,
+  captureMoveForClickedPiece,
   chooseSimulationAction,
   createCaptureDemoState,
   createInitialState,
@@ -14,7 +15,7 @@ import {
   keyOf,
   legalMoves,
   promotionTypeForMove
-} from './game.js';
+} from './game.js?v=capture-interaction-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -111,8 +112,9 @@ function drawStaticBoard() {
     }));
   });
   svg.appendChild(nodes);
-  svg.appendChild(svgElement('g', { id: 'moveLayer' }));
+  svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
+  svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
 }
 
 function pieceSymbol(type) {
@@ -138,16 +140,25 @@ function renderPiece(piece) {
   group.appendChild(label);
   group.addEventListener('click', event => {
     event.stopPropagation();
+    if (selectedPieceId && piece.id !== selectedPieceId) {
+      const captureMove = captureMoveForClickedPiece(state, selectedPieceId, piece.id);
+      if (captureMove) {
+        chooseMove(captureMove);
+        return;
+      }
+    }
     selectPiece(piece.id);
   });
   return group;
 }
 
 function renderMoves() {
-  const layer = document.getElementById('moveLayer');
-  layer.replaceChildren();
+  const pathLayer = document.getElementById('movePathLayer');
+  const targetLayer = document.getElementById('moveTargetLayer');
+  pathLayer.replaceChildren();
+  targetLayer.replaceChildren();
   selectedMoves.forEach(move => {
-    layer.appendChild(svgElement('polyline', {
+    pathLayer.appendChild(svgElement('polyline', {
       class: 'move-path',
       points: pointList(move.path)
     }));
@@ -161,7 +172,7 @@ function renderMoves() {
       event.stopPropagation();
       chooseMove(move);
     });
-    layer.appendChild(target);
+    targetLayer.appendChild(target);
   });
 }
 
