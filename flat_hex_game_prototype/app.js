@@ -10,14 +10,13 @@ import {
   applyMove,
   capturePositionEffect,
   captureMoveForClickedPiece,
-  createCaptureDemoState,
   createInitialState,
   isOnBoard,
   keyOf,
   legalMoves,
   promotionTypeForMove,
   stepwiseGameSearch
-} from './game.js?v=layout3-double-sided-1';
+} from './game.js?v=layout3-facing-preview-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -30,6 +29,9 @@ const promotionQuestion = document.getElementById('promotionQuestion');
 const promoteButton = document.getElementById('promoteButton');
 const boardShell = document.getElementById('boardShell');
 const faceBadge = document.getElementById('faceBadge');
+const previewButton = document.getElementById('previewButton');
+const stepButton = document.getElementById('stepButton');
+const autoButton = document.getElementById('autoButton');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -40,6 +42,7 @@ let pendingPromotion = null;
 let autoTimer = null;
 let animationLock = false;
 let simulationLock = false;
+let previewSide = null;
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -122,10 +125,30 @@ function drawStaticBoard() {
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
 }
 
-function renderFaceLabels() {
+function oppositeBoardSide(side) {
+  return side === 'front' ? 'back' : 'front';
+}
+
+function activeBoardSide() {
+  return state.boardSide ?? 'front';
+}
+
+function displayedBoardSide() {
+  return previewSide ?? activeBoardSide();
+}
+
+function displayedPieces() {
+  const side = displayedBoardSide();
+  return state.boardStates?.[side] ?? state.pieces;
+}
+
+function isPreviewing() {
+  return previewSide !== null;
+}
+
+function renderFaceLabels(side) {
   const layer = document.getElementById('faceLabelLayer');
   layer.replaceChildren();
-  const side = state.boardSide ?? 'front';
   BOARD_FACE_LABELS[side].forEach((label, index) => {
     const corner = CORNERS[index];
     const next = CORNERS[(index + 1) % 6];
@@ -174,6 +197,10 @@ function renderPiece(piece) {
   group.appendChild(label);
   group.addEventListener('click', event => {
     event.stopPropagation();
+    if (isPreviewing()) {
+      boardHelp.textContent = '当前是背面预览；返回当前朝上面后才能移动棋子。';
+      return;
+    }
     if (selectedPieceId && piece.id !== selectedPieceId) {
       const captureMove = captureMoveForClickedPiece(state, selectedPieceId, piece.id);
       if (captureMove) {
@@ -211,19 +238,31 @@ function renderMoves() {
 }
 
 function render() {
-  const boardSide = state.boardSide ?? 'front';
+  const boardSide = displayedBoardSide();
+  const previewing = isPreviewing();
   svg.dataset.side = boardSide;
   boardShell.dataset.side = boardSide;
+  boardShell.classList.toggle('previewing', previewing);
   const pieceLayer = document.getElementById('pieceLayer');
-  pieceLayer.replaceChildren(...state.pieces.map(renderPiece));
-  renderFaceLabels();
-  renderMoves();
+  pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
+  renderFaceLabels(boardSide);
+  if (previewing) {
+    document.getElementById('movePathLayer').replaceChildren();
+    document.getElementById('moveTargetLayer').replaceChildren();
+  } else {
+    renderMoves();
+  }
   turnBadge.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
     : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
-  faceBadge.textContent = boardSide === 'front'
-    ? `A 正面 · 布局三 · 已翻 ${state.flipCount ?? 0} 次`
-    : `B 反面 · 互补拼图 · 已翻 ${state.flipCount ?? 0} 次`;
+  const sideName = boardSide === 'front' ? 'A 面 · 布局三' : 'B 面 · 互补拼图';
+  faceBadge.textContent = previewing
+    ? `背面预览 · ${sideName} · 禁止移动`
+    : `当前朝上 · ${sideName} · 已翻 ${state.flipCount ?? 0} 次`;
+  previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
+  previewButton.setAttribute('aria-pressed', String(previewing));
+  stepButton.disabled = previewing;
+  autoButton.disabled = previewing;
   turnBadge.classList.toggle('winner-glow', Boolean(state.winner));
   historyElement.replaceChildren(...state.history.slice().reverse().map(item => {
     const line = document.createElement('li');
@@ -234,6 +273,10 @@ function render() {
 }
 
 function selectPiece(pieceId) {
+  if (isPreviewing()) {
+    boardHelp.textContent = '背面预览不可操作；返回当前朝上面后才能移动棋子。';
+    return;
+  }
   if (animationLock || state.winner || pendingPromotion) return;
   const piece = state.pieces.find(item => item.id === pieceId);
   if (!piece || piece.side !== state.turn) {
@@ -290,6 +333,7 @@ async function animateMove(pieceId, path, positionEffect, defenderId = null) {
 
 async function animateBoardFlip(nextState) {
   animationLock = true;
+  previewSide = null;
   boardShell.classList.add('flipping');
   boardHelp.textContent = '发生吃子：六边形棋盘正在整体翻面……';
   await new Promise(resolve => setTimeout(resolve, 430));
@@ -301,6 +345,7 @@ async function animateBoardFlip(nextState) {
 }
 
 async function commitMove(pieceId, move, promote = false, decisionNote = '') {
+  if (isPreviewing()) return;
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
@@ -336,7 +381,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
 }
 
 function chooseMove(move) {
-  if (animationLock || !selectedPieceId) return;
+  if (isPreviewing() || animationLock || !selectedPieceId) return;
   const mover = state.pieces.find(item => item.id === selectedPieceId);
   const promotionType = promotionTypeForMove(state, selectedPieceId, move);
   if (promotionType) {
@@ -367,6 +412,7 @@ function resetGame() {
   autoTimer = null;
   document.getElementById('autoButton').classList.remove('active');
   state = createInitialState();
+  previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
   pendingPromotion = null;
@@ -375,21 +421,37 @@ function resetGame() {
   render();
 }
 
-function loadCaptureDemo() {
-  clearInterval(autoTimer);
-  autoTimer = null;
-  document.getElementById('autoButton').classList.remove('active');
-  document.getElementById('autoButton').textContent = '连续模拟';
-  state = createCaptureDemoState();
+async function toggleFacePreview() {
+  if (animationLock || simulationLock || pendingPromotion) return;
+  if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    autoButton.classList.remove('active');
+    autoButton.textContent = '连续模拟';
+  }
+  animationLock = true;
   selectedPieceId = null;
   selectedMoves = new Map();
-  pendingPromotion = null;
-  promotionModal.classList.add('hidden');
-  boardHelp.textContent = '演示局面：选择白象、白后、白王或白兵，红圈即对应吃子。';
+  boardShell.classList.add('flipping');
+  boardHelp.textContent = previewSide === null
+    ? '正在翻到背面预览；预览不会改变棋局状态。'
+    : '正在返回当前朝上面。';
+  await new Promise(resolve => setTimeout(resolve, 430));
+  previewSide = previewSide === null ? oppositeBoardSide(activeBoardSide()) : null;
   render();
+  await new Promise(resolve => setTimeout(resolve, 470));
+  boardShell.classList.remove('flipping');
+  animationLock = false;
+  boardHelp.textContent = isPreviewing()
+    ? '背面仅供预览，棋子不可选择；点击“返回当前朝上面”继续下棋。'
+    : '已返回当前朝上面，可以继续移动棋子。';
 }
 
 async function simulateStep() {
+  if (isPreviewing()) {
+    boardHelp.textContent = '背面预览期间不能运行算法；请先返回当前朝上面。';
+    return;
+  }
   if (simulationLock || animationLock || pendingPromotion || state.winner) return;
   simulationLock = true;
   try {
@@ -439,9 +501,10 @@ async function simulateStep() {
 }
 
 document.getElementById('resetButton').addEventListener('click', resetGame);
-document.getElementById('captureDemoButton').addEventListener('click', loadCaptureDemo);
-document.getElementById('stepButton').addEventListener('click', simulateStep);
-document.getElementById('autoButton').addEventListener('click', event => {
+previewButton.addEventListener('click', toggleFacePreview);
+stepButton.addEventListener('click', simulateStep);
+autoButton.addEventListener('click', event => {
+  if (isPreviewing()) return;
   if (autoTimer) {
     clearInterval(autoTimer);
     autoTimer = null;
@@ -465,6 +528,10 @@ document.getElementById('autoButton').addEventListener('click', event => {
 });
 
 svg.addEventListener('click', () => {
+  if (isPreviewing()) {
+    boardHelp.textContent = '背面仅供预览；返回当前朝上面后才能移动棋子。';
+    return;
+  }
   selectedPieceId = null;
   selectedMoves = new Map();
   render();

@@ -71,6 +71,9 @@ button {
 }
 button:hover { border-color: var(--cyan); }
 button.active { color: #071015; background: var(--cyan); }
+button[aria-pressed="true"] { color: #071015; background: var(--gold); }
+button:disabled { opacity: .42; cursor: not-allowed; }
+button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .selected { margin-top: 12px; padding: 10px; color: #adc0d2; border-radius: 9px; background: #0e151e; font-size: 13px; }
 .rules ul { margin: 0; padding-left: 20px; color: #adbdcb; font-size: 13px; line-height: 1.6; }
 .history-card { flex: 1; min-height: 220px; }
@@ -97,6 +100,8 @@ button.active { color: #071015; background: var(--cyan); }
 .move-target.capture { fill: rgba(255,99,86,.16); stroke: #ff766c; stroke-width: 4; r: 29px; }
 .piece { cursor: pointer; transition: filter .15s ease; }
 .piece:hover { filter: drop-shadow(0 0 7px rgba(97,231,255,.85)); }
+.board-shell.previewing .piece { cursor: not-allowed; filter: saturate(.7) opacity(.76); }
+.board-shell.previewing .piece:hover { filter: saturate(.7) opacity(.76); }
 .piece.selected { filter: drop-shadow(0 0 12px var(--gold)); }
 .piece-base.white { fill: var(--white-piece); stroke: #8298aa; }
 .piece-base.black { fill: var(--black-piece); stroke: #bed0df; }

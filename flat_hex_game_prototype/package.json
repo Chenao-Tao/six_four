@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test game.test.js"
+    "test": "node --test game.test.js ui.test.js"
   }
 }

@@ -265,3 +265,41 @@ test('连续两次吃子翻回原面时保留两面的结算结果', () => {
   assert.equal(afterBackCapture.boardStates.back.find(item => item.id === 'wQ').type, 'bishop');
   assert.strictEqual(afterBackCapture.pieces, afterBackCapture.boardStates.front);
 });
+
+function compactPieces(pieces) {
+  return pieces
+    .map(item => `${item.id}:${item.side}:${item.type}@${keyOf(item.position)}`)
+    .sort();
+}
+
+test('布局三棋子身份与交点严格匹配参考图', () => {
+  const state = createInitialState();
+  assert.deepEqual(compactPieces(state.boardStates.front), [
+    'bB1:black:bishop@4,-3',
+    'bB2:black:bishop@3,-1',
+    'bK:black:king@-4,4',
+    'bP1:black:pawn@-1,0',
+    'bP2:black:pawn@2,1',
+    'bQ:black:queen@0,4',
+    'wB1:white:bishop@1,-2',
+    'wB2:white:bishop@-3,-1',
+    'wK:white:king@4,0',
+    'wP1:white:pawn@-3,1',
+    'wP2:white:pawn@-1,3',
+    'wQ:white:queen@3,-4'
+  ].sort());
+  assert.deepEqual(compactPieces(state.boardStates.back), [
+    'bB1:black:bishop@4,-4',
+    'bB2:black:bishop@-3,1',
+    'bK:black:king@4,0',
+    'bP1:black:pawn@2,-1',
+    'bP2:black:pawn@-2,1',
+    'bQ:black:queen@3,-3',
+    'wB1:white:bishop@-1,2',
+    'wB2:white:bishop@-3,2',
+    'wK:white:king@-4,0',
+    'wP1:white:pawn@0,1',
+    'wP2:white:pawn@1,-4',
+    'wQ:white:queen@-2,4'
+  ].sort());
+});

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形平面棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=layout3-double-sided-1">
+  <link rel="stylesheet" href="styles.css?v=layout3-facing-preview-1">
 </head>
 <body>
   <main class="app-shell">
@@ -27,7 +27,7 @@
           <h2>模拟控制</h2>
           <div class="buttons">
             <button id="resetButton">重新开局</button>
-            <button id="captureDemoButton">载入吃子演示</button>
+            <button id="previewButton" aria-pressed="false">预览背面</button>
             <button id="stepButton">算法演示一步</button>
             <button id="autoButton">连续模拟</button>
           </div>
@@ -44,7 +44,7 @@
             <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象留在原位；兵吃兵/王后占据目标；王吃后双方原位不变。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
             <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
-            <li><b>双面棋盘</b>：正面按 1A/2A/3A/4B/5A/6A 拼合，反面使用实体板互补面；每次成功吃子后整块六边形翻面。</li>
+            <li><b>双面棋盘</b>：当前朝上面才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后整块六边形实际翻面，原背面成为新的可操作面。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -64,6 +64,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=layout3-double-sided-1"></script>
+  <script type="module" src="app.js?v=layout3-facing-preview-1"></script>
 </body>
 </html>

@@ -47,7 +47,7 @@ export const CORNERS = DIRECTIONS.map(direction => ({
 export const KING_POINTS = [{ q: 0, r: 0 }, ...CORNERS];
 
 // 顺序与 UI 六个扇区一致：右下、下、左下、左上、上、右上。
-// 布局三正面使用参考拼图中的 1A/2A/3A/5A/6A/4B，反面为实体板互补面。
+// 布局三当前朝上面使用 1A/2A/3A/5A/6A/4B，翻面后是实体板互补面。
 export const BOARD_FACE_LABELS = {
   front: ['5A', '6A', '3A', '4B', '1A', '2A'],
   back: ['2B', '1B', '4A', '3B', '6B', '5B']
@@ -59,6 +59,7 @@ function piece(id, side, type, q, r) {
 
 function layoutThreeFrontPieces() {
   return [
+    // 棋子按参考合成图中的最近网格交点落位；圆形标记本身存在少量排版偏移。
     piece('wK', 'white', 'king', 4, 0),
     piece('wQ', 'white', 'queen', 3, -4),
     piece('wB1', 'white', 'bishop', 1, -2),
@@ -69,7 +70,7 @@ function layoutThreeFrontPieces() {
     piece('bQ', 'black', 'queen', 0, 4),
     piece('bB1', 'black', 'bishop', 4, -3),
     piece('bB2', 'black', 'bishop', 3, -1),
-    piece('bP1', 'black', 'pawn', -1, -1),
+    piece('bP1', 'black', 'pawn', -1, 0),
     piece('bP2', 'black', 'pawn', 2, 1)
   ];
 }
@@ -84,10 +85,10 @@ function layoutThreeBackPieces() {
     piece('wP2', 'white', 'pawn', 1, -4),
     piece('bK', 'black', 'king', 4, 0),
     piece('bQ', 'black', 'queen', 3, -3),
-    piece('bB1', 'black', 'bishop', 2, 1),
-    piece('bB2', 'black', 'bishop', -2, 1),
-    piece('bP1', 'black', 'pawn', 1, -2),
-    piece('bP2', 'black', 'pawn', -3, -1)
+    piece('bB1', 'black', 'bishop', 4, -4),
+    piece('bB2', 'black', 'bishop', -3, 1),
+    piece('bP1', 'black', 'pawn', 2, -1),
+    piece('bP2', 'black', 'pawn', -2, 1)
   ];
 }
 
