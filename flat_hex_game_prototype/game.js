@@ -352,7 +352,7 @@ const VALID_PIECE_SIDES = new Set(['white', 'black']);
 const VALID_PIECE_TYPES = new Set(Object.keys(PIECE_NAMES));
 const KING_POINT_KEYS = new Set(KING_POINTS.map(keyOf));
 
-function normalizeCustomFace(face, pieces, requireKings = true) {
+function normalizeCustomFace(face, pieces) {
   const faceName = face === 'front' ? 'A 面' : 'B 面';
   if (!Array.isArray(pieces)) return { error: `${faceName}棋子数据无效` };
   const occupied = new Set();
@@ -382,22 +382,22 @@ function normalizeCustomFace(face, pieces, requireKings = true) {
     });
   }
 
-  for (const side of ['white', 'black']) {
-    if (kingCounts[side] > 1) {
-      return { error: `${faceName}最多只能有一枚${side === 'white' ? '白方' : '黑方'}王` };
-    }
-    if (requireKings && kingCounts[side] !== 1) {
-      return { error: `${faceName}必须且只能有一枚${side === 'white' ? '白方' : '黑方'}王` };
-    }
-  }
-  return { pieces: normalized };
+  return { pieces: normalized, kingCounts };
 }
 
 function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings) {
-  const front = normalizeCustomFace('front', boardStates?.front, requireKings);
+  const front = normalizeCustomFace('front', boardStates?.front);
   if (front.error) return { error: front.error };
-  const back = normalizeCustomFace('back', boardStates?.back, requireKings);
+  const back = normalizeCustomFace('back', boardStates?.back);
   if (back.error) return { error: back.error };
+  for (const side of ['white', 'black']) {
+    const kingCount = front.kingCounts[side] + back.kingCounts[side];
+    const sideName = side === 'white' ? '白方' : '黑方';
+    if (kingCount > 1) return { error: `双面棋盘最多只能有一枚${sideName}王` };
+    if (requireKings && kingCount !== 1) {
+      return { error: `双面棋盘必须且只能有一枚${sideName}王` };
+    }
+  }
   const faceLabelsError = validateFaceLabels(faceLabels);
   if (faceLabelsError) return { error: faceLabelsError };
   const rotationsError = validatePanelRotations(panelRotations);

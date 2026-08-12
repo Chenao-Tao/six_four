@@ -22,7 +22,7 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=layout-draft-validation-1';
+} from './game.js?v=global-king-count-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');

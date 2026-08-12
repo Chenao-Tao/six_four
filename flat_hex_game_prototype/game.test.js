@@ -38,7 +38,7 @@ function findPiece(state, id) {
   return state.pieces.find(item => item.id === id);
 }
 
-test('布局草稿允许王暂时缺失，但同面同阵营不能出现多个王', () => {
+test('双面棋盘合计每方只允许一枚王', () => {
   const partialBoard = {
     front: [piece('white-king', 'white', 'king', 0, 0)],
     back: []
@@ -49,14 +49,18 @@ test('布局草稿允许王暂时缺失，但同面同阵营不能出现多个�
   assert.equal(layout.error, undefined);
   assert.equal(layout.boardStates.front.length, 1);
   assert.equal(layout.boardStates.back.length, 0);
-  assert.match(createCustomState(partialBoard).error, /A 面.*黑方王/);
+  assert.match(createCustomState(partialBoard).error, /双面棋盘.*黑方王/);
+
+  const playable = createCustomState({
+    front: [piece('white-king', 'white', 'king', 0, 0)],
+    back: [piece('black-king', 'black', 'king', 4, 0)]
+  });
+  assert.equal(playable.error, undefined);
+
   assert.match(createCustomLayout({
-    front: [
-      piece('white-king-1', 'white', 'king', 0, 0),
-      piece('white-king-2', 'white', 'king', 4, 0)
-    ],
-    back: []
-  }).error, /A 面.*白方王/);
+    front: [piece('white-king-1', 'white', 'king', 0, 0)],
+    back: [piece('white-king-2', 'white', 'king', 4, 0)]
+  }).error, /双面棋盘.*白方王/);
 });
 
 test('后吃象后双方换位，象强制降级为兵', () => {
@@ -334,11 +338,9 @@ test('自定义双面棋盘通过校验后以白方第一手开局且不引用�
   const draft = {
     front: [
       piece('', 'white', 'king', 0, 0),
-      piece('', 'black', 'king', 4, 0),
       piece('', 'white', 'pawn', 1, 0)
     ],
     back: [
-      piece('', 'white', 'king', -4, 0),
       piece('', 'black', 'king', 0, 4),
       piece('', 'black', 'bishop', -1, 1)
     ]
@@ -353,24 +355,19 @@ test('自定义双面棋盘通过校验后以白方第一手开局且不引用�
   assert.equal(result.state.flipCount, 0);
   assert.strictEqual(result.state.pieces, result.state.boardStates.front);
   assert.equal(result.state.history.at(-1), '自定义棋盘已保存：白方先行');
-  assert.equal(new Set(result.state.boardStates.front.map(item => item.id)).size, 3);
+  assert.equal(new Set(result.state.boardStates.front.map(item => item.id)).size, 2);
 
   draft.front[0].position.q = 3;
   assert.deepEqual(result.state.boardStates.front[0].position, { q: 0, r: 0 });
 });
 
-test('自定义棋盘拒绝重叠、越界和缺少双方王的布局', () => {
-  const validBack = [
-    piece('', 'white', 'king', -4, 0),
-    piece('', 'black', 'king', 4, 0)
-  ];
-
+test('自定义棋盘拒绝重叠、越界和双面合计缺少王的布局', () => {
   assert.match(createCustomState({
     front: [
       piece('', 'white', 'king', 0, 0),
       piece('', 'black', 'king', 0, 0)
     ],
-    back: validBack
+    back: []
   }).error, /A 面.*同一交点/);
 
   assert.match(createCustomState({
@@ -378,20 +375,20 @@ test('自定义棋盘拒绝重叠、越界和缺少双方王的布局', () => {
       piece('', 'white', 'king', 0, 0),
       piece('', 'black', 'king', 5, 0)
     ],
-    back: validBack
+    back: []
   }).error, /A 面.*棋盘外/);
 
   assert.match(createCustomState({
     front: [piece('', 'white', 'king', 0, 0)],
-    back: validBack
-  }).error, /A 面.*黑方王/);
+    back: []
+  }).error, /双面棋盘.*黑方王/);
 
   assert.match(createCustomState({
     front: [
       piece('', 'white', 'king', 1, 0),
       piece('', 'black', 'king', 4, 0)
     ],
-    back: validBack
+    back: []
   }).error, /A 面.*王只能放在中心或六个外角/);
 });
 
@@ -427,8 +424,8 @@ test('交换两块三角板时同步交换另一面的镜像位置', () => {
 
 test('自定义棋局保存拆装后的板块布局并拒绝不成对的双面数据', () => {
   const pieces = {
-    front: [piece('', 'white', 'king', 0, 0), piece('', 'black', 'king', 4, 0)],
-    back: [piece('', 'white', 'king', -4, 0), piece('', 'black', 'king', 0, 4)]
+    front: [piece('', 'white', 'king', 0, 0)],
+    back: [piece('', 'black', 'king', 0, 4)]
   };
   const swapped = swapBoardPanels(createInitialState().boardFaceLabels, 'front', 1, 4);
 
@@ -496,8 +493,8 @@ test('自定义棋局保存旋转方向并拒绝正反面朝向不成镜像的�
     4
   );
   const pieces = {
-    front: [piece('', 'white', 'king', 0, 0), piece('', 'black', 'king', 4, 0)],
-    back: [piece('', 'white', 'king', -4, 0), piece('', 'black', 'king', 0, 4)]
+    front: [piece('', 'white', 'king', 0, 0)],
+    back: [piece('', 'black', 'king', 0, 4)]
   };
 
   const saved = createCustomState(pieces, rotated.faceLabels, rotated.panelRotations);
