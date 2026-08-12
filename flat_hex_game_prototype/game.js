@@ -352,7 +352,7 @@ const VALID_PIECE_SIDES = new Set(['white', 'black']);
 const VALID_PIECE_TYPES = new Set(Object.keys(PIECE_NAMES));
 const KING_POINT_KEYS = new Set(KING_POINTS.map(keyOf));
 
-function normalizeCustomFace(face, pieces) {
+function normalizeCustomFace(face, pieces, requireKings = true) {
   const faceName = face === 'front' ? 'A 面' : 'B 面';
   if (!Array.isArray(pieces)) return { error: `${faceName}棋子数据无效` };
   const occupied = new Set();
@@ -383,11 +383,38 @@ function normalizeCustomFace(face, pieces) {
   }
 
   for (const side of ['white', 'black']) {
-    if (kingCounts[side] !== 1) {
+    if (kingCounts[side] > 1) {
+      return { error: `${faceName}最多只能有一枚${side === 'white' ? '白方' : '黑方'}王` };
+    }
+    if (requireKings && kingCounts[side] !== 1) {
       return { error: `${faceName}必须且只能有一枚${side === 'white' ? '白方' : '黑方'}王` };
     }
   }
   return { pieces: normalized };
+}
+
+function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings) {
+  const front = normalizeCustomFace('front', boardStates?.front, requireKings);
+  if (front.error) return { error: front.error };
+  const back = normalizeCustomFace('back', boardStates?.back, requireKings);
+  if (back.error) return { error: back.error };
+  const faceLabelsError = validateFaceLabels(faceLabels);
+  if (faceLabelsError) return { error: faceLabelsError };
+  const rotationsError = validatePanelRotations(panelRotations);
+  if (rotationsError) return { error: rotationsError };
+  return {
+    boardStates: { front: front.pieces, back: back.pieces },
+    faceLabels: cloneFaceLabels(faceLabels),
+    panelRotations: clonePanelRotations(panelRotations)
+  };
+}
+
+export function createCustomLayout(
+  boardStates,
+  faceLabels = BOARD_FACE_LABELS,
+  panelRotations = BOARD_PANEL_ROTATIONS
+) {
+  return normalizeCustomBoard(boardStates, faceLabels, panelRotations, false);
 }
 
 export function createCustomState(
@@ -395,21 +422,15 @@ export function createCustomState(
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS
 ) {
-  const front = normalizeCustomFace('front', boardStates?.front);
-  if (front.error) return { error: front.error };
-  const back = normalizeCustomFace('back', boardStates?.back);
-  if (back.error) return { error: back.error };
-  const faceLabelsError = validateFaceLabels(faceLabels);
-  if (faceLabelsError) return { error: faceLabelsError };
-  const rotationsError = validatePanelRotations(panelRotations);
-  if (rotationsError) return { error: rotationsError };
+  const layout = normalizeCustomBoard(boardStates, faceLabels, panelRotations, true);
+  if (layout.error) return { error: layout.error };
   return {
     state: withInitialPositionHistory(doubleSidedState(
-      front.pieces,
-      back.pieces,
+      layout.boardStates.front,
+      layout.boardStates.back,
       {
-        boardFaceLabels: cloneFaceLabels(faceLabels),
-        boardPanelRotations: clonePanelRotations(panelRotations),
+        boardFaceLabels: layout.faceLabels,
+        boardPanelRotations: layout.panelRotations,
         history: ['自定义棋盘已保存：白方先行']
       }
     ))

@@ -7,6 +7,7 @@ import {
   captureMoveForClickedPiece,
   chooseSimulationAction,
   createCaptureDemoState,
+  createCustomLayout,
   createCustomState,
   createInitialState,
   flipBoardPanel,
@@ -36,6 +37,27 @@ function piece(id, side, type, q, r) {
 function findPiece(state, id) {
   return state.pieces.find(item => item.id === id);
 }
+
+test('布局草稿允许王暂时缺失，但同面同阵营不能出现多个王', () => {
+  const partialBoard = {
+    front: [piece('white-king', 'white', 'king', 0, 0)],
+    back: []
+  };
+
+  const layout = createCustomLayout(partialBoard);
+
+  assert.equal(layout.error, undefined);
+  assert.equal(layout.boardStates.front.length, 1);
+  assert.equal(layout.boardStates.back.length, 0);
+  assert.match(createCustomState(partialBoard).error, /A 面.*黑方王/);
+  assert.match(createCustomLayout({
+    front: [
+      piece('white-king-1', 'white', 'king', 0, 0),
+      piece('white-king-2', 'white', 'king', 4, 0)
+    ],
+    back: []
+  }).error, /A 面.*白方王/);
+});
 
 test('后吃象后双方换位，象强制降级为兵', () => {
   const state = stateOf([

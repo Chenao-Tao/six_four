@@ -11,6 +11,7 @@ import {
   applyMove,
   capturePositionEffect,
   captureMoveForClickedPiece,
+  createCustomLayout,
   createCustomState,
   createInitialState,
   flipBoardPanel,
@@ -21,7 +22,7 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=rotating-pieces-save-1';
+} from './game.js?v=layout-draft-validation-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -760,17 +761,17 @@ function saveCustomBoard() {
   render();
 }
 
-function layoutSnapshotFromEditor(name) {
+function layoutSnapshotFromEditor(name, layout = customEditor) {
   return {
     name,
-    boardStates: clonePiecesByFace(customEditor.boardStates),
+    boardStates: clonePiecesByFace(layout.boardStates),
     faceLabels: {
-      front: [...customEditor.faceLabels.front],
-      back: [...customEditor.faceLabels.back]
+      front: [...layout.faceLabels.front],
+      back: [...layout.faceLabels.back]
     },
     panelRotations: {
-      front: [...customEditor.panelRotations.front],
-      back: [...customEditor.panelRotations.back]
+      front: [...layout.panelRotations.front],
+      back: [...layout.panelRotations.back]
     }
   };
 }
@@ -782,7 +783,7 @@ function saveLayoutToLibrary() {
     boardHelp.textContent = '请输入布局名称后再保存。';
     return;
   }
-  const validation = createCustomState(
+  const validation = createCustomLayout(
     customEditor.boardStates,
     customEditor.faceLabels,
     customEditor.panelRotations
@@ -791,7 +792,7 @@ function saveLayoutToLibrary() {
     boardHelp.textContent = `布局不能保存：${validation.error}`;
     return;
   }
-  const snapshot = layoutSnapshotFromEditor(name);
+  const snapshot = layoutSnapshotFromEditor(name, validation);
   const existingIndex = savedLayouts.findIndex(item => item.name === name);
   if (existingIndex >= 0) savedLayouts[existingIndex] = snapshot;
   else savedLayouts.push(snapshot);
@@ -810,19 +811,19 @@ function loadLayoutFromLibrary() {
     boardHelp.textContent = '选择的布局存档不存在。';
     return;
   }
-  const validation = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+  const validation = createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
   if (validation.error) {
     boardHelp.textContent = `布局存档无效：${validation.error}`;
     return;
   }
-  customEditor.boardStates = clonePiecesByFace(layout.boardStates);
+  customEditor.boardStates = clonePiecesByFace(validation.boardStates);
   customEditor.faceLabels = {
-    front: [...layout.faceLabels.front],
-    back: [...layout.faceLabels.back]
+    front: [...validation.faceLabels.front],
+    back: [...validation.faceLabels.back]
   };
   customEditor.panelRotations = {
-    front: [...layout.panelRotations.front],
-    back: [...layout.panelRotations.back]
+    front: [...validation.panelRotations.front],
+    back: [...validation.panelRotations.back]
   };
   customEditor.side = 'front';
   customEditor.selectedPanel = null;

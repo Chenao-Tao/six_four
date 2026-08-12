@@ -76,5 +76,7 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(app, /function saveLayoutToLibrary\(\)/);
   assert.match(app, /function loadLayoutFromLibrary\(\)/);
   assert.match(app, /function deleteLayoutFromLibrary\(\)/);
+  assert.match(app, /const validation = createCustomLayout\(/);
   assert.match(app, /localStorage\.setItem\(LAYOUT_STORAGE_KEY/);
+  assert.match(html, /可随时保存尚未摆完的双面布局/);
 });
