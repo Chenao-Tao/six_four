@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>六三角形平面棋盘 · 算法原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header>
+      <div><span class="eyebrow">ALGORITHM PROTOTYPE</span><h1>六三角形平面棋盘</h1></div>
+      <div class="turn" id="turnBadge"></div>
+    </header>
+    <section class="workspace">
+      <div class="board-card">
+        <svg id="board" viewBox="0 0 760 700" aria-label="六边形棋盘"></svg>
+        <div class="board-help" id="boardHelp">点击己方棋子，查看合法移动位置。</div>
+      </div>
+      <aside>
+        <section class="card">
+          <h2>模拟控制</h2>
+          <div class="buttons">
+            <button id="resetButton">重新开局</button>
+            <button id="stepButton">算法演示一步</button>
+            <button id="autoButton">连续模拟</button>
+          </div>
+          <div class="selected" id="selectedInfo">尚未选择棋子</div>
+        </section>
+        <section class="card rules">
+          <h2>本版可执行定义</h2>
+          <ul>
+            <li><b>王</b>：只在中心与六个外角之间，沿大三角边移动。</li>
+            <li><b>皇后</b>：连续走1～3格，每步可改变方向，不能穿子。</li>
+            <li><b>象</b>：沿三角网格的一条直线移动，遇子停止。</li>
+            <li><b>兵</b>：沿任意相邻线路移动1格。</li>
+            <li><b>吃子</b>：当前仅兵可吃敌兵或敌王；吃兵可选择升象，吃王获胜。</li>
+          </ul>
+        </section>
+        <section class="card history-card">
+          <h2>算法步骤</h2>
+          <ol id="history"></ol>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <div class="modal hidden" id="promotionModal">
+    <div class="modal-card">
+      <h2>兵吃兵成功</h2>
+      <p>是否将这枚兵升级为象？</p>
+      <div class="buttons">
+        <button data-promote="true">升级为象</button>
+        <button data-promote="false">保持为兵</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
