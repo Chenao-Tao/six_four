@@ -8,14 +8,14 @@ import {
   add,
   applyMove,
   captureMoveForClickedPiece,
-  chooseSimulationAction,
   createCaptureDemoState,
   createInitialState,
   isOnBoard,
   keyOf,
   legalMoves,
-  promotionTypeForMove
-} from './game.js?v=capture-occupy-repeat-1';
+  promotionTypeForMove,
+  stepwiseGameSearch
+} from './game.js?v=stepwise-game-search-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -320,7 +320,23 @@ async function simulateStep() {
   if (simulationLock || animationLock || pendingPromotion || state.winner) return;
   simulationLock = true;
   try {
-    const action = chooseSimulationAction(state);
+    let action = null;
+    for (const step of stepwiseGameSearch(state, 3)) {
+      action = step;
+      const stepMover = state.pieces.find(item => item.id === step.pieceId);
+      selectedPieceId = step.pieceId;
+      selectedMoves = legalMoves(state, step.pieceId);
+      selectedInfo.textContent = `分步博弈 ${step.searchDepth}/3：` +
+        `${PIECE_NAMES[stepMover.type]}${step.move.captureId ? '攻击' : '移动'}，` +
+        `评估 ${step.score}，搜索 ${step.searchedNodes} 节点，剪枝 ${step.prunedBranches} 次`;
+      boardHelp.textContent = step.searchDepth === 1
+        ? '第1步：评估当前行动的直接收益。'
+        : step.searchDepth === 2
+          ? '第2步：加入对手的最优回应。'
+          : '第3步：加入己方反制并确定最终动作。';
+      render();
+      await new Promise(resolve => setTimeout(resolve, 360));
+    }
     if (!action) {
       boardHelp.textContent = '当前一方没有合法移动。';
       return;
@@ -337,11 +353,12 @@ async function simulateStep() {
     const repetitionNote = action.repetitionCount > 0
       ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
       : '，已避开近期重复局面';
-    selectedInfo.textContent = `Minimax + Alpha-Beta（${action.searchDepth} 层）选择：` +
+    selectedInfo.textContent = `分步博弈最终选择（${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     render();
     await new Promise(resolve => setTimeout(resolve, 240));
-    const decisionNote = `算法已搜索 ${action.searchDepth} 层并选择评估值 ${action.score} 的动作。`;
+    const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
+      `剪枝 ${action.prunedBranches} 次，执行评估值 ${action.score} 的动作。`;
     await commitMove(action.pieceId, action.move, action.promote, decisionNote);
   } finally {
     simulationLock = false;

@@ -38,7 +38,7 @@
             <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
             <li><b>吃子位置</b>：兵或王被消灭时，攻击者占据其位置；象降兵、后降象时双方仍留在原位。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
-            <li><b>最优演示</b>：算法用3层 Minimax + Alpha-Beta 比较各分支，并优先避开近期重复局面。</li>
+            <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -58,6 +58,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=capture-occupy-repeat-1"></script>
+  <script type="module" src="app.js?v=stepwise-game-search-1"></script>
 </body>
 </html>

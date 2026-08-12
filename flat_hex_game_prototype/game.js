@@ -375,14 +375,15 @@ function repetitionAwareActions(state) {
   return candidates.filter(item => item.repetitionCount === lowestRepetition);
 }
 
-function minimax(state, depth, alpha, beta, perspective) {
+function minimax(state, depth, alpha, beta, perspective, metrics) {
+  metrics.searchedNodes += 1;
   if (depth === 0 || state.winner) return evaluateState(state, perspective);
   const candidates = repetitionAwareActions(state);
   if (!candidates.length) return evaluateState(state, perspective);
   const maximizing = state.turn === perspective;
   let bestScore = maximizing ? -Infinity : Infinity;
   for (const { result } of candidates) {
-    const score = minimax(result.state, depth - 1, alpha, beta, perspective);
+    const score = minimax(result.state, depth - 1, alpha, beta, perspective, metrics);
     if (maximizing) {
       bestScore = Math.max(bestScore, score);
       alpha = Math.max(alpha, bestScore);
@@ -390,15 +391,19 @@ function minimax(state, depth, alpha, beta, perspective) {
       bestScore = Math.min(bestScore, score);
       beta = Math.min(beta, bestScore);
     }
-    if (beta <= alpha) break;
+    if (beta <= alpha) {
+      metrics.prunedBranches += 1;
+      break;
+    }
   }
   return bestScore;
 }
 
-export function chooseSimulationAction(state, searchDepth = 3) {
+function searchAtDepth(state, searchDepth) {
   const candidates = repetitionAwareActions(state);
   if (!candidates.length) return null;
   const perspective = state.turn;
+  const metrics = { searchedNodes: 0, prunedBranches: 0 };
   let bestAction = null;
   let bestScore = -Infinity;
   let bestRepetitionCount = Infinity;
@@ -408,7 +413,8 @@ export function chooseSimulationAction(state, searchDepth = 3) {
       Math.max(0, searchDepth - 1),
       -Infinity,
       Infinity,
-      perspective
+      perspective,
+      metrics
     );
     if (score > bestScore) {
       bestScore = score;
@@ -420,6 +426,22 @@ export function chooseSimulationAction(state, searchDepth = 3) {
     ...bestAction,
     score: bestScore,
     searchDepth,
-    repetitionCount: bestRepetitionCount
+    repetitionCount: bestRepetitionCount,
+    ...metrics
   };
+}
+
+export function* stepwiseGameSearch(state, maxDepth = 3) {
+  const normalizedDepth = Math.max(1, Math.floor(maxDepth));
+  for (let searchDepth = 1; searchDepth <= normalizedDepth; searchDepth++) {
+    const result = searchAtDepth(state, searchDepth);
+    if (!result) return;
+    yield result;
+  }
+}
+
+export function chooseSimulationAction(state, searchDepth = 3) {
+  let finalResult = null;
+  for (const result of stepwiseGameSearch(state, searchDepth)) finalResult = result;
+  return finalResult;
 }

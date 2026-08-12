@@ -8,7 +8,8 @@ import {
   keyOf,
   legalMoves,
   positionSignature,
-  promotionTypeForMove
+  promotionTypeForMove,
+  stepwiseGameSearch
 } from './game.js';
 
 function stateOf(pieces, turn = 'white') {
@@ -176,4 +177,25 @@ test('局面指纹只保留最近十二个状态', () => {
   assert.equal(result.state.positionHistory.length, 12);
   assert.equal(result.state.positionHistory[0], 'old-9');
   assert.equal(result.state.positionHistory.at(-1), positionSignature(result.state));
+});
+
+test('分步博弈依次给出一至三层结论，最终结果等同三层搜索', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, -3),
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bK', 'black', 'king', 0, -4),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+
+  const steps = [...stepwiseGameSearch(state, 3)];
+  const final = chooseSimulationAction(state, 3);
+
+  assert.deepEqual(steps.map(item => item.searchDepth), [1, 2, 3]);
+  assert.equal(steps.at(-1).pieceId, final.pieceId);
+  assert.deepEqual(steps.at(-1).move.target, final.move.target);
+  assert.equal(steps.at(-1).move.capturesKing, true);
+  steps.forEach(item => {
+    assert.ok(item.searchedNodes > 0);
+    assert.ok(item.prunedBranches >= 0);
+  });
 });
