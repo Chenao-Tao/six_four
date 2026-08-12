@@ -1,7 +1,8 @@
-import { BOARD_RADIUS, CORNERS } from './game.js?v=solid-board-editing-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=panel-piece-ownership-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
+const EFFECT_DURATIONS = { rotate: 720, flip: 780, swap: 900 };
 
 function panelCoordinates(point, panelIndex) {
   const first = CORNERS[panelIndex];
@@ -36,17 +37,15 @@ export function findPanelAtPoint(renderFaces, point) {
 
 export function mapPiecesToPanels(pieces) {
   return pieces.map(piece => {
-    let panelIndex = -1;
-    let local = null;
-    for (let index = 0; index < 6; index += 1) {
-      const candidate = panelCoordinates(piece.position, index);
-      if (isInsidePanel(candidate)) {
-        panelIndex = index;
-        local = candidate;
-        break;
-      }
+    let panelIndex = Number.isInteger(piece.panelIndex) && piece.panelIndex >= 0 && piece.panelIndex < 6
+      ? piece.panelIndex
+      : panelIndexForPoint(piece.position);
+    let local = panelIndex === null ? null : panelCoordinates(piece.position, panelIndex);
+    if (!local || !isInsidePanel(local)) {
+      panelIndex = panelIndexForPoint(piece.position);
+      local = panelIndex === null ? null : panelCoordinates(piece.position, panelIndex);
     }
-    if (panelIndex < 0) throw new RangeError(`棋子 ${piece.id} 不在任何三角板内`);
+    if (!local || !isInsidePanel(local)) throw new RangeError(`棋子 ${piece.id} 不在任何三角板内`);
     return {
       ...piece,
       position: { ...piece.position },
@@ -141,6 +140,36 @@ function gridSegments(vertices) {
   return segments;
 }
 
+function projectedCenter(points) {
+  return points.reduce((center, point) => ({
+    x: center.x + point.x / points.length,
+    y: center.y + point.y / points.length
+  }), { x: 0, y: 0 });
+}
+
+function scaledProjectedFace(points, scaleX, scaleY = 1) {
+  const center = projectedCenter(points);
+  return points.map(point => ({
+    ...point,
+    x: center.x + (point.x - center.x) * scaleX,
+    y: center.y + (point.y - center.y) * scaleY
+  }));
+}
+
+export function solidEffectFrame(effect, now) {
+  if (!effect || !Number.isFinite(effect.startedAt) || !Number.isFinite(effect.duration) || effect.duration <= 0) {
+    return null;
+  }
+  const progress = Math.max(0, Math.min(1, (now - effect.startedAt) / effect.duration));
+  if (progress >= 1) return null;
+  return {
+    progress,
+    eased: 1 - (1 - progress) ** 3,
+    pulse: Math.sin(progress * Math.PI),
+    alpha: 1 - progress
+  };
+}
+
 export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = () => {} } = {}) {
   const context = canvas.getContext('2d');
   const faces = modelFaces();
@@ -153,6 +182,7 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   let dragDistance = 0;
   let animationFrame = 0;
   let lastRenderFaces = [];
+  let operationEffect = null;
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -183,7 +213,145 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
     }
   }
 
-  function render() {
+  function drawOperationLabel(text, position, alpha) {
+    context.save();
+    context.font = '700 14px "Microsoft YaHei", sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    const width = context.measureText(text).width + 24;
+    context.fillStyle = `rgba(7, 16, 23, ${0.84 * alpha})`;
+    context.strokeStyle = `rgba(255, 213, 122, ${0.9 * alpha})`;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.roundRect(position.x - width / 2, position.y - 16, width, 32, 7);
+    context.fill();
+    context.stroke();
+    context.fillStyle = `rgba(255, 230, 170, ${alpha})`;
+    context.fillText(text, position.x, position.y + 1);
+    context.restore();
+  }
+
+  function drawAffectedFace(face, frame) {
+    context.save();
+    context.shadowColor = `rgba(255, 201, 106, ${0.85 * frame.alpha})`;
+    context.shadowBlur = 12 + frame.pulse * 18;
+    drawPath(
+      face.projected,
+      `rgba(255, 201, 106, ${0.08 + frame.pulse * 0.18})`,
+      `rgba(255, 220, 142, ${0.55 + frame.pulse * 0.45})`,
+      3 + frame.pulse * 3
+    );
+    context.restore();
+  }
+
+  function drawRotateEffect(face, frame) {
+    const center = projectedCenter(face.projected);
+    const radius = Math.max(28, Math.min(...face.projected.map(point => Math.hypot(
+      point.x - center.x,
+      point.y - center.y
+    ))) * 0.52);
+    const startAngle = -Math.PI * 0.72;
+    const endAngle = startAngle + Math.PI * 1.34 * frame.eased;
+    context.save();
+    context.strokeStyle = `rgba(255, 225, 153, ${frame.alpha})`;
+    context.fillStyle = context.strokeStyle;
+    context.lineWidth = 4;
+    context.lineCap = 'round';
+    context.shadowColor = 'rgba(255, 201, 106, .9)';
+    context.shadowBlur = 12;
+    context.beginPath();
+    context.arc(center.x, center.y, radius, startAngle, endAngle);
+    context.stroke();
+    const arrow = {
+      x: center.x + Math.cos(endAngle) * radius,
+      y: center.y + Math.sin(endAngle) * radius
+    };
+    context.translate(arrow.x, arrow.y);
+    context.rotate(endAngle + Math.PI / 2);
+    context.beginPath();
+    context.moveTo(0, 0);
+    context.lineTo(-7, -12);
+    context.lineTo(7, -12);
+    context.closePath();
+    context.fill();
+    context.restore();
+    drawOperationLabel('旋转 120°', { x: center.x, y: center.y - radius - 24 }, frame.alpha);
+  }
+
+  function drawFlipEffect(face, frame) {
+    const center = projectedCenter(face.projected);
+    const squeeze = Math.max(0.08, Math.abs(Math.cos(frame.progress * Math.PI)));
+    const ghost = scaledProjectedFace(face.projected, squeeze, 1);
+    context.save();
+    context.shadowColor = 'rgba(97, 231, 255, .9)';
+    context.shadowBlur = 18;
+    drawPath(
+      ghost,
+      `rgba(97, 231, 255, ${0.12 + frame.pulse * 0.22})`,
+      `rgba(184, 245, 255, ${frame.alpha})`,
+      4
+    );
+    context.setLineDash([8, 6]);
+    context.strokeStyle = `rgba(255, 225, 153, ${frame.alpha})`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(center.x, Math.min(...face.projected.map(point => point.y)) - 8);
+    context.lineTo(center.x, Math.max(...face.projected.map(point => point.y)) + 8);
+    context.stroke();
+    context.restore();
+    drawOperationLabel('翻转正反面', { x: center.x, y: center.y - 42 }, frame.alpha);
+  }
+
+  function drawSwapEffect(firstFace, secondFace, frame) {
+    const first = projectedCenter(firstFace.projected);
+    const second = projectedCenter(secondFace.projected);
+    context.save();
+    context.strokeStyle = `rgba(97, 231, 255, ${0.38 + frame.alpha * 0.62})`;
+    context.lineWidth = 4;
+    context.setLineDash([12, 10]);
+    context.lineDashOffset = -frame.progress * 70;
+    context.shadowColor = 'rgba(97, 231, 255, .8)';
+    context.shadowBlur = 12;
+    context.beginPath();
+    context.moveTo(first.x, first.y);
+    context.lineTo(second.x, second.y);
+    context.stroke();
+    context.setLineDash([]);
+    for (const progress of [frame.eased, 1 - frame.eased]) {
+      const x = first.x + (second.x - first.x) * progress;
+      const y = first.y + (second.y - first.y) * progress;
+      context.beginPath();
+      context.arc(x, y, 6 + frame.pulse * 3, 0, Math.PI * 2);
+      context.fillStyle = `rgba(255, 218, 132, ${frame.alpha})`;
+      context.fill();
+    }
+    context.restore();
+    drawOperationLabel('交换板块', {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2 - 28
+    }, frame.alpha);
+  }
+
+  function drawOperationEffect(renderFaces, now) {
+    const frame = solidEffectFrame(operationEffect, now);
+    if (!frame) {
+      operationEffect = null;
+      return;
+    }
+    const affectedFaces = operationEffect.panelIndices
+      .map(panelIndex => renderFaces.find(face => face.panelIndex === panelIndex))
+      .filter(Boolean);
+    affectedFaces.forEach(face => drawAffectedFace(face, frame));
+    if (operationEffect.type === 'rotate' && affectedFaces[0]) {
+      drawRotateEffect(affectedFaces[0], frame);
+    } else if (operationEffect.type === 'flip' && affectedFaces[0]) {
+      drawFlipEffect(affectedFaces[0], frame);
+    } else if (operationEffect.type === 'swap' && affectedFaces.length === 2) {
+      drawSwapEffect(affectedFaces[0], affectedFaces[1], frame);
+    }
+  }
+
+  function render(now = performance.now()) {
     const bounds = canvas.getBoundingClientRect();
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(bounds.width));
@@ -255,6 +423,7 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
         context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
       });
     });
+    drawOperationEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
   }
 
@@ -304,6 +473,20 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   return {
     update(nextModel) {
       model = nextModel;
+    },
+    playEffect(type, panelIndices) {
+      const uniquePanels = [...new Set(panelIndices)]
+        .filter(panelIndex => Number.isInteger(panelIndex) && panelIndex >= 0 && panelIndex < 6);
+      const expectedPanels = type === 'swap' ? 2 : 1;
+      if (!(type in EFFECT_DURATIONS) || uniquePanels.length !== expectedPanels) return false;
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      operationEffect = {
+        type,
+        panelIndices: uniquePanels,
+        startedAt: performance.now(),
+        duration: reducedMotion ? 260 : EFFECT_DURATIONS[type]
+      };
+      return true;
     },
     resetView() {
       rotationX = -0.35;

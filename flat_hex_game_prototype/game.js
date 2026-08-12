@@ -150,6 +150,42 @@ function pointIsOnPanel(point, panelIndex) {
   return coordinates.first >= -epsilon && coordinates.second >= -epsilon && center >= -epsilon;
 }
 
+export function panelIndexForPoint(point) {
+  for (let panelIndex = 0; panelIndex < 6; panelIndex += 1) {
+    if (pointIsOnPanel(point, panelIndex)) return panelIndex;
+  }
+  return null;
+}
+
+function piecePanelIndex(piece) {
+  return validatePanelIndex(piece.panelIndex) && pointIsOnPanel(piece.position, piece.panelIndex)
+    ? piece.panelIndex
+    : panelIndexForPoint(piece.position);
+}
+
+function pointFromPanelCoordinates(coordinates, panelIndex, mirrored = false) {
+  const firstCorner = CORNERS[panelIndex];
+  const secondCorner = CORNERS[(panelIndex + 1) % 6];
+  const first = mirrored ? coordinates.second : coordinates.first;
+  const second = mirrored ? coordinates.first : coordinates.second;
+  return {
+    q: Math.round(first * firstCorner.q + second * secondCorner.q),
+    r: Math.round(first * firstCorner.r + second * secondCorner.r)
+  };
+}
+
+function movePanelPieces(pieces, fromIndex, toIndex, mirrored = false) {
+  return pieces.map(item => {
+    const owner = piecePanelIndex(item);
+    if (owner !== fromIndex) return { ...item, position: { ...item.position }, panelIndex: owner };
+    return {
+      ...item,
+      position: pointFromPanelCoordinates(panelCoordinates(item.position, fromIndex), toIndex, mirrored),
+      panelIndex: toIndex
+    };
+  });
+}
+
 function rotatePointOnPanel(point, panelIndex, clockwise = true) {
   const firstCorner = CORNERS[panelIndex];
   const secondCorner = CORNERS[(panelIndex + 1) % 6];
@@ -168,11 +204,11 @@ function rotatePointOnPanel(point, panelIndex, clockwise = true) {
 
 function rotatePiecesOnPanel(pieces, panelIndex, clockwise = true) {
   const movingIds = new Set(
-    pieces.filter(item => pointIsOnPanel(item.position, panelIndex)).map(item => item.id)
+    pieces.filter(item => piecePanelIndex(item) === panelIndex).map(item => item.id)
   );
   const rotated = pieces.map(item => movingIds.has(item.id)
-    ? { ...item, position: rotatePointOnPanel(item.position, panelIndex, clockwise) }
-    : { ...item, position: { ...item.position } });
+    ? { ...item, position: rotatePointOnPanel(item.position, panelIndex, clockwise), panelIndex }
+    : { ...item, position: { ...item.position }, panelIndex: piecePanelIndex(item) });
   return { pieces: rotated };
 }
 
@@ -180,7 +216,8 @@ export function flipBoardPanel(
   faceLabels,
   side,
   panelIndex,
-  panelRotations = BOARD_PANEL_ROTATIONS
+  panelRotations = BOARD_PANEL_ROTATIONS,
+  boardStates = null
 ) {
   if (!['front', 'back'].includes(side) || !validatePanelIndex(panelIndex)) {
     return { error: '板块位置无效' };
@@ -195,7 +232,33 @@ export function flipBoardPanel(
   const oppositeIndex = 5 - panelIndex;
   next[side][panelIndex] = oppositePanelFace(next[side][panelIndex]);
   next[oppositeSide][oppositeIndex] = oppositePanelFace(next[oppositeSide][oppositeIndex]);
-  return { faceLabels: next, panelRotations: nextRotations };
+  let nextBoardStates = null;
+  if (boardStates) {
+    if (!Array.isArray(boardStates.front) || !Array.isArray(boardStates.back)) {
+      return { error: '双面棋子数据无效' };
+    }
+    const cloned = cloneBoardStates(boardStates);
+    const currentOutside = cloned[side].filter(item => piecePanelIndex(item) !== panelIndex);
+    const oppositeOutside = cloned[oppositeSide].filter(item => piecePanelIndex(item) !== oppositeIndex);
+    const currentPanel = movePanelPieces(
+      cloned[side].filter(item => piecePanelIndex(item) === panelIndex),
+      panelIndex,
+      oppositeIndex,
+      true
+    );
+    const oppositePanel = movePanelPieces(
+      cloned[oppositeSide].filter(item => piecePanelIndex(item) === oppositeIndex),
+      oppositeIndex,
+      panelIndex,
+      true
+    );
+    nextBoardStates = {
+      ...cloned,
+      [side]: [...currentOutside, ...oppositePanel],
+      [oppositeSide]: [...oppositeOutside, ...currentPanel]
+    };
+  }
+  return { faceLabels: next, panelRotations: nextRotations, boardStates: nextBoardStates };
 }
 
 export function swapBoardPanels(
@@ -203,7 +266,8 @@ export function swapBoardPanels(
   side,
   firstIndex,
   secondIndex,
-  panelRotations = BOARD_PANEL_ROTATIONS
+  panelRotations = BOARD_PANEL_ROTATIONS,
+  boardStates = null
 ) {
   if (!['front', 'back'].includes(side) ||
       !validatePanelIndex(firstIndex) || !validatePanelIndex(secondIndex) ||
@@ -227,7 +291,29 @@ export function swapBoardPanels(
     [nextRotations[side][secondIndex], nextRotations[side][firstIndex]];
   [nextRotations[oppositeSide][firstOppositeIndex], nextRotations[oppositeSide][secondOppositeIndex]] =
     [nextRotations[oppositeSide][secondOppositeIndex], nextRotations[oppositeSide][firstOppositeIndex]];
-  return { faceLabels: next, panelRotations: nextRotations };
+  let nextBoardStates = null;
+  if (boardStates) {
+    if (!Array.isArray(boardStates.front) || !Array.isArray(boardStates.back)) {
+      return { error: '双面棋子数据无效' };
+    }
+    nextBoardStates = cloneBoardStates(boardStates);
+    for (const [face, first, second] of [
+      [side, firstIndex, secondIndex],
+      [oppositeSide, firstOppositeIndex, secondOppositeIndex]
+    ]) {
+      nextBoardStates[face] = nextBoardStates[face].map(item => {
+        const owner = piecePanelIndex(item);
+        if (owner === first) {
+          return movePanelPieces([item], first, second)[0];
+        }
+        if (owner === second) {
+          return movePanelPieces([item], second, first)[0];
+        }
+        return { ...item, position: { ...item.position }, panelIndex: owner };
+      });
+    }
+  }
+  return { faceLabels: next, panelRotations: nextRotations, boardStates: nextBoardStates };
 }
 
 export function rotateBoardPanel(
@@ -271,7 +357,8 @@ export function rotateBoardPanel(
 }
 
 function piece(id, side, type, q, r) {
-  return { id, side, type, position: { q, r } };
+  const position = { q, r };
+  return { id, side, type, position, panelIndex: panelIndexForPoint(position) };
 }
 
 function layoutThreeFrontPieces() {
@@ -295,18 +382,18 @@ function layoutThreeFrontPieces() {
 function layoutThreeBackPieces() {
   return [
     // 实拍图二：翻面后 1 面仍在上，2/3 面位于右侧。
-    piece('wK', 'white', 'king', 0, 2),
-    piece('wQ', 'white', 'queen', 0, 1),
-    piece('wB1', 'white', 'bishop', -2, -1),
-    piece('wB2', 'white', 'bishop', 1, 0),
-    piece('wP1', 'white', 'pawn', -1, -2),
-    piece('wP2', 'white', 'pawn', -2, 1),
-    piece('bK', 'black', 'king', -1, -1),
-    piece('bQ', 'black', 'queen', 2, 0),
-    piece('bB1', 'black', 'bishop', -1, 0),
-    piece('bB2', 'black', 'bishop', -2, -1),
-    piece('bP1', 'black', 'pawn', -3, 0),
-    piece('bP2', 'black', 'pawn', 1, 1)
+    piece('back-wK', 'white', 'king', 0, 2),
+    piece('back-wQ', 'white', 'queen', 0, 1),
+    piece('back-wB1', 'white', 'bishop', -2, -1),
+    piece('back-wB2', 'white', 'bishop', 1, 0),
+    piece('back-wP1', 'white', 'pawn', -1, -2),
+    piece('back-wP2', 'white', 'pawn', -2, 1),
+    piece('back-bK', 'black', 'king', -1, -1),
+    piece('back-bQ', 'black', 'queen', 2, 0),
+    piece('back-bB1', 'black', 'bishop', -1, 0),
+    piece('back-bB2', 'black', 'bishop', -2, -1),
+    piece('back-bP1', 'black', 'pawn', -3, 0),
+    piece('back-bP2', 'black', 'pawn', 1, 1)
   ];
 }
 
@@ -378,7 +465,10 @@ function normalizeCustomFace(face, pieces) {
       id: `custom-${face}-${item.side}-${item.type}-${index + 1}`,
       side: item.side,
       type: item.type,
-      position: { q: position.q, r: position.r }
+      position: { q: position.q, r: position.r },
+      panelIndex: validatePanelIndex(item.panelIndex) && pointIsOnPanel(position, item.panelIndex)
+        ? item.panelIndex
+        : panelIndexForPoint(position)
     });
   }
 
@@ -628,7 +718,10 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         type: promotedType,
         position: ['move', 'occupy', 'swap'].includes(positionEffect)
           ? { ...target }
-          : { ...item.position }
+          : { ...item.position },
+        panelIndex: ['move', 'occupy', 'swap'].includes(positionEffect)
+          ? panelIndexForPoint(target)
+          : piecePanelIndex(item)
       }];
     }
     if (item.id !== move.captureId) return [item];
@@ -638,7 +731,10 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
       type: capturedType,
       position: positionEffect === 'swap'
         ? { ...movingPiece.position }
-        : { ...item.position }
+        : { ...item.position },
+      panelIndex: positionEffect === 'swap'
+        ? panelIndexForPoint(movingPiece.position)
+        : piecePanelIndex(item)
     }];
   });
   const captureResult = captured

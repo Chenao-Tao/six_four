@@ -319,18 +319,18 @@ test('布局三棋子身份与交点严格匹配参考图', () => {
     'wQ:white:queen@-4,1'
   ].sort());
   assert.deepEqual(compactPieces(state.boardStates.back), [
-    'bB1:black:bishop@-1,0',
-    'bB2:black:bishop@-2,-1',
-    'bK:black:king@-1,-1',
-    'bP1:black:pawn@-3,0',
-    'bP2:black:pawn@1,1',
-    'bQ:black:queen@2,0',
-    'wB1:white:bishop@-2,-1',
-    'wB2:white:bishop@1,0',
-    'wK:white:king@0,2',
-    'wP1:white:pawn@-1,-2',
-    'wP2:white:pawn@-2,1',
-    'wQ:white:queen@0,1'
+    'back-bB1:black:bishop@-1,0',
+    'back-bB2:black:bishop@-2,-1',
+    'back-bK:black:king@-1,-1',
+    'back-bP1:black:pawn@-3,0',
+    'back-bP2:black:pawn@1,1',
+    'back-bQ:black:queen@2,0',
+    'back-wB1:white:bishop@-2,-1',
+    'back-wB2:white:bishop@1,0',
+    'back-wK:white:king@0,2',
+    'back-wP1:white:pawn@-1,-2',
+    'back-wP2:white:pawn@-2,1',
+    'back-wQ:white:queen@0,1'
   ].sort());
 });
 
@@ -515,13 +515,13 @@ test('旋转三角板时板内棋子在两面按镜像方向同步旋转', () =>
   const initial = createInitialState();
   const boardStates = {
     front: [
-      piece('front-center', 'white', 'pawn', 0, 0),
-      piece('front-inner', 'black', 'bishop', 1, 1),
+      { ...piece('front-center', 'white', 'pawn', 0, 0), panelIndex: 0 },
+      { ...piece('front-inner', 'black', 'bishop', 1, 1), panelIndex: 0 },
       piece('front-outside', 'white', 'queen', -1, 0)
     ],
     back: [
-      piece('back-center', 'white', 'pawn', 0, 0),
-      piece('back-inner', 'black', 'bishop', 2, -1),
+      { ...piece('back-center', 'white', 'pawn', 0, 0), panelIndex: 5 },
+      { ...piece('back-inner', 'black', 'bishop', 2, -1), panelIndex: 5 },
       piece('back-outside', 'white', 'queen', -1, 0)
     ]
   };
@@ -568,4 +568,90 @@ test('板块三条边上的棋子旋转后仍保持一一对应且不重叠', ()
   assert.deepEqual(result.boardStates.front.find(item => item.id === 'first-corner').position, { q: 0, r: 4 });
   assert.deepEqual(result.boardStates.front.find(item => item.id === 'second-corner').position, { q: 0, r: 0 });
   assert.equal(new Set(result.boardStates.front.map(item => keyOf(item.position))).size, 3);
+});
+
+test('旋转只携带归属于选中板的棋子且棋子身份集合保持不变', () => {
+  const initial = createInitialState();
+  const boardStates = {
+    front: [
+      { ...piece('selected', 'white', 'pawn', 1, 1), panelIndex: 0 },
+      { ...piece('shared-but-next', 'black', 'bishop', 2, 0), panelIndex: 5 },
+      { ...piece('outside', 'white', 'queen', -1, 0), panelIndex: 2 }
+    ],
+    back: []
+  };
+
+  const result = rotateBoardPanel(
+    initial.boardFaceLabels,
+    initial.boardPanelRotations,
+    'front',
+    0,
+    boardStates
+  );
+
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'selected').position, { q: 2, r: 1 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'shared-but-next').position, { q: 2, r: 0 });
+  assert.deepEqual(
+    result.boardStates.front.map(item => [item.id, item.side, item.type]).sort(),
+    boardStates.front.map(item => [item.id, item.side, item.type]).sort()
+  );
+});
+
+test('翻转实体板会交换该板正反面的棋子并保留各自身份', () => {
+  const initial = createInitialState();
+  const boardStates = {
+    front: [{ ...piece('front-pawn', 'white', 'pawn', 1, 1), panelIndex: 0 }],
+    back: [{ ...piece('back-bishop', 'black', 'bishop', 1, -1), panelIndex: 5 }]
+  };
+
+  const result = flipBoardPanel(
+    initial.boardFaceLabels,
+    'front',
+    0,
+    initial.boardPanelRotations,
+    boardStates
+  );
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.boardStates.front.map(item => [item.id, item.type, item.panelIndex]), [
+    ['back-bishop', 'bishop', 0]
+  ]);
+  assert.deepEqual(result.boardStates.front[0].position, { q: 0, r: 1 });
+  assert.deepEqual(result.boardStates.back.map(item => [item.id, item.type, item.panelIndex]), [
+    ['front-pawn', 'pawn', 5]
+  ]);
+  assert.deepEqual(result.boardStates.back[0].position, { q: 2, r: -1 });
+  assert.deepEqual(
+    [...result.boardStates.front, ...result.boardStates.back]
+      .map(item => [item.id, item.side, item.type]).sort(),
+    [...boardStates.front, ...boardStates.back]
+      .map(item => [item.id, item.side, item.type]).sort()
+  );
+});
+
+test('交换两块实体板时板上的棋子随板换位', () => {
+  const initial = createInitialState();
+  const boardStates = {
+    front: [
+      { ...piece('first', 'white', 'pawn', 1, 1), panelIndex: 0 },
+      { ...piece('second', 'black', 'bishop', -1, 2), panelIndex: 1 }
+    ],
+    back: []
+  };
+
+  const result = swapBoardPanels(
+    initial.boardFaceLabels,
+    'front',
+    0,
+    1,
+    initial.boardPanelRotations,
+    boardStates
+  );
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.boardStates.front.find(item => item.id === 'first').panelIndex, 1);
+  assert.equal(result.boardStates.front.find(item => item.id === 'second').panelIndex, 0);
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'first').position, { q: -1, r: 2 });
+  assert.deepEqual(result.boardStates.front.find(item => item.id === 'second').position, { q: 1, r: 1 });
+  assert.deepEqual(result.boardStates.front.map(item => item.id).sort(), ['first', 'second']);
 });

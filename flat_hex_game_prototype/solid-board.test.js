@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
-import { findPanelAtPoint, mapPiecesToPanels } from './solid-board.js';
+import { findPanelAtPoint, mapPiecesToPanels, solidEffectFrame } from './solid-board.js';
 
 test('平面棋子映射到六块立体板时不丢失、不复制且不修改原数据', () => {
   const pieces = [
@@ -58,4 +58,14 @@ test('立体面点击按绘制层级选中最靠近观察者的三角板', () =>
   assert.equal(findPanelAtPoint(faces, { x: 20, y: 20 }), 4);
   assert.equal(findPanelAtPoint(faces, { x: 5, y: 5 }), 1);
   assert.equal(findPanelAtPoint(faces, { x: 120, y: 120 }), null);
+});
+
+test('立体操作特效提供稳定进度并在时长结束后清除', () => {
+  const effect = { startedAt: 1000, duration: 800 };
+
+  assert.deepEqual(solidEffectFrame(null, 1200), null);
+  assert.equal(solidEffectFrame(effect, 1000).progress, 0);
+  assert.equal(solidEffectFrame(effect, 1400).progress, 0.5);
+  assert.equal(solidEffectFrame(effect, 1400).pulse, 1);
+  assert.equal(solidEffectFrame(effect, 1800), null);
 });

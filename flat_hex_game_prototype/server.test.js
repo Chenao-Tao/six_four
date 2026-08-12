@@ -60,6 +60,8 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
   const savedLayout = library.layouts.find(item => item.name === '测试布局');
   assert.ok(savedLayout);
   assert.deepEqual(savedLayout.boardStates.front[0].position, { q: 0, r: 0 });
+  assert.equal(savedLayout.boardStates.front[0].panelIndex, 0);
+  assert.equal(savedLayout.boardStates.back[0].panelIndex, 0);
 });
 
 test('未完成草稿可以落盘但不能启用，删除活动布局后回到默认布局', async t => {

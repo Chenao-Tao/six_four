@@ -18,12 +18,13 @@ import {
   isOnBoard,
   keyOf,
   legalMoves,
+  panelIndexForPoint,
   promotionTypeForMove,
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=solid-board-editing-1';
-import { createSolidBoardViewer } from './solid-board.js?v=solid-board-editing-1';
+} from './game.js?v=panel-piece-ownership-1';
+import { createSolidBoardViewer } from './solid-board.js?v=solid-operation-effects-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -392,6 +393,7 @@ function selectSolidPanel(panelIndex) {
   }
   if (solidSwapPending && solidSelectedPanel !== panelIndex) {
     const target = solidEditableData();
+    const firstPanelIndex = solidSelectedPanel;
     const firstLabel = target.faceLabels[target.side][solidSelectedPanel];
     const secondLabel = target.faceLabels[target.side][panelIndex];
     const result = swapBoardPanels(
@@ -399,7 +401,8 @@ function selectSolidPanel(panelIndex) {
       target.side,
       solidSelectedPanel,
       panelIndex,
-      target.panelRotations
+      target.panelRotations,
+      target.boardStates
     );
     if (result.error) {
       refreshSolidBoard(result.error);
@@ -409,6 +412,7 @@ function selectSolidPanel(panelIndex) {
     solidSelectedPanel = panelIndex;
     solidSwapPending = false;
     refreshSolidBoard(`已交换 ${firstLabel} 与 ${secondLabel}；平面布局已同步。`);
+    solidBoardViewer.playEffect('swap', [firstPanelIndex, panelIndex]);
     return;
   }
   solidSelectedPanel = panelIndex;
@@ -434,6 +438,7 @@ function rotateSolidPanel() {
   applySolidBoardResult(target, result);
   const label = result.faceLabels[target.side][solidSelectedPanel];
   refreshSolidBoard(`${label} 已旋转120°，板上已有棋子同步旋转。`);
+  solidBoardViewer.playEffect('rotate', [solidSelectedPanel]);
 }
 
 function flipSolidPanel() {
@@ -444,7 +449,8 @@ function flipSolidPanel() {
     target.faceLabels,
     target.side,
     solidSelectedPanel,
-    target.panelRotations
+    target.panelRotations,
+    target.boardStates
   );
   if (result.error) {
     refreshSolidBoard(result.error);
@@ -453,6 +459,7 @@ function flipSolidPanel() {
   applySolidBoardResult(target, result);
   const nextLabel = result.faceLabels[target.side][solidSelectedPanel];
   refreshSolidBoard(`${previousLabel} 已翻转为 ${nextLabel}；平面布局已同步。`);
+  solidBoardViewer.playEffect('flip', [solidSelectedPanel]);
 }
 
 function beginSolidPanelSwap() {
@@ -909,7 +916,8 @@ function setEditorPiece(side, type) {
     id: `draft-${draftPieceSequence}`,
     side,
     type,
-    position: { ...editorPoint }
+    position: { ...editorPoint },
+    panelIndex: panelIndexForPoint(editorPoint)
   });
   customEditor.boardStates[customEditor.side] = remaining;
   closePieceEditor();
@@ -1166,7 +1174,8 @@ function selectEditorPanel(panelIndex) {
       customEditor.side,
       customEditor.selectedPanel,
       panelIndex,
-      customEditor.panelRotations
+      customEditor.panelRotations,
+      customEditor.boardStates
     );
     if (result.error) {
       boardHelp.textContent = result.error;
@@ -1174,6 +1183,7 @@ function selectEditorPanel(panelIndex) {
     }
     customEditor.faceLabels = result.faceLabels;
     customEditor.panelRotations = result.panelRotations;
+    customEditor.boardStates = result.boardStates;
     customEditor.selectedPanel = panelIndex;
     customEditor.swapPending = false;
     boardHelp.textContent = `已交换 ${firstLabel} 与 ${secondLabel}，另一面已同步更新。`;
@@ -1195,7 +1205,8 @@ function flipSelectedPanel() {
     customEditor.faceLabels,
     customEditor.side,
     panelIndex,
-    customEditor.panelRotations
+    customEditor.panelRotations,
+    customEditor.boardStates
   );
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -1203,6 +1214,7 @@ function flipSelectedPanel() {
   }
   customEditor.faceLabels = result.faceLabels;
   customEditor.panelRotations = result.panelRotations;
+  customEditor.boardStates = result.boardStates;
   const nextLabel = customEditor.faceLabels[customEditor.side][panelIndex];
   boardHelp.textContent = `${previousLabel} 板块已翻转为 ${nextLabel}，背面对应板块同步翻转。`;
   render();
