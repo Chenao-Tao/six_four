@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>闭合六面体 · 高级能量翻面</title>
+
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background: #10141a;
+      color: #edf3f9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #scene {
+      position: absolute;
+      inset: 0;
+    }
+
+    .panel {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      z-index: 10;
+      width: min(390px, calc(100vw - 32px));
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      background: rgba(14,18,24,.84);
+      backdrop-filter: blur(10px);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    p {
+      margin: 0;
+      color: #b6c1ce;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    button {
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 9px;
+      padding: 8px 11px;
+      color: #eef5fb;
+      background: rgba(255,255,255,.07);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    button:hover { background: rgba(255,255,255,.12); }
+
+    .panel-btn.active {
+      border-color: rgba(255,184,79,.9);
+      background: rgba(255,184,79,.16);
+    }
+
+    .status {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,.1);
+      color: #9eacbb;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .tip {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      background: rgba(14,18,24,.78);
+      color: #b7c2cf;
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 6px;
+      border-radius: 50%;
+      background: #ff6a3b;
+      vertical-align: -1px;
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+<div id="app">
+  <div id="scene"></div>
+
+  <div class="panel">
+    <h1>闭合六面体 · 高级能量翻面</h1>
+    <p>
+      六个实体等边三角面组成闭合三角双锥。每块板正反两面都有相同的
+      15 点三角棋盘，正面统一为黑色，反面统一为白色。点击某一块板时，它不会像门一样打开，而是在原来的面位置上
+      直接把正反两面交换。翻面时会触发能量扫描、双层边缘辉光、三角冲击波与粒子碎光，六面体仍保持闭合。
+    </p>
+
+    <div class="controls" id="panelButtons"></div>
+
+    <div class="controls">
+      <button id="resetBtn">全部恢复正面</button>
+      <button id="flipAllBtn">全部交换正反面</button>
+    </div>
+
+    <div class="status" id="status">
+      当前：6 个三角实体面闭合，等待点击。
+    </div>
+  </div>
+
+  <div class="tip">
+    <span class="dot"></span>每块板：黑色正面 + 白色反面 · 两面均为 15 点<br>
+    左键点击板：原位交换正反面<br>
+    拖动：旋转视角　滚轮：缩放
+  </div>
+</div>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  const host = document.getElementById('scene');
+  const statusEl = document.getElementById('status');
+  const buttonsEl = document.getElementById('panelButtons');
+
+  // ============================================================
+  // 场景
+  // ============================================================
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x10141a);
+
+  const camera = new THREE.PerspectiveCamera(
+    45,
+    host.clientWidth / host.clientHeight,
+    0.1,
+    100
+  );
+  camera.position.set(7.0, -8.0, 5.2);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(host.clientWidth, host.clientHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  host.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.target.set(0, 0, 0);
+  controls.minDistance = 5;
+  controls.maxDistance = 18;
+
+  // ============================================================
+  // 灯光
+  // ============================================================
+
+  scene.add(new THREE.HemisphereLight(0xdbe9ff, 0x1b2027, 1.55));
+
+  const key = new THREE.DirectionalLight(0xffffff, 2.0);
+  key.position.set(5, -4, 8);
+  key.castShadow = true;
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(0x93bfff, 0.9);
+  fill.position.set(-4, 4, 2);
+  scene.add(fill);
+
+  // ============================================================
+  // 地面
+  // ============================================================
+
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(10, 96),
+    new THREE.MeshStandardMaterial({
+      color: 0x171c23,
+      roughness: 0.95,
+      metalness: 0
+    })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -4.1;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const helper = new THREE.GridHelper(18, 18, 0x34404d, 0x252d35);
+  helper.position.y = -4.08;
+  scene.add(helper);
+
+  // ============================================================
+  // 材质
+  // ============================================================
+
+  // 正面统一黑色
+  const MAT_FACE_FRONT = new THREE.MeshStandardMaterial({
+    color: 0x050505,
+    roughness: 0.42,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+
+  // 反面统一白色
+  const MAT_FACE_BACK = new THREE.MeshStandardMaterial({
+    color: 0xf5f5f5,
+    roughness: 0.42,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+
+  const MAT_SIDE = new THREE.MeshStandardMaterial({
+    color: 0x343434,
+    roughness: 0.45,
+    metalness: 0.08,
+    side: THREE.DoubleSide
+  });
+
+  const MAT_POINT = new THREE.MeshStandardMaterial({
+    color: 0xff6a3b,
+    roughness: 0.28,
+    metalness: 0.04
+  });
+
+  const MAT_GRID = new THREE.LineBasicMaterial({
+    color: 0x0d141b
+  });
+
+  const MAT_EDGE = new THREE.LineBasicMaterial({
+    color: 0x05080c
+  });
+
+  // ============================================================
+  // 高级翻面特效
+  // ============================================================
+
+  const FX_CYAN = new THREE.Color(0x58d7ff);
+  const FX_BLUE = new THREE.Color(0x5f7cff);
+  const FX_WHITE = new THREE.Color(0xffffff);
+
+  function makeEnergyShader(localA, localB, localC) {
+    const geo = new THREE.BufferGeometry();
+
+    geo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([
+        localA.x, localA.y, 0,
+        localB.x, localB.y, 0,
+        localC.x, localC.y, 0
+      ], 3)
+    );
+
+    // 用重心坐标计算三角形边缘辉光
+    geo.setAttribute(
+      'barycentric',
+      new THREE.Float32BufferAttribute([
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, 1
+      ], 3)
+    );
+
+    geo.setIndex([0, 1, 2]);
+
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uProgress: { value: 0 },
+        uOpacity: { value: 0 },
+        uColorA: { value: FX_CYAN.clone() },
+        uColorB: { value: FX_BLUE.clone() }
+      },
+      vertexShader: `
+        attribute vec3 barycentric;
+
+        varying vec3 vBary;
+        varying vec3 vPos;
+
+        void main() {
+          vBary = barycentric;
+          vPos = position;
+
+          gl_Position =
+            projectionMatrix *
+            modelViewMatrix *
+            vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uProgress;
+        uniform float uOpacity;
+        uniform vec3 uColorA;
+        uniform vec3 uColorB;
+
+        varying vec3 vBary;
+        varying vec3 vPos;
+
+        float edgeFactor() {
+          vec3 d = fwidth(vBary);
+          vec3 a3 = smoothstep(vec3(0.0), d * 2.0, vBary);
+          return 1.0 - min(min(a3.x, a3.y), a3.z);
+        }
+
+        void main() {
+          float p = uProgress;
+
+          // 三角边缘能量
+          float edge = pow(edgeFactor(), 1.6);
+
+          // 扫描带：从一侧扫到另一侧
+          float sweepCenter = mix(-2.6, 2.6, p);
+          float sweep = exp(-pow((vPos.x - sweepCenter) * 3.2, 2.0));
+
+          // 双层扫描条纹
+          float stripe1 = 0.5 + 0.5 * sin(vPos.y * 18.0 - uTime * 7.0);
+          float stripe2 = 0.5 + 0.5 * sin(vPos.x * 24.0 + vPos.y * 8.0 + uTime * 10.0);
+          float scanTexture = mix(stripe1, stripe2, 0.45);
+
+          // 翻面中点的核心脉冲
+          float centerPulse = exp(-pow((p - 0.5) * 5.6, 2.0));
+
+          // 从中心向外扩散的能量波
+          float radial = length(vPos.xy);
+          float ringRadius = mix(0.15, 2.2, p);
+          float ring = exp(-pow((radial - ringRadius) * 6.0, 2.0));
+
+          // 两种冷色渐变
+          vec3 col = mix(uColorA, uColorB, 0.5 + 0.5 * sin(uTime * 2.0 + vPos.y));
+
+          float alpha =
+              edge * 1.8 +
+              sweep * (0.65 + scanTexture * 0.35) +
+              ring * 0.9 +
+              centerPulse * 0.28 * scanTexture;
+
+          alpha *= uOpacity;
+
+          gl_FragColor = vec4(col * alpha, alpha);
+        }
+      `
+    });
+
+    return { geo, mat };
+  }
+
+  function makeGlowLineMaterial() {
+    return new THREE.LineBasicMaterial({
+      color: 0x6fe3ff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+  }
+
+  function makeParticleMaterial() {
+    return new THREE.PointsMaterial({
+      color: 0xbcefff,
+      size: 0.055,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true
+    });
+  }
+
+  // ============================================================
+  // 六面体几何
+  // ============================================================
+
+  const SIDE = 4.0;
+  const CENTER_R = SIDE / Math.sqrt(3);
+  const PYRAMID_H = SIDE * Math.sqrt(2 / 3);
+
+  const A = new THREE.Vector3(CENTER_R, 0, 0);
+  const B = new THREE.Vector3(-CENTER_R / 2, SIDE / 2, 0);
+  const C = new THREE.Vector3(-CENTER_R / 2, -SIDE / 2, 0);
+  const TOP = new THREE.Vector3(0, 0, PYRAMID_H);
+  const BOTTOM = new THREE.Vector3(0, 0, -PYRAMID_H);
+
+  const FACE_LIST = [
+    [TOP, A, B],
+    [TOP, B, C],
+    [TOP, C, A],
+    [BOTTOM, B, A],
+    [BOTTOM, C, B],
+    [BOTTOM, A, C]
+  ];
+
+  // ============================================================
+  // 工具函数
+  // ============================================================
+
+  function ensureOutward(a, b, c) {
+    let A0 = a.clone();
+    let B0 = b.clone();
+    let C0 = c.clone();
+
+    const normal = new THREE.Vector3()
+      .subVectors(B0, A0)
+      .cross(new THREE.Vector3().subVectors(C0, A0));
+
+    const center = new THREE.Vector3()
+      .addVectors(A0, B0)
+      .add(C0)
+      .multiplyScalar(1 / 3);
+
+    if (normal.dot(center) < 0) {
+      const t = B0;
+      B0 = C0;
+      C0 = t;
+    }
+
+    return [A0, B0, C0];
+  }
+
+  function triangleBasis(A0, B0, C0) {
+    const center = new THREE.Vector3()
+      .addVectors(A0, B0)
+      .add(C0)
+      .multiplyScalar(1 / 3);
+
+    const xAxis = new THREE.Vector3().subVectors(B0, A0).normalize();
+    const zAxis = new THREE.Vector3()
+      .subVectors(B0, A0)
+      .cross(new THREE.Vector3().subVectors(C0, A0))
+      .normalize();
+
+    const yAxis = new THREE.Vector3()
+      .crossVectors(zAxis, xAxis)
+      .normalize();
+
+    const matrix = new THREE.Matrix4();
+    matrix.makeBasis(xAxis, yAxis, zAxis);
+    matrix.setPosition(center);
+
+    return { center, xAxis, yAxis, zAxis, matrix };
+  }
+
+  function worldToLocalPoint(p, basisMatrix) {
+    const inv = basisMatrix.clone().invert();
+    return p.clone().applyMatrix4(inv);
+  }
+
+  function addSegment(positions, p1, p2) {
+    positions.push(
+      p1.x, p1.y, p1.z,
+      p2.x, p2.y, p2.z
+    );
+  }
+
+  function baryPoint(A0, B0, C0, i, j, k, n) {
+    return new THREE.Vector3()
+      .addScaledVector(A0, i / n)
+      .addScaledVector(B0, j / n)
+      .addScaledVector(C0, k / n);
+  }
+
+  // ============================================================
+  // 真正的“实体三角板”
+  // 不是只有线框，而是正面 + 反面 + 三个侧壁
+  // ============================================================
+
+  function createSolidTriangle(localA, localB, localC, thickness, panelId) {
+    const half = thickness / 2;
+
+    const frontA = localA.clone(); frontA.z = half;
+    const frontB = localB.clone(); frontB.z = half;
+    const frontC = localC.clone(); frontC.z = half;
+
+    const backA = localA.clone(); backA.z = -half;
+    const backB = localB.clone(); backB.z = -half;
+    const backC = localC.clone(); backC.z = -half;
+
+    const group = new THREE.Group();
+
+    // 正面
+    {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([
+        frontA.x, frontA.y, frontA.z,
+        frontB.x, frontB.y, frontB.z,
+        frontC.x, frontC.y, frontC.z
+      ], 3));
+      geo.setIndex([0, 1, 2]);
+      geo.computeVertexNormals();
+
+      const mesh = new THREE.Mesh(geo, MAT_FACE_FRONT);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.panelId = panelId;
+      group.add(mesh);
+    }
+
+    // 反面
+    {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([
+        backA.x, backA.y, backA.z,
+        backC.x, backC.y, backC.z,
+        backB.x, backB.y, backB.z
+      ], 3));
+      geo.setIndex([0, 1, 2]);
+      geo.computeVertexNormals();
+
+      const mesh = new THREE.Mesh(geo, MAT_FACE_BACK);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.panelId = panelId;
+      group.add(mesh);
+    }
+
+    // 三个侧壁
+    const edgePairs = [
+      [frontA, frontB, backA, backB],
+      [frontB, frontC, backB, backC],
+      [frontC, frontA, backC, backA]
+    ];
+
+    edgePairs.forEach(([f1, f2, b1, b2]) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([
+        f1.x, f1.y, f1.z,
+        f2.x, f2.y, f2.z,
+        b2.x, b2.y, b2.z,
+        b1.x, b1.y, b1.z
+      ], 3));
+      geo.setIndex([0, 1, 2, 0, 2, 3]);
+      geo.computeVertexNormals();
+
+      const mesh = new THREE.Mesh(geo, MAT_SIDE);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.panelId = panelId;
+      group.add(mesh);
+    });
+
+    return group;
+  }
+
+  // ============================================================
+  // 双面 15 点 + 三角棋盘
+  // ============================================================
+
+  function createBoardDetail(localA, localB, localC, thickness, panelId) {
+    const group = new THREE.Group();
+    const divisions = 4;
+    const detailOffset = thickness / 2 + 0.012;
+    const pointOffset = thickness / 2 + 0.055;
+
+    for (const sign of [1, -1]) {
+      // 棋盘线
+      const positions = [];
+
+      for (let i = 1; i < divisions; i++) {
+        const t = i / divisions;
+
+        const p1 = localA.clone().lerp(localC, t);
+        const p2 = localB.clone().lerp(localC, t);
+        p1.z = sign * detailOffset;
+        p2.z = sign * detailOffset;
+        addSegment(positions, p1, p2);
+
+        const p3 = localB.clone().lerp(localA, t);
+        const p4 = localC.clone().lerp(localA, t);
+        p3.z = sign * detailOffset;
+        p4.z = sign * detailOffset;
+        addSegment(positions, p3, p4);
+
+        const p5 = localC.clone().lerp(localB, t);
+        const p6 = localA.clone().lerp(localB, t);
+        p5.z = sign * detailOffset;
+        p6.z = sign * detailOffset;
+        addSegment(positions, p5, p6);
+      }
+
+      const gridGeo = new THREE.BufferGeometry();
+      gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const grid = new THREE.LineSegments(gridGeo, MAT_GRID);
+      grid.userData.panelId = panelId;
+      group.add(grid);
+
+      // 外边框
+      const edgePos = [];
+      const aa = localA.clone(); aa.z = sign * detailOffset;
+      const bb = localB.clone(); bb.z = sign * detailOffset;
+      const cc = localC.clone(); cc.z = sign * detailOffset;
+      addSegment(edgePos, aa, bb);
+      addSegment(edgePos, bb, cc);
+      addSegment(edgePos, cc, aa);
+
+      const edgeGeo = new THREE.BufferGeometry();
+      edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
+      const edge = new THREE.LineSegments(edgeGeo, MAT_EDGE);
+      edge.userData.panelId = panelId;
+      group.add(edge);
+
+      // 15 个点
+      const pointGeometry = new THREE.SphereGeometry(0.062, 14, 10);
+
+      for (let i = 0; i <= divisions; i++) {
+        for (let j = 0; j <= divisions - i; j++) {
+          const k = divisions - i - j;
+
+          const p = baryPoint(localA, localB, localC, i, j, k, divisions);
+          p.z = sign * pointOffset;
+
+          const dot = new THREE.Mesh(pointGeometry, MAT_POINT);
+          dot.position.copy(p);
+          dot.userData.panelId = panelId;
+          dot.castShadow = true;
+          group.add(dot);
+        }
+      }
+    }
+
+    return group;
+  }
+
+
+  // ============================================================
+  // 高级翻面特效对象
+  //
+  // 组成：
+  // 1. Shader 能量扫描面
+  // 2. 双层三角辉光轮廓
+  // 3. 三角冲击波
+  // 4. 沿边缘喷出的粒子碎光
+  // ============================================================
+
+  function createAdvancedFlipFx(localA, localB, localC) {
+    const fxRoot = new THREE.Group();
+
+    // ----------------------------------------------------------
+    // 1) Shader 能量扫描面
+    // ----------------------------------------------------------
+
+    const shader = makeEnergyShader(localA, localB, localC);
+    const energyMesh = new THREE.Mesh(shader.geo, shader.mat);
+    energyMesh.position.z = 0.015;
+    energyMesh.renderOrder = 20;
+    fxRoot.add(energyMesh);
+
+    // ----------------------------------------------------------
+    // 2) 双层边缘辉光
+    // ----------------------------------------------------------
+
+    const outlinePos = [];
+    addSegment(outlinePos, localA, localB);
+    addSegment(outlinePos, localB, localC);
+    addSegment(outlinePos, localC, localA);
+
+    const outlineGeo = new THREE.BufferGeometry();
+    outlineGeo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(outlinePos, 3)
+    );
+
+    const glowMatA = makeGlowLineMaterial();
+    const glowA = new THREE.LineSegments(outlineGeo, glowMatA);
+    glowA.position.z = 0.025;
+    glowA.renderOrder = 22;
+    fxRoot.add(glowA);
+
+    const glowMatB = makeGlowLineMaterial();
+    glowMatB.color.setHex(0x476bff);
+    const glowB = new THREE.LineSegments(outlineGeo.clone(), glowMatB);
+    glowB.position.z = -0.025;
+    glowB.renderOrder = 22;
+    fxRoot.add(glowB);
+
+    // ----------------------------------------------------------
+    // 3) 两层三角冲击波
+    // ----------------------------------------------------------
+
+    const shockMat1 = makeGlowLineMaterial();
+    const shock1 = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([localA, localB, localC]),
+      shockMat1
+    );
+    shock1.position.z = 0.035;
+    shock1.renderOrder = 23;
+    fxRoot.add(shock1);
+
+    const shockMat2 = makeGlowLineMaterial();
+    shockMat2.color.setHex(0xffffff);
+    const shock2 = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([localA, localB, localC]),
+      shockMat2
+    );
+    shock2.position.z = 0.04;
+    shock2.renderOrder = 23;
+    fxRoot.add(shock2);
+
+    // ----------------------------------------------------------
+    // 4) 粒子碎光
+    // ----------------------------------------------------------
+
+    const centroid = new THREE.Vector3()
+      .addVectors(localA, localB)
+      .add(localC)
+      .multiplyScalar(1 / 3);
+
+    const particleCount = 84;
+    const particleBase = [];
+    const particleDir = [];
+    const particlePhase = [];
+
+    function pointOnEdge(t, p1, p2) {
+      return p1.clone().lerp(p2, t);
+    }
+
+    const edges = [
+      [localA, localB],
+      [localB, localC],
+      [localC, localA]
+    ];
+
+    for (let i = 0; i < particleCount; i++) {
+      const edge = edges[i % 3];
+      const t = ((i * 37) % 101) / 100;
+
+      const base = pointOnEdge(t, edge[0], edge[1]);
+
+      // 粒子从边缘向外喷射
+      let dir = base.clone().sub(centroid).normalize();
+
+      const tangent = edge[1].clone().sub(edge[0]).normalize();
+
+      const wobble =
+        (((i * 17) % 19) / 19 - 0.5) * 0.65;
+
+      dir.addScaledVector(tangent, wobble).normalize();
+
+      particleBase.push(base);
+      particleDir.push(dir);
+      particlePhase.push(((i * 23) % 97) / 97);
+    }
+
+    const particleArray = new Float32Array(particleCount * 3);
+
+    for (let i = 0; i < particleCount; i++) {
+      particleArray[i * 3 + 0] = particleBase[i].x;
+      particleArray[i * 3 + 1] = particleBase[i].y;
+      particleArray[i * 3 + 2] = 0.05;
+    }
+
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute(
+      'position',
+      new THREE.BufferAttribute(particleArray, 3)
+    );
+
+    const particleMat = makeParticleMaterial();
+    const particles = new THREE.Points(
+      particleGeo,
+      particleMat
+    );
+    particles.renderOrder = 25;
+    fxRoot.add(particles);
+
+    return {
+      root: fxRoot,
+
+      shader,
+      energyMesh,
+
+      glowA,
+      glowB,
+      glowMatA,
+      glowMatB,
+
+      shock1,
+      shock2,
+      shockMat1,
+      shockMat2,
+
+      particles,
+      particleGeo,
+      particleMat,
+      particleBase,
+      particleDir,
+      particlePhase,
+      particleCount,
+
+      centroid
+    };
+  }
+
+  // ============================================================
+  // 每块板在自己的局部坐标系里建模
+  //
+  // “翻转”不再做铰链旋转：
+  // scale.z = +1 -> -1
+  //
+  // 即把板的所有正反面内容直接镜像穿过自己的中面。
+  // 板始终停留在原来的六面体面位置。
+  // ============================================================
+
+  const panels = new Map();
+
+  FACE_LIST.forEach((faceVerts, index) => {
+    const panelId = index + 1;
+
+    const [WA, WB, WC] = ensureOutward(...faceVerts);
+    const basis = triangleBasis(WA, WB, WC);
+
+    const localA = worldToLocalPoint(WA, basis.matrix);
+    const localB = worldToLocalPoint(WB, basis.matrix);
+    const localC = worldToLocalPoint(WC, basis.matrix);
+
+    const root = new THREE.Group();
+    root.name = `Panel_${String(panelId).padStart(2, '0')}`;
+    root.matrixAutoUpdate = false;
+    root.matrix.copy(basis.matrix);
+    root.userData.panelId = panelId;
+    scene.add(root);
+
+    // 用一个可缩放的flipGroup做原位正反交换
+    const flipGroup = new THREE.Group();
+    flipGroup.userData.panelId = panelId;
+    root.add(flipGroup);
+
+    const solid = createSolidTriangle(localA, localB, localC, 0.09, panelId);
+    const detail = createBoardDetail(localA, localB, localC, 0.09, panelId);
+
+    flipGroup.add(solid);
+    flipGroup.add(detail);
+
+    const fx = createAdvancedFlipFx(localA, localB, localC);
+    root.add(fx.root);
+
+    panels.set(panelId, {
+      root,
+      flipGroup,
+      fx,
+
+      side: 1,
+      targetSide: 1,
+      currentScaleZ: 1,
+
+      animating: false,
+      animStart: 0,
+      animDuration: 720,
+      animFrom: 1,
+      animTo: 1
+    });
+  });
+
+  // ============================================================
+  // 点击逻辑
+  // ============================================================
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  function getPanelId(object) {
+    let obj = object;
+    while (obj) {
+      if (obj.userData?.panelId) return obj.userData.panelId;
+      obj = obj.parent;
+    }
+    return null;
+  }
+
+  function startFlipAnimation(state, targetSide) {
+    state.side = targetSide;
+    state.targetSide = targetSide;
+
+    state.animFrom = state.currentScaleZ;
+    state.animTo = targetSide;
+    state.animStart = performance.now();
+    state.animating = true;
+  }
+
+  function flipPanel(panelId) {
+    const state = panels.get(panelId);
+    if (!state) return;
+
+    const next = state.side * -1;
+    startFlipAnimation(state, next);
+
+    statusEl.textContent =
+      `Panel ${String(panelId).padStart(2, '0')}：` +
+      (next === 1
+        ? '白色反面 → 黑色正面'
+        : '黑色正面 → 白色反面') +
+      ' · 能量翻面';
+
+    refreshButtons();
+  }
+
+  function refreshButtons() {
+    document.querySelectorAll('.panel-btn').forEach(btn => {
+      const id = Number(btn.dataset.panel);
+      const state = panels.get(id);
+      const reversed = state?.side === -1;
+
+      btn.classList.toggle('active', reversed);
+      btn.textContent = `板 ${id}${reversed ? ' · 已反面' : ''}`;
+    });
+  }
+
+  for (let i = 1; i <= 6; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'panel-btn';
+    btn.dataset.panel = String(i);
+    btn.textContent = `板 ${i}`;
+    btn.addEventListener('click', () => flipPanel(i));
+    buttonsEl.appendChild(btn);
+  }
+
+  let pointerStart = null;
+
+  renderer.domElement.addEventListener('pointerdown', e => {
+    pointerStart = { x: e.clientX, y: e.clientY };
+  });
+
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!pointerStart) return;
+
+    const move = Math.hypot(
+      e.clientX - pointerStart.x,
+      e.clientY - pointerStart.y
+    );
+    pointerStart = null;
+
+    // 拖动视角不算点击
+    if (move > 5) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, camera);
+
+    const roots = [...panels.values()].map(v => v.root);
+    const hits = raycaster.intersectObjects(roots, true);
+
+    if (!hits.length) return;
+
+    const id = getPanelId(hits[0].object);
+    if (id) flipPanel(id);
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    panels.forEach(state => {
+      startFlipAnimation(state, 1);
+    });
+
+    statusEl.textContent = '六块三角板正在同步恢复黑色正面。';
+    refreshButtons();
+  });
+
+  document.getElementById('flipAllBtn').addEventListener('click', () => {
+    const anyFront = [...panels.values()].some(state => state.side === 1);
+    const target = anyFront ? -1 : 1;
+
+    panels.forEach(state => {
+      startFlipAnimation(state, target);
+    });
+
+    statusEl.textContent =
+      target === -1
+        ? '六块三角板同步切换到白色反面。'
+        : '六块三角板同步恢复黑色正面。';
+
+    refreshButtons();
+  });
+
+  refreshButtons();
+
+  // ============================================================
+  // 动画
+  //
+  // 关键点：
+  // 不是绕边旋转，不会打开六面体。
+  // 只改变每块板局部法向方向的scale.z：
+  //
+  // +1 -> 0 -> -1
+  //
+  // 因此正反面的棋盘、点阵会直接交换，
+  // 而三角板的空间位置与六面体闭合结构保持不变。
+  // ============================================================
+
+  function easeInOutQuint(t) {
+    return t < 0.5
+      ? 16 * t * t * t * t * t
+      : 1 - Math.pow(-2 * t + 2, 5) / 2;
+  }
+
+  function smoothPulse(x, center, width) {
+    const d = (x - center) / width;
+    return Math.exp(-d * d);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const now = performance.now();
+    const globalTime = now * 0.001;
+
+    panels.forEach(state => {
+      let p = state.side === -1 ? 1 : 0;
+      let intensity = 0;
+
+      if (state.animating) {
+        p = Math.min(
+          1,
+          (now - state.animStart) / state.animDuration
+        );
+
+        const e = easeInOutQuint(p);
+
+        state.currentScaleZ =
+          state.animFrom +
+          (state.animTo - state.animFrom) * e;
+
+        // 翻面过程稍微向外“呼吸”，让特效更有体积感
+        const breathe = 1 + Math.sin(Math.PI * p) * 0.018;
+        state.flipGroup.scale.x = breathe;
+        state.flipGroup.scale.y = breathe;
+
+        intensity = Math.sin(Math.PI * p);
+
+        if (p >= 1) {
+          state.currentScaleZ = state.animTo;
+          state.flipGroup.scale.x = 1;
+          state.flipGroup.scale.y = 1;
+          state.animating = false;
+          intensity = 0;
+        }
+      }
+
+      // 原位正反面交换仍然只发生在局部法向 Z
+      state.flipGroup.scale.z = state.currentScaleZ;
+
+      // ========================================================
+      // Shader 能量面
+      // ========================================================
+
+      state.fx.shader.mat.uniforms.uTime.value = globalTime;
+      state.fx.shader.mat.uniforms.uProgress.value = p;
+      state.fx.shader.mat.uniforms.uOpacity.value =
+        state.animating ? (0.38 + intensity * 0.9) : 0;
+
+      // ========================================================
+      // 双层轮廓辉光
+      // ========================================================
+
+      state.fx.glowMatA.opacity = state.animating
+        ? 0.22 + intensity * 0.95
+        : 0;
+
+      state.fx.glowMatB.opacity = state.animating
+        ? 0.12 + intensity * 0.65
+        : 0;
+
+      const glowScale = 1 + intensity * 0.035;
+      state.fx.glowA.scale.set(glowScale, glowScale, 1);
+      state.fx.glowB.scale.set(
+        1 + intensity * 0.065,
+        1 + intensity * 0.065,
+        1
+      );
+
+      // ========================================================
+      // 双层冲击波
+      // ========================================================
+
+      const wave1 = state.animating
+        ? smoothPulse(p, 0.48, 0.22)
+        : 0;
+
+      const wave2 = state.animating
+        ? smoothPulse(p, 0.58, 0.24)
+        : 0;
+
+      const s1 = 1 + wave1 * 0.20;
+      const s2 = 1 + wave2 * 0.34;
+
+      state.fx.shock1.scale.set(s1, s1, 1);
+      state.fx.shock2.scale.set(s2, s2, 1);
+
+      state.fx.shockMat1.opacity = wave1 * 0.72;
+      state.fx.shockMat2.opacity = wave2 * 0.45;
+
+      // ========================================================
+      // 粒子碎光
+      // ========================================================
+
+      const particleBurst = state.animating
+        ? smoothPulse(p, 0.52, 0.30)
+        : 0;
+
+      state.fx.particleMat.opacity = particleBurst * 0.82;
+      state.fx.particleMat.size =
+        0.045 + particleBurst * 0.035;
+
+      const arr =
+        state.fx.particleGeo.attributes.position.array;
+
+      for (let i = 0; i < state.fx.particleCount; i++) {
+        const base = state.fx.particleBase[i];
+        const dir = state.fx.particleDir[i];
+        const phase = state.fx.particlePhase[i];
+
+        // 每颗粒子的出现时间略有不同
+        const local =
+          Math.max(
+            0,
+            Math.min(
+              1,
+              (p - phase * 0.18) / 0.82
+            )
+          );
+
+        const travel =
+          Math.sin(Math.PI * local) *
+          (0.15 + 0.65 * particleBurst);
+
+        const drift =
+          Math.sin(
+            globalTime * 9.0 +
+            phase * 20.0
+          ) * 0.028;
+
+        arr[i * 3 + 0] =
+          base.x +
+          dir.x * travel +
+          dir.y * drift;
+
+        arr[i * 3 + 1] =
+          base.y +
+          dir.y * travel -
+          dir.x * drift;
+
+        arr[i * 3 + 2] =
+          0.05 +
+          Math.sin(
+            globalTime * 12.0 +
+            phase * 14.0
+          ) * 0.035 *
+          particleBurst;
+      }
+
+      state.fx.particleGeo.attributes.position.needsUpdate = true;
+    });
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  // ============================================================
+  // 自适应
+  // ============================================================
+
+  window.addEventListener('resize', () => {
+    const w = host.clientWidth;
+    const h = host.clientHeight;
+
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
+</script>
+</body>
+</html>
