@@ -113,6 +113,17 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
 });
 
+test('立体棋盘保留算法模拟和重开回到平面主界面的入口', () => {
+  assert.match(html, /id="solidStepButton"/);
+  assert.match(html, /id="solidAutoButton"/);
+  assert.match(html, /id="resetSolidGameButton"/);
+  assert.match(app, /solidStepButton\.addEventListener\('click', simulateStep\)/);
+  assert.match(app, /solidAutoButton\.addEventListener\('click'/);
+  assert.match(app, /const wasSolid = Boolean\(solidBoardViewer\)/);
+  assert.match(app, /if \(wasSolid\) closeSolidBoard\(\)/);
+  assert.match(app, /activeBoardShape === 'solid' && !solidBoardViewer && !customEditor/);
+});
+
 test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
   assert.match(app, /createCustomState\([\s\S]*?activeBoardShape\s*\)/);
   assert.match(app, /onPieceSelect: selectSolidPiece/);

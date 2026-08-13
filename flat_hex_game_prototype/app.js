@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=solid-capture-approach-1';
+} from './game.js?v=solid-king-simulation-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=solid-capture-approach-1';
+} from './layout-storage.js?v=solid-king-simulation-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=solid-capture-approach-1';
+} from './solid-board.js?v=solid-king-simulation-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-capture-approach-1';
+} from './solid-assembly.js?v=solid-king-simulation-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -92,6 +92,8 @@ const rotateSolidPanelButton = document.getElementById('rotateSolidPanelButton')
 const flipSolidPanelButton = document.getElementById('flipSolidPanelButton');
 const removeSolidPanelButton = document.getElementById('removeSolidPanelButton');
 const resetSolidViewButton = document.getElementById('resetSolidViewButton');
+const solidStepButton = document.getElementById('solidStepButton');
+const solidAutoButton = document.getElementById('solidAutoButton');
 const resetSolidGameButton = document.getElementById('resetSolidGameButton');
 const saveSolidCustomButton = document.getElementById('saveSolidCustomButton');
 const closeSolidViewButton = document.getElementById('closeSolidViewButton');
@@ -582,12 +584,16 @@ function refreshSolidBoard(message = '') {
   solidSlotPicker.classList.toggle('hidden', !editingSolid);
   solidCustomizeButton.classList.toggle('hidden', editingSolid);
   resetSolidGameButton.classList.toggle('hidden', editingSolid);
+  solidStepButton.classList.toggle('hidden', editingSolid);
+  solidAutoButton.classList.toggle('hidden', editingSolid);
   saveSolidCustomButton.classList.toggle('hidden', !editingSolid);
   closeSolidViewButton.classList.toggle('hidden', !editingSolid);
   closeSolidViewButton.textContent = '返回平面编辑';
   solidViewerHelp.textContent = editingSolid
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
+  solidStepButton.disabled = editingSolid || simulationLock || animationLock || Boolean(pendingPromotion);
+  solidAutoButton.disabled = editingSolid || simulationLock || animationLock || Boolean(pendingPromotion);
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -1562,6 +1568,7 @@ function beginPanelSwap() {
 
 function resetGame() {
   if (customEditor) return;
+  const wasSolid = Boolean(solidBoardViewer);
   stopAutoSimulation();
   state = cloneGameState(activeInitialState);
   previewSide = null;
@@ -1569,11 +1576,9 @@ function resetGame() {
   selectedMoves = new Map();
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
+  if (wasSolid) closeSolidBoard();
   boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
-  if (solidBoardViewer) {
-    solidViewerStatus.textContent = `已重新开局；第 ${state.moveNumber} 手，白方行动。`;
-  }
 }
 
 async function toggleFacePreview() {
@@ -1625,6 +1630,7 @@ async function simulateStep() {
         : step.searchDepth === 2
           ? '第2步：加入对手的最优回应。'
           : '第3步：加入己方反制并确定最终动作。';
+      if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
       render();
       await new Promise(resolve => setTimeout(resolve, 360));
     }
@@ -1646,6 +1652,7 @@ async function simulateStep() {
       : '，已避开近期重复局面';
     selectedInfo.textContent = `分步博弈最终选择（${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
+    if (solidBoardViewer) solidViewerStatus.textContent = selectedInfo.textContent;
     render();
     await new Promise(resolve => setTimeout(resolve, 240));
     const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
@@ -1668,6 +1675,28 @@ rotateSolidPanelButton.addEventListener('click', rotateSolidPanel);
 flipSolidPanelButton.addEventListener('click', flipSolidPanel);
 removeSolidPanelButton.addEventListener('click', removeSolidPanel);
 resetSolidViewButton.addEventListener('click', () => solidBoardViewer?.resetView());
+solidStepButton.addEventListener('click', simulateStep);
+solidAutoButton.addEventListener('click', event => {
+  if (customEditor || isPreviewing() || simulationLock || animationLock || pendingPromotion) return;
+  if (autoTimer) {
+    stopAutoSimulation();
+    event.currentTarget.classList.remove('active');
+    event.currentTarget.textContent = '连续模拟';
+    return;
+  }
+  event.currentTarget.classList.add('active');
+  event.currentTarget.textContent = '停止模拟';
+  simulateStep();
+  autoTimer = setInterval(() => {
+    if (state.winner) {
+      stopAutoSimulation();
+      event.currentTarget.classList.remove('active');
+      event.currentTarget.textContent = '连续模拟';
+      return;
+    }
+    simulateStep();
+  }, 900);
+});
 resetSolidGameButton.addEventListener('click', resetGame);
 saveSolidCustomButton.addEventListener('click', saveCustomBoard);
 closeSolidViewButton.addEventListener('click', closeSolidBoard);

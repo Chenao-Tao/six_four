@@ -281,6 +281,32 @@ test('立体王沿六面体真实棱在顶点之间移动', () => {
   assert.equal(new Set(moves.map(move => move.pointKey)).size, 3);
 });
 
+test('立体王沿棱移动时忽略棱上棋子但受目标顶点占用约束', () => {
+  const edgeBlocked = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('edge', 'black', 'pawn', 0, 2), panelIndex: 0 }
+  ]);
+  assert.equal(legalMoves(edgeBlocked, 'wK').size, 3);
+
+  const vertexBlocked = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('blocker', 'white', 'pawn', 4, 0), panelIndex: 0 }
+  ]);
+  assert.equal(
+    [...legalMoves(vertexBlocked, 'wK').values()]
+      .some(move => move.pointKey === '0,0,4,0,0'),
+    false
+  );
+
+  const capturableVertex = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('target', 'black', 'queen', 4, 0), panelIndex: 0 }
+  ]);
+  const capture = [...legalMoves(capturableVertex, 'wK').values()]
+    .find(move => move.pointKey === '0,0,4,0,0');
+  assert.equal(capture?.captureId, 'target');
+});
+
 test('立体吃子只翻目标面并交换该面内外层棋子', () => {
   const state = {
     ...solidStateOf([

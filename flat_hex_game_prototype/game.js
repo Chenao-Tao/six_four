@@ -959,8 +959,6 @@ function solidKingMoves(state, pieceToMove, occupied) {
       })
       .sort(([leftKey], [rightKey]) =>
         solidPointWeights(rightKey)[startVertex] - solidPointWeights(leftKey)[startVertex]);
-    const blocked = edgeNodes.slice(1, -1).some(([pointKey]) => occupied.has(pointKey));
-    if (blocked) continue;
     const alias = targetNode.aliases.find(item => item.panelIndex === startPanel) ?? targetNode.aliases[0];
     const path = edgeNodes.map(([, node]) =>
       (node.aliases.find(item => item.panelIndex === alias.panelIndex) ?? node.aliases[0]).position);
