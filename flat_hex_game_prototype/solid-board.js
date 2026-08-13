@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=panel-piece-ownership-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=vertical-mirror-flip-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -33,6 +33,19 @@ export function findPanelAtPoint(renderFaces, point) {
     }
   }
   return null;
+}
+
+export function findSolidTargetAtPoint(targets, point) {
+  let match = null;
+  for (const target of targets) {
+    const distance = Math.hypot(point.x - target.x, point.y - target.y);
+    if (distance > target.radius) continue;
+    if (!match || target.depth > match.depth ||
+      (target.depth === match.depth && distance < match.distance)) {
+      match = { ...target, distance };
+    }
+  }
+  return match;
 }
 
 export function mapPiecesToPanels(pieces) {
@@ -170,7 +183,29 @@ export function solidEffectFrame(effect, now) {
   };
 }
 
-export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = () => {} } = {}) {
+export function solidCameraAngles(point) {
+  const distance = Math.hypot(point.x, point.y, point.z);
+  if (!Number.isFinite(distance) || distance < EPSILON) {
+    return { rotationX: 0, rotationY: 0 };
+  }
+  const rotationY = Math.atan2(-point.x, point.z);
+  const zAfterY = -point.x * Math.sin(rotationY) + point.z * Math.cos(rotationY);
+  const rotationX = Math.atan2(point.y, zAfterY);
+  return {
+    rotationX: Object.is(rotationX, -0) ? 0 : rotationX,
+    rotationY: Object.is(rotationY, -0) ? 0 : rotationY
+  };
+}
+
+export function isSharedSolidPoint(local) {
+  return [local.center, local.u, local.v].some(weight => Math.abs(weight) <= EPSILON);
+}
+
+export function createSolidBoardViewer(canvas, initialModel, {
+  onPanelSelect = () => {},
+  onPieceSelect = () => {},
+  onMoveSelect = () => {}
+} = {}) {
   const context = canvas.getContext('2d');
   const faces = modelFaces();
   let model = initialModel;
@@ -182,7 +217,9 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   let dragDistance = 0;
   let animationFrame = 0;
   let lastRenderFaces = [];
+  let lastInteractionTargets = [];
   let operationEffect = null;
+  let cameraMotion = null;
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -299,7 +336,7 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
     context.lineTo(center.x, Math.max(...face.projected.map(point => point.y)) + 8);
     context.stroke();
     context.restore();
-    drawOperationLabel('翻转正反面', { x: center.x, y: center.y - 42 }, frame.alpha);
+    drawOperationLabel('垂直镜像翻面', { x: center.x, y: center.y - 42 }, frame.alpha);
   }
 
   function drawSwapEffect(firstFace, secondFace, frame) {
@@ -351,7 +388,63 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
     }
   }
 
+  function drawPlannedMove(renderFaces) {
+    if (!model.plannedMove) return;
+    const endpoints = [model.plannedMove.from, model.plannedMove.to].map(point => {
+      const face = renderFaces.find(item => item.panelIndex === point.panelIndex);
+      if (!face) return null;
+      const normal = normalize(cross(
+        subtract(face.vertices[1], face.vertices[0]),
+        subtract(face.vertices[2], face.vertices[0])
+      ));
+      return project(add(barycentricPoint(face.vertices, point.local), scale(normal, 0.075)),
+        canvas.getBoundingClientRect().width,
+        canvas.getBoundingClientRect().height);
+    });
+    if (endpoints.some(point => !point)) return;
+    const [from, to] = endpoints;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.strokeStyle = model.plannedMove.captureId ? '#ff6678' : '#ffc96a';
+    context.fillStyle = context.strokeStyle;
+    context.lineWidth = 5;
+    context.lineCap = 'round';
+    context.setLineDash([12, 8]);
+    context.shadowColor = context.strokeStyle;
+    context.shadowBlur = 12;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    context.arc(from.x, from.y, 8, 0, Math.PI * 2);
+    context.fill();
+    context.translate(to.x, to.y);
+    context.rotate(angle + Math.PI / 2);
+    context.beginPath();
+    context.moveTo(0, 0);
+    context.lineTo(-9, -17);
+    context.lineTo(9, -17);
+    context.closePath();
+    context.fill();
+    context.restore();
+    drawOperationLabel(model.plannedMove.label, {
+      x: (from.x + to.x) / 2,
+      y: (from.y + to.y) / 2 - 28
+    }, 1);
+  }
+
   function render(now = performance.now()) {
+    if (cameraMotion) {
+      const progress = Math.max(0, Math.min(1, (now - cameraMotion.startedAt) / cameraMotion.duration));
+      const eased = 1 - (1 - progress) ** 3;
+      rotationX = cameraMotion.from.rotationX +
+        (cameraMotion.to.rotationX - cameraMotion.from.rotationX) * eased;
+      rotationY = cameraMotion.from.rotationY +
+        (cameraMotion.to.rotationY - cameraMotion.from.rotationY) * eased;
+      if (progress >= 1) cameraMotion = null;
+    }
     const bounds = canvas.getBoundingClientRect();
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(bounds.width));
@@ -374,61 +467,120 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
       };
     }).sort((left, right) => left.depth - right.depth);
     lastRenderFaces = renderFaces;
+    const interactionTargets = [];
+    const sharedPieceDraws = [];
+
+    function drawPiece(face, piece) {
+      const normal = normalize(cross(
+        subtract(face.vertices[1], face.vertices[0]),
+        subtract(face.vertices[2], face.vertices[0])
+      ));
+      const world = barycentricPoint(face.vertices, piece.local);
+      const position = project(add(world, scale(normal, 0.055)), width, height);
+      const radius = Math.max(12, 17 * position.perspective * zoom);
+      const isSelectedPiece = model.selectedPieceId === piece.id;
+      context.beginPath();
+      context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+      context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
+      context.fill();
+      context.lineWidth = isSelectedPiece ? 5 : 2.5;
+      context.strokeStyle = isSelectedPiece ? '#ffc96a' : piece.side === 'white' ? '#7196ad' : '#d6eaf7';
+      context.stroke();
+      context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
+      context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
+      context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+      interactionTargets.push({
+        type: 'piece',
+        pieceId: piece.id,
+        x: position.x,
+        y: position.y,
+        radius: radius + 7,
+        depth: position.z
+      });
+    }
 
     renderFaces.forEach(face => {
       const { panelIndex, vertices, projected } = face;
-      const label = model.faceLabels[panelIndex] ?? `面 ${panelIndex + 1}`;
+      const label = model.faceLabels[panelIndex];
+      const isEmptySlot = model.assemblyMode && !label;
       const normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
       const viewNormal = rotatePoint(normal, rotationX, rotationY);
       const light = Math.max(0, viewNormal.z) * 24;
-      const isBackFace = label.endsWith('B');
+      const isBackFace = label?.endsWith('B');
       const base = isBackFace ? 190 + light : 25 + light;
       const fill = `rgb(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18})`;
       const lineColor = isBackFace ? 'rgba(15,28,38,.55)' : 'rgba(190,235,255,.52)';
       const isSelected = model.selectedPanel === panelIndex;
-      drawPath(projected, fill, isSelected ? '#ffc96a' : isBackFace ? '#263d4d' : '#a8d8ee', isSelected ? 5 : 2);
+      if (isEmptySlot) context.setLineDash([10, 8]);
+      drawPath(
+        projected,
+        isEmptySlot ? 'rgba(13, 25, 35, .16)' : fill,
+        isSelected ? '#ffc96a' : isEmptySlot ? 'rgba(144, 192, 216, .58)' : isBackFace ? '#263d4d' : '#a8d8ee',
+        isSelected ? 5 : 2
+      );
+      context.setLineDash([]);
       if (isSelected) drawPath(projected, 'rgba(255,201,106,.14)', null);
 
-      context.lineWidth = 1;
-      context.strokeStyle = lineColor;
-      gridSegments(vertices).forEach(([from, to]) => {
-        const start = project(from, width, height);
-        const end = project(to, width, height);
-        context.beginPath();
-        context.moveTo(start.x, start.y);
-        context.lineTo(end.x, end.y);
-        context.stroke();
-      });
+      if (!isEmptySlot) {
+        context.lineWidth = 1;
+        context.strokeStyle = lineColor;
+        gridSegments(vertices).forEach(([from, to]) => {
+          const start = project(from, width, height);
+          const end = project(to, width, height);
+          context.beginPath();
+          context.moveTo(start.x, start.y);
+          context.lineTo(end.x, end.y);
+          context.stroke();
+        });
+      }
 
       const labelPoint = project(barycentricPoint(vertices, { center: 1 / 3, u: 1 / 3, v: 1 / 3 }), width, height);
-      context.fillStyle = isBackFace ? '#203746' : '#d8f3ff';
+      context.fillStyle = isEmptySlot ? 'rgba(184, 222, 240, .74)' : isBackFace ? '#203746' : '#d8f3ff';
       context.font = '700 13px "Microsoft YaHei", sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
-      context.fillText(`${label} · ${model.panelRotations[panelIndex] ?? 0}°`, labelPoint.x, labelPoint.y);
+      context.fillText(
+        isEmptySlot ? `空槽 ${panelIndex + 1}` : `${label} · ${model.panelRotations[panelIndex] ?? 0}°`,
+        labelPoint.x,
+        labelPoint.y
+      );
 
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
-        const world = barycentricPoint(vertices, piece.local);
-        const position = project(add(world, scale(normal, 0.035)), width, height);
-        const radius = Math.max(12, 17 * position.perspective * zoom);
+        if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
+        else drawPiece(face, piece);
+      });
+
+      (model.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
+        const world = barycentricPoint(vertices, move.local);
+        const position = project(add(world, scale(normal, 0.05)), width, height);
+        const radius = Math.max(9, 12 * position.perspective * zoom);
         context.beginPath();
         context.arc(position.x, position.y, radius, 0, Math.PI * 2);
-        context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
+        context.fillStyle = move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
         context.fill();
-        context.lineWidth = 2.5;
-        context.strokeStyle = piece.side === 'white' ? '#7196ad' : '#d6eaf7';
+        context.lineWidth = 3;
+        context.strokeStyle = move.captureId ? '#ff6678' : '#61e7ff';
         context.stroke();
-        context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
-        context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
-        context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+        interactionTargets.push({
+          type: 'move',
+          targetKey: move.targetKey,
+          x: position.x,
+          y: position.y,
+          radius: radius + 8,
+          depth: position.z
+        });
       });
     });
+    drawPlannedMove(renderFaces);
+    sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
+    lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
   }
 
   function pointerMove(event) {
     if (!dragging || !previousPointer) return;
+    cameraMotion = null;
     const deltaX = event.clientX - previousPointer.x;
     const deltaY = event.clientY - previousPointer.y;
     dragDistance += Math.hypot(deltaX, deltaY);
@@ -447,11 +599,17 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   function pointerEnd(event) {
     if (dragging && dragDistance < 5 && event.type === 'pointerup') {
       const bounds = canvas.getBoundingClientRect();
-      const panelIndex = findPanelAtPoint(lastRenderFaces, {
+      const point = {
         x: event.clientX - bounds.left,
         y: event.clientY - bounds.top
-      });
-      if (panelIndex !== null) onPanelSelect(panelIndex);
+      };
+      const target = findSolidTargetAtPoint(lastInteractionTargets, point);
+      if (target?.type === 'move') onMoveSelect(target.targetKey);
+      else if (target?.type === 'piece') onPieceSelect(target.pieceId);
+      else {
+        const panelIndex = findPanelAtPoint(lastRenderFaces, point);
+        if (panelIndex !== null) onPanelSelect(panelIndex);
+      }
     }
     dragging = false;
     previousPointer = null;
@@ -489,9 +647,33 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
       return true;
     },
     resetView() {
+      cameraMotion = null;
       rotationX = -0.35;
       rotationY = 0.65;
       zoom = 1;
+    },
+    followPoint(position, panelIndex, animate = true) {
+      const mapped = mapPiecesToPanels([{ id: 'camera-focus', position, panelIndex }])[0];
+      const world = barycentricPoint(faces[mapped.panelIndex], mapped.local);
+      const target = solidCameraAngles(world);
+      if (!animate) {
+        cameraMotion = null;
+        rotationX = target.rotationX;
+        rotationY = target.rotationY;
+        return;
+      }
+      cameraMotion = {
+        from: { rotationX, rotationY },
+        to: target,
+        startedAt: performance.now(),
+        duration: 320
+      };
+    },
+    followPiece(pieceId, animate = true) {
+      const piece = model.pieces.find(item => item.id === pieceId);
+      if (!piece) return false;
+      this.followPoint(piece.position, piece.panelIndex, animate);
+      return true;
     },
     destroy() {
       cancelAnimationFrame(animationFrame);

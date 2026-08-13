@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
-import { findPanelAtPoint, mapPiecesToPanels, solidEffectFrame } from './solid-board.js';
+import {
+  findPanelAtPoint,
+  findSolidTargetAtPoint,
+  isSharedSolidPoint,
+  mapPiecesToPanels,
+  solidCameraAngles,
+  solidEffectFrame
+} from './solid-board.js';
 
 test('平面棋子映射到六块立体板时不丢失、不复制且不修改原数据', () => {
   const pieces = [
@@ -60,6 +67,18 @@ test('立体面点击按绘制层级选中最靠近观察者的三角板', () =>
   assert.equal(findPanelAtPoint(faces, { x: 120, y: 120 }), null);
 });
 
+test('立体交互优先命中更靠近观察者的棋子或合法落点', () => {
+  const targets = [
+    { type: 'piece', pieceId: 'far-piece', x: 50, y: 50, radius: 20, depth: 0.2 },
+    { type: 'move', targetKey: '1,0', x: 54, y: 50, radius: 16, depth: 0.8 },
+    { type: 'piece', pieceId: 'near-piece', x: 50, y: 50, radius: 18, depth: 1.1 }
+  ];
+
+  assert.equal(findSolidTargetAtPoint(targets, { x: 52, y: 50 }).pieceId, 'near-piece');
+  assert.equal(findSolidTargetAtPoint(targets, { x: 31, y: 50 }).pieceId, 'far-piece');
+  assert.equal(findSolidTargetAtPoint(targets, { x: 100, y: 100 }), null);
+});
+
 test('立体操作特效提供稳定进度并在时长结束后清除', () => {
   const effect = { startedAt: 1000, duration: 800 };
 
@@ -68,4 +87,20 @@ test('立体操作特效提供稳定进度并在时长结束后清除', () => {
   assert.equal(solidEffectFrame(effect, 1400).progress, 0.5);
   assert.equal(solidEffectFrame(effect, 1400).pulse, 1);
   assert.equal(solidEffectFrame(effect, 1800), null);
+});
+
+test('立体相机跟随目标点会生成有限且可复现的旋转角', () => {
+  const top = solidCameraAngles({ x: 0, y: 0, z: 2 });
+  assert.deepEqual(top, { rotationX: 0, rotationY: 0 });
+
+  const side = solidCameraAngles({ x: 2, y: 0, z: 0 });
+  assert.equal(Number.isFinite(side.rotationX), true);
+  assert.equal(Number.isFinite(side.rotationY), true);
+  assert.equal(side.rotationY, -Math.PI / 2);
+});
+
+test('公共棱和公共顶点棋子会进入最后绘制层', () => {
+  assert.equal(isSharedSolidPoint({ center: 0, u: 0.5, v: 0.5 }), true);
+  assert.equal(isSharedSolidPoint({ center: 0, u: 1, v: 0 }), true);
+  assert.equal(isSharedSolidPoint({ center: 0.25, u: 0.5, v: 0.25 }), false);
 });

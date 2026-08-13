@@ -11,6 +11,7 @@ function layout(name) {
   const initial = createInitialState();
   return {
     name,
+    boardShape: 'solid',
     boardStates: {
       front: [{ id: 'white-king', side: 'white', type: 'king', position: { q: 0, r: 0 } }],
       back: [{ id: 'black-king', side: 'black', type: 'king', position: { q: 4, r: 0 } }]
@@ -59,6 +60,7 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
   assert.equal(library.activeLayoutName, '测试布局');
   const savedLayout = library.layouts.find(item => item.name === '测试布局');
   assert.ok(savedLayout);
+  assert.equal(savedLayout.boardShape, 'solid');
   assert.deepEqual(savedLayout.boardStates.front[0].position, { q: 0, r: 0 });
   assert.equal(savedLayout.boardStates.front[0].panelIndex, 0);
   assert.equal(savedLayout.boardStates.back[0].panelIndex, 0);
@@ -106,4 +108,30 @@ test('未完成草稿可以落盘但不能启用，删除活动布局后回到�
   }).then(response => response.json());
   assert.equal(deleted.activeLayoutName, '默认布局');
   assert.equal(deleted.layouts.some(item => item.name === '可用布局'), false);
+});
+
+test('布局文件不可写时接口返回可识别的文件系统错误码', async t => {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'flat-hex-layouts-'));
+  const layoutFile = join(tempDirectory, 'layouts.json');
+  t.after(() => rm(tempDirectory, { recursive: true, force: true }));
+  const writeError = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+  const server = createAppServer({
+    layoutFile,
+    persistLibrary: async () => {
+      throw writeError;
+    }
+  });
+  const baseUrl = await listen(server);
+  t.after(() => close(server));
+
+  const response = await fetch(`${baseUrl}/api/layouts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ layout: layout('不可写布局'), activate: true })
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.code, 'EPERM');
+  assert.match(body.error, /operation not permitted/);
 });

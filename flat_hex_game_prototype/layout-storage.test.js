@@ -5,7 +5,8 @@ import { createInitialState } from './game.js';
 import {
   createBrowserLayoutStore,
   DEFAULT_LAYOUT_NAME,
-  LAYOUT_LIBRARY_STORAGE_KEY
+  LAYOUT_LIBRARY_STORAGE_KEY,
+  shouldFallbackToBrowserStorage
 } from './layout-storage.js';
 
 function memoryStorage() {
@@ -23,10 +24,20 @@ function memoryStorage() {
   };
 }
 
+test('布局接口不存在或项目文件不可写时回退浏览器存储', () => {
+  assert.equal(shouldFallbackToBrowserStorage(404, {}), true);
+  for (const code of ['EPERM', 'EACCES', 'EROFS']) {
+    assert.equal(shouldFallbackToBrowserStorage(500, { code }), true);
+  }
+  assert.equal(shouldFallbackToBrowserStorage(500, { code: 'EIO' }), false);
+  assert.equal(shouldFallbackToBrowserStorage(400, { code: 'EPERM' }), false);
+});
+
 function customLayout(name) {
   const initial = createInitialState();
   return {
     name,
+    boardShape: 'solid',
     boardStates: {
       front: [
         { id: 'white-king', side: 'white', type: 'king', position: { q: 0, r: -4 } },
@@ -52,10 +63,30 @@ test('浏览器布局存储提供默认布局并持久化保存与启用状态',
   });
   assert.equal(saved.activeLayoutName, '线上布局');
   assert.ok(saved.layouts.some(layout => layout.name === '线上布局'));
+  assert.equal(saved.layouts.find(layout => layout.name === '线上布局').boardShape, 'solid');
   assert.ok(storage.getItem(LAYOUT_LIBRARY_STORAGE_KEY));
 
   const restartedStore = createBrowserLayoutStore(storage);
   assert.equal(restartedStore.request().activeLayoutName, '线上布局');
+});
+
+test('旧布局缺少棋盘形态时按平面布局兼容读取', () => {
+  const storage = memoryStorage();
+  const legacy = customLayout('旧布局');
+  delete legacy.boardShape;
+  storage.setItem(LAYOUT_LIBRARY_STORAGE_KEY, JSON.stringify({
+    version: 1,
+    activeLayoutName: '旧布局',
+    layouts: [legacy]
+  }));
+
+  const store = createBrowserLayoutStore(storage);
+  const saved = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: legacy, activate: false })
+  });
+
+  assert.equal(saved.layouts.find(layout => layout.name === '旧布局').boardShape, 'flat');
 });
 
 test('浏览器布局存储允许草稿落盘但拒绝启用缺少王的布局', () => {

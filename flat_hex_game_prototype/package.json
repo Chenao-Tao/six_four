@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test game.test.js layout-storage.test.js server.test.js solid-board.test.js ui.test.js"
+    "test": "node --test game.test.js layout-storage.test.js server.test.js solid-assembly.test.js solid-board.test.js ui.test.js"
   }
 }

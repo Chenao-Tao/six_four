@@ -2,11 +2,17 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState
-} from './game.js?v=panel-piece-ownership-1';
+} from './game.js?v=vertical-mirror-flip-1';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';
 export const DEFAULT_LAYOUT_NAME = '默认布局';
+const FILE_STORAGE_ERROR_CODES = new Set(['EPERM', 'EACCES', 'EROFS']);
+
+export function shouldFallbackToBrowserStorage(status, body) {
+  return status === 404 ||
+    (status === 500 && FILE_STORAGE_ERROR_CODES.has(body?.code));
+}
 
 function clonePiecesByFace(boardStates) {
   return {
@@ -19,6 +25,7 @@ function layoutSnapshot(name, source, builtIn = false) {
   return {
     name,
     ...(builtIn ? { builtIn: true } : {}),
+    boardShape: source.boardShape === 'solid' ? 'solid' : 'flat',
     boardStates: clonePiecesByFace(source.boardStates),
     faceLabels: {
       front: [...source.faceLabels.front],
@@ -34,6 +41,7 @@ function layoutSnapshot(name, source, builtIn = false) {
 function defaultLayout() {
   const state = createInitialState();
   return layoutSnapshot(DEFAULT_LAYOUT_NAME, {
+    boardShape: 'flat',
     boardStates: state.boardStates,
     faceLabels: state.boardFaceLabels,
     panelRotations: state.boardPanelRotations
@@ -45,9 +53,12 @@ function normalizedLayout(layout, requirePlayable) {
   if (!name) throw new Error('布局名称不能为空');
   if (name === DEFAULT_LAYOUT_NAME) throw new Error('默认布局不能被覆盖');
   if (name.length > 40) throw new Error('布局名称不能超过40个字符');
+  if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
+    throw new Error('棋盘形态必须是平面或立体');
+  }
   const validation = requirePlayable
-    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations)
-    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
+    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape)
+    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape);
   if (validation.error) throw new Error(validation.error);
   const source = requirePlayable
     ? {
@@ -56,7 +67,7 @@ function normalizedLayout(layout, requirePlayable) {
         panelRotations: validation.state.boardPanelRotations
       }
     : validation;
-  return layoutSnapshot(name, source);
+  return layoutSnapshot(name, { ...source, boardShape: layout?.boardShape });
 }
 
 export function createBrowserLayoutStore(storage) {
@@ -106,7 +117,12 @@ export function createBrowserLayoutStore(storage) {
     if (path === '/api/layouts' && method === 'POST') {
       const layout = normalizedLayout(body.layout, Boolean(body.activate));
       if (!body.activate && library.activeLayoutName === layout.name) {
-        const playable = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+        const playable = createCustomState(
+          layout.boardStates,
+          layout.faceLabels,
+          layout.panelRotations,
+          layout.boardShape
+        );
         if (playable.error) throw new Error(`当前启用布局必须保持可开局：${playable.error}`);
       }
       const index = library.layouts.findIndex(item => item.name === layout.name);
@@ -121,7 +137,12 @@ export function createBrowserLayoutStore(storage) {
       const layout = library.layouts.find(item => item.name === body.name);
       if (!layout) throw new Error('布局不存在');
       if (!layout.builtIn) {
-        const validation = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+        const validation = createCustomState(
+          layout.boardStates,
+          layout.faceLabels,
+          layout.panelRotations,
+          layout.boardShape
+        );
         if (validation.error) throw new Error(validation.error);
       }
       library.activeLayoutName = layout.name;
