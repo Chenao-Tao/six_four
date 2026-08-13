@@ -312,6 +312,31 @@ test('立体吃子只翻目标面并交换该面内外层棋子', () => {
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wP'));
 });
 
+test('公共棱吃子翻转攻击棋来源面而非目标别名面', () => {
+  const outer = [
+    { ...piece('wB', 'white', 'bishop', 1, 1), panelIndex: 0 },
+    { ...piece('bP', 'black', 'pawn', -1, 1), panelIndex: 1 }
+  ];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: { outer, inner: [] },
+    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
+  };
+
+  const move = [...legalMoves(state, 'wB').values()]
+    .find(item => item.captureId === 'bP');
+
+  assert.equal(move.panelIndex, 1, '回归场景必须使用相邻面的公共棱坐标别名');
+  const result = applyMove(
+    state,
+    'wB',
+    { ...move.target, panelIndex: move.panelIndex }
+  ).state;
+
+  assert.equal(result.solidFaceSides[0], 'back');
+  assert.equal(result.solidFaceSides[1], 'front');
+});
+
 test('背面公共棱有棋子时整条棱不下沉也不上浮', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
