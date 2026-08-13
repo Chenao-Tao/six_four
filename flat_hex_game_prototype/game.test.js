@@ -225,6 +225,141 @@ test('立体布局按物理交点校验公共位置占用', () => {
   assert.equal(separateApexes.boardStates.front.length, 2);
 });
 
+test('立体棋子可以沿公共棱进入相邻三角面', () => {
+  const state = solidStateOf([
+    { ...piece('wP', 'white', 'pawn', 1, 0), panelIndex: 0 }
+  ]);
+
+  const moves = [...legalMoves(state, 'wP').values()];
+  const crossed = moves.find(move => move.panelIndex === 2 &&
+    move.target.q === -1 && move.target.r === 1);
+
+  assert.ok(crossed, '公共棱上的兵应能迈入相邻的第 3 面');
+  const result = applyMove(state, 'wP', { ...crossed.target, panelIndex: crossed.panelIndex });
+  assert.equal(result.error, undefined);
+  assert.equal(findPiece(result.state, 'wP').panelIndex, 2);
+});
+
+test('立体普通移动同步更新当前外层棋子', () => {
+  const outer = [{ ...piece('wP', 'white', 'pawn', 1, 0), panelIndex: 0 }];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: { outer, inner: [] },
+    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
+  };
+  state.pieces = state.solidLayers.outer;
+  const move = [...legalMoves(state, 'wP').values()].find(item => item.panelIndex === 2);
+
+  const result = applyMove(state, 'wP', { ...move.target, panelIndex: move.panelIndex }).state;
+
+  assert.strictEqual(result.pieces, result.solidLayers.outer);
+  assert.deepEqual(findPiece(result, 'wP').position, { q: move.target.q, r: move.target.r });
+  assert.equal(findPiece(result, 'wP').panelIndex, move.panelIndex);
+});
+
+test('立体后与象可以沿连续表面跨过相邻面', () => {
+  const queenState = solidStateOf([
+    { ...piece('wQ', 'white', 'queen', 1, 1), panelIndex: 0 }
+  ]);
+  const queenMoves = [...legalMoves(queenState, 'wQ').values()];
+  assert.ok(queenMoves.some(move => move.panelIndex !== 0 && move.path.length === 4));
+
+  const bishopState = solidStateOf([
+    { ...piece('wB', 'white', 'bishop', 1, 2), panelIndex: 0 }
+  ]);
+  assert.ok([...legalMoves(bishopState, 'wB').values()].some(move => move.panelIndex !== 0));
+});
+
+test('立体王沿六面体真实棱在顶点之间移动', () => {
+  const state = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 }
+  ]);
+  const moves = [...legalMoves(state, 'wK').values()];
+
+  assert.equal(moves.length, 3);
+  assert.ok(moves.every(move => move.path.length === 5));
+  assert.equal(new Set(moves.map(move => move.pointKey)).size, 3);
+});
+
+test('立体吃子只翻目标面并交换该面内外层棋子', () => {
+  const state = {
+    ...solidStateOf([
+      { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+      { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
+      { ...piece('outer', 'white', 'bishop', 1, 2), panelIndex: 0 },
+      { ...piece('other-face', 'black', 'bishop', -1, 2), panelIndex: 1 }
+    ]),
+    solidLayers: {
+      outer: [
+        { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+        { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
+        { ...piece('outer', 'white', 'bishop', 1, 2), panelIndex: 0 },
+        { ...piece('other-face', 'black', 'bishop', -1, 2), panelIndex: 1 }
+      ],
+      inner: [{ ...piece('inner', 'black', 'bishop', 1, 2), panelIndex: 0 }]
+    },
+    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
+  };
+  state.pieces = state.solidLayers.outer;
+
+  const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
+
+  assert.equal(result.solidFaceSides[0], 'back');
+  assert.equal(result.solidFaceSides[1], 'front');
+  assert.equal(findPiece(result, 'outer'), undefined);
+  assert.ok(findPiece(result, 'inner'));
+  assert.ok(findPiece(result, 'other-face'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'wP'));
+});
+
+test('背面公共棱有棋子时整条棱不下沉也不上浮', () => {
+  const outer = [
+    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+    { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
+    { ...piece('edge-outer', 'white', 'bishop', 1, 0), panelIndex: 0 }
+  ];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: {
+      outer,
+      inner: [{ ...piece('edge-inner', 'black', 'bishop', 3, 0), panelIndex: 0 }]
+    },
+    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
+  };
+  state.pieces = state.solidLayers.outer;
+
+  const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
+
+  assert.ok(findPiece(result, 'edge-outer'));
+  assert.equal(findPiece(result, 'wP'), undefined);
+  assert.equal(findPiece(result, 'edge-inner'), undefined);
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-inner'));
+});
+
+test('公共顶点被任意相交背面棱支撑时保持外层', () => {
+  const outer = [
+    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+    { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
+    { ...piece('apex', 'white', 'king', 0, 0), panelIndex: 0 }
+  ];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: {
+      outer,
+      inner: [{ ...piece('support', 'black', 'bishop', 0, 2), panelIndex: 1 }]
+    },
+    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
+  };
+  state.pieces = state.solidLayers.outer;
+
+  const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
+
+  assert.ok(findPiece(result, 'apex'));
+  assert.equal(findPiece(result, 'wP'), undefined);
+  assert.equal(findPiece(result, 'support'), undefined);
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'support'));
+});
+
 test('皇后的每个合法动作都必须完整走三步', () => {
   const state = stateOf([piece('wQ', 'white', 'queen', 0, 0)]);
   const moves = legalMoves(state, 'wQ');

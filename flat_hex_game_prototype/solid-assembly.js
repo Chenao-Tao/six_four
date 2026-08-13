@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=solid-shared-points-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=solid-surface-movement-1';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 

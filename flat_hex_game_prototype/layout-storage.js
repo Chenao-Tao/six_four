@@ -2,7 +2,7 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState
-} from './game.js?v=solid-shared-points-1';
+} from './game.js?v=solid-surface-movement-1';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';

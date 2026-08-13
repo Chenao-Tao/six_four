@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=solid-shared-points-1';
+} from './game.js?v=solid-surface-movement-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=solid-shared-points-1';
+} from './layout-storage.js?v=solid-surface-movement-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=solid-shared-points-1';
+} from './solid-board.js?v=solid-surface-movement-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-shared-points-1';
+} from './solid-assembly.js?v=solid-surface-movement-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -144,12 +144,19 @@ function clonePiecesByFace(boardStates) {
 
 function cloneGameState(source) {
   const boardStates = clonePiecesByFace(source.boardStates);
+  const solidLayers = source.solidLayers
+    ? {
+        outer: source.solidLayers.outer.map(item => ({ ...item, position: { ...item.position } })),
+        inner: source.solidLayers.inner.map(item => ({ ...item, position: { ...item.position } }))
+      }
+    : null;
   return {
     ...source,
     history: [...source.history],
     positionHistory: [...(source.positionHistory ?? [])],
     boardStates,
-    pieces: boardStates[source.boardSide],
+    ...(solidLayers ? { solidLayers, solidFaceSides: [...source.solidFaceSides] } : {}),
+    pieces: solidLayers ? solidLayers.outer : boardStates[source.boardSide],
     boardFaceLabels: {
       front: [...source.boardFaceLabels.front],
       back: [...source.boardFaceLabels.back]
@@ -372,6 +379,9 @@ function displayedBoardSide() {
 function displayedPieces() {
   const side = displayedBoardSide();
   if (customEditor) return customEditor.boardStates[side];
+  if (state.boardShape === 'solid' && state.solidLayers) {
+    return previewSide === null ? state.solidLayers.outer : state.solidLayers.inner;
+  }
   return state.boardStates?.[side] ?? state.pieces;
 }
 
@@ -402,16 +412,26 @@ function solidBoardModel() {
     };
   }
   const side = displayedBoardSide();
+  const faceLabels = [...displayedFaceLabels()[side]];
+  const panelRotations = [...displayedPanelRotations()[side]];
+  if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
+    state.solidFaceSides.forEach((faceSide, panelIndex) => {
+      if (faceSide !== 'back') return;
+      const oppositeIndex = 5 - panelIndex;
+      faceLabels[panelIndex] = displayedFaceLabels().back[oppositeIndex];
+      panelRotations[panelIndex] = displayedPanelRotations().back[oppositeIndex];
+    });
+  }
   const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
     const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
     const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
-    return { ...mapped, targetKey: keyOf(move.target), captureId: move.captureId };
+    return { ...mapped, targetKey: move.mapKey ?? keyOf(move.target), captureId: move.captureId };
   });
   return {
     side,
     pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
-    faceLabels: [...displayedFaceLabels()[side]],
-    panelRotations: [...displayedPanelRotations()[side]],
+    faceLabels,
+    panelRotations,
     selectedPanel: customEditor ? solidSelectedPanel : null,
     selectedPieceId: customEditor ? null : selectedPieceId,
     moveTargets
@@ -1049,7 +1069,10 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
     ? capturePositionEffect(mover.type, captured.type)
     : 'move';
   if (!solidBoardViewer) await animateMove(pieceId, move.path, positionEffect, captured?.id);
-  const result = applyMove(state, pieceId, move.target, promote);
+  const result = applyMove(state, pieceId, {
+    ...move.target,
+    ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {})
+  }, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
     return;

@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=solid-shared-points-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=solid-surface-movement-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;

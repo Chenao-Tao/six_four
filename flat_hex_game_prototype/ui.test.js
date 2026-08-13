@@ -120,8 +120,10 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
   assert.match(app, /if \(move\) chooseMove\(move\)/);
-  assert.match(app, /const result = applyMove\(state, pieceId, move\.target, promote\)/);
+  assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
   assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
+  assert.match(app, /solidFaceSides\.forEach/);
+  assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
 });
 
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {

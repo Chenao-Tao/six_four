@@ -53,6 +53,13 @@ const SOLID_SLOT_VERTICES = [
   ['bottom', 'c', 'b'],
   ['bottom', 'a', 'c']
 ];
+const SOLID_VERTEX_NAMES = ['top', 'bottom', 'a', 'b', 'c'];
+const SOLID_EDGE_IDS = new Set(SOLID_SLOT_VERTICES.flatMap(vertices => [
+  [vertices[0], vertices[1]].sort().join(':'),
+  [vertices[1], vertices[2]].sort().join(':'),
+  [vertices[2], vertices[0]].sort().join(':')
+]));
+let cachedSolidSurfaceGraph = null;
 
 // 顺序与 UI 六个扇区一致：右下、下、左下、左上、上、右上。
 // 布局三当前朝上面使用 1A/2A/3A/5A/6A/4B，翻面后是实体板互补面。
@@ -163,6 +170,85 @@ export function solidPointKey(position, panelIndex) {
   return `${weights.top},${weights.bottom},${weights.a},${weights.b},${weights.c}`;
 }
 
+function solidPointWeights(pointKey) {
+  const values = pointKey.split(',').map(Number);
+  return Object.fromEntries(SOLID_VERTEX_NAMES.map((name, index) => [name, values[index]]));
+}
+
+function solidPointVertices(pointKey) {
+  const weights = solidPointWeights(pointKey);
+  return SOLID_VERTEX_NAMES.filter(name => weights[name] > 0);
+}
+
+function solidIncidentEdges(pointKey) {
+  const vertices = solidPointVertices(pointKey);
+  if (vertices.length === 2) return [vertices.sort().join(':')];
+  if (vertices.length !== 1) return [];
+  const vertex = vertices[0];
+  return [...SOLID_EDGE_IDS].filter(edge => edge.split(':').includes(vertex));
+}
+
+function solidSurfaceGraph() {
+  if (cachedSolidSurfaceGraph) return cachedSolidSurfaceGraph;
+  const nodes = new Map();
+  for (let panelIndex = 0; panelIndex < 6; panelIndex += 1) {
+    for (const position of BOARD_POINTS) {
+      if (!pointIsOnPanel(position, panelIndex)) continue;
+      const pointKey = solidPointKey(position, panelIndex);
+      if (!nodes.has(pointKey)) nodes.set(pointKey, { aliases: [], step: [], bishop: [] });
+      nodes.get(pointKey).aliases.push({ position: { ...position }, panelIndex });
+    }
+  }
+
+  const connectSteps = () => {
+    for (const [pointKey, node] of nodes) {
+      const seen = new Set();
+      for (const alias of node.aliases) {
+        for (const direction of DIRECTIONS) {
+          const target = add(alias.position, direction);
+          if (!isOnBoard(target) || !pointIsOnPanel(target, alias.panelIndex)) continue;
+          const targetPointKey = solidPointKey(target, alias.panelIndex);
+          const transitionKey = `${targetPointKey}:${alias.panelIndex}`;
+          if (targetPointKey === pointKey || seen.has(transitionKey)) continue;
+          seen.add(transitionKey);
+          node.step.push({
+            pointKey: targetPointKey,
+            position: target,
+            panelIndex: alias.panelIndex
+          });
+        }
+      }
+    }
+  };
+  connectSteps();
+  for (const [pointKey, node] of nodes) {
+    const commonNeighborCounts = new Map();
+    for (const firstStep of node.step) {
+      for (const secondStep of nodes.get(firstStep.pointKey)?.step ?? []) {
+        if (secondStep.pointKey === pointKey ||
+            node.step.some(step => step.pointKey === secondStep.pointKey)) continue;
+        commonNeighborCounts.set(
+          secondStep.pointKey,
+          (commonNeighborCounts.get(secondStep.pointKey) ?? 0) + 1
+        );
+      }
+    }
+    for (const [targetPointKey, count] of commonNeighborCounts) {
+      if (count < 2) continue;
+      const targetNode = nodes.get(targetPointKey);
+      const alias = targetNode.aliases.find(candidate =>
+        node.aliases.some(source => source.panelIndex === candidate.panelIndex)) ?? targetNode.aliases[0];
+      node.bishop.push({
+        pointKey: targetPointKey,
+        position: { ...alias.position },
+        panelIndex: alias.panelIndex
+      });
+    }
+  }
+  cachedSolidSurfaceGraph = nodes;
+  return nodes;
+}
+
 function pointIsOnPanel(point, panelIndex) {
   const coordinates = panelCoordinates(point, panelIndex);
   const center = 1 - coordinates.first - coordinates.second;
@@ -181,6 +267,18 @@ function piecePanelIndex(piece) {
   return validatePanelIndex(piece.panelIndex) && pointIsOnPanel(piece.position, piece.panelIndex)
     ? piece.panelIndex
     : panelIndexForPoint(piece.position);
+}
+
+function physicalBackPieces(pieces) {
+  return pieces.map(item => {
+    const backPanel = piecePanelIndex(item);
+    const physicalPanel = 5 - backPanel;
+    return {
+      ...item,
+      position: pointFromPanelCoordinates(panelCoordinates(item.position, backPanel), physicalPanel, true),
+      panelIndex: physicalPanel
+    };
+  });
 }
 
 function pointFromPanelCoordinates(coordinates, panelIndex, mirrored = false) {
@@ -443,10 +541,13 @@ export function positionSignature(state) {
       return `${item.id}:${item.side}:${item.type}:${positionKey}`;
     })
     .join('|');
-  const position = state.boardStates
+  const position = state.solidLayers
+    ? `outer[${serializePieces(state.solidLayers.outer)}]:inner[${serializePieces(state.solidLayers.inner)}]`
+    : state.boardStates
     ? `front[${serializePieces(state.boardStates.front)}]:back[${serializePieces(state.boardStates.back)}]`
     : serializePieces(state.pieces);
-  return `${state.boardSide ?? 'single'}:${state.turn}:${state.winner ?? '-'}:${position}`;
+  const faceSides = state.solidFaceSides?.join('') ?? state.boardSide ?? 'single';
+  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${position}`;
 }
 
 function withInitialPositionHistory(state) {
@@ -553,6 +654,15 @@ export function createCustomState(
     normalizedBoardShape
   );
   if (layout.error) return { error: layout.error };
+  const solidExtra = normalizedBoardShape === 'solid'
+    ? {
+        solidLayers: {
+          outer: layout.boardStates.front,
+          inner: physicalBackPieces(layout.boardStates.back)
+        },
+        solidFaceSides: Array(6).fill('front')
+      }
+    : {};
   return {
     state: withInitialPositionHistory(doubleSidedState(
       layout.boardStates.front,
@@ -561,7 +671,8 @@ export function createCustomState(
         boardShape: normalizedBoardShape,
         boardFaceLabels: layout.faceLabels,
         boardPanelRotations: layout.panelRotations,
-        history: ['自定义棋盘已保存：白方先行']
+        history: ['自定义棋盘已保存：白方先行'],
+        ...solidExtra
       }
     ))
   };
@@ -594,7 +705,10 @@ function boardPointKey(state, position, panelIndex) {
     : keyOf(position);
 }
 
-function movePanelIndex(pieceToMove, target) {
+function movePanelIndex(pieceToMove, target, preferredPanelIndex = null) {
+  if (validatePanelIndex(preferredPanelIndex) && pointIsOnPanel(target, preferredPanelIndex)) {
+    return preferredPanelIndex;
+  }
   const currentPanel = piecePanelIndex(pieceToMove);
   return currentPanel !== null && pointIsOnPanel(target, currentPanel)
     ? currentPanel
@@ -623,17 +737,31 @@ function canLand(pieceToMove, occupant) {
   return canCapture(pieceToMove.type, occupant.type);
 }
 
-function addMove(state, moves, pieceToMove, target, path, occupied, panelIndex = movePanelIndex(pieceToMove, target)) {
-  const pointKey = boardPointKey(state, target, panelIndex);
+function addMove(
+  state,
+  moves,
+  pieceToMove,
+  target,
+  path,
+  occupied,
+  panelIndex = movePanelIndex(pieceToMove, target),
+  knownPointKey = null
+) {
+  const pointKey = knownPointKey ?? boardPointKey(state, target, panelIndex);
   if (!pointKey) return false;
   const occupant = occupied.get(pointKey);
   if (!canLand(pieceToMove, occupant)) return false;
   if ([...moves.values()].some(move => move.pointKey === pointKey)) return !occupant;
-  moves.set(keyOf(target), {
+  const baseKey = keyOf(target);
+  const mapKey = moves.has(baseKey) && state.boardShape === 'solid'
+    ? `${panelIndex}:${baseKey}`
+    : baseKey;
+  moves.set(mapKey, {
     target,
     path,
     panelIndex,
     pointKey,
+    mapKey,
     captureId: occupant?.id ?? null,
     capturesKing: occupant?.type === 'king'
   });
@@ -642,6 +770,22 @@ function addMove(state, moves, pieceToMove, target, path, occupied, panelIndex =
 
 function pawnMoves(state, pieceToMove, occupied) {
   const moves = new Map();
+  if (state.boardShape === 'solid') {
+    const pointKey = boardPointKey(state, pieceToMove.position, piecePanelIndex(pieceToMove));
+    for (const transition of solidSurfaceGraph().get(pointKey)?.step ?? []) {
+      addMove(
+        state,
+        moves,
+        pieceToMove,
+        transition.position,
+        [pieceToMove.position, transition.position],
+        occupied,
+        transition.panelIndex,
+        transition.pointKey
+      );
+    }
+    return moves;
+  }
   DIRECTIONS.forEach(direction => {
     const target = add(pieceToMove.position, direction);
     if (isOnBoard(target)) {
@@ -653,6 +797,22 @@ function pawnMoves(state, pieceToMove, occupied) {
 
 function bishopMoves(state, pieceToMove, occupied) {
   const moves = new Map();
+  if (state.boardShape === 'solid') {
+    const pointKey = boardPointKey(state, pieceToMove.position, piecePanelIndex(pieceToMove));
+    for (const transition of solidSurfaceGraph().get(pointKey)?.bishop ?? []) {
+      addMove(
+        state,
+        moves,
+        pieceToMove,
+        transition.position,
+        [pieceToMove.position, transition.position],
+        occupied,
+        transition.panelIndex,
+        transition.pointKey
+      );
+    }
+    return moves;
+  }
   BISHOP_DIRECTIONS.forEach(direction => {
     const target = add(pieceToMove.position, direction);
     if (!isOnBoard(target)) return;
@@ -662,6 +822,7 @@ function bishopMoves(state, pieceToMove, occupied) {
 }
 
 function queenMoves(state, pieceToMove, occupied) {
+  if (state.boardShape === 'solid') return solidQueenMoves(state, pieceToMove, occupied);
   const moves = new Map();
   const startPanel = piecePanelIndex(pieceToMove);
   const queue = [{
@@ -696,6 +857,46 @@ function queenMoves(state, pieceToMove, occupied) {
   return moves;
 }
 
+function solidQueenMoves(state, pieceToMove, occupied) {
+  const moves = new Map();
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const queue = [{
+    point: pieceToMove.position,
+    panelIndex: startPanel,
+    pointKey: startPointKey,
+    path: [pieceToMove.position],
+    pointKeys: [startPointKey]
+  }];
+  while (queue.length) {
+    const current = queue.shift();
+    const depth = current.path.length - 1;
+    if (depth === 3) continue;
+    for (const transition of solidSurfaceGraph().get(current.pointKey)?.step ?? []) {
+      if (current.pointKeys.includes(transition.pointKey)) continue;
+      const occupant = occupied.get(transition.pointKey);
+      const path = [...current.path, transition.position];
+      const pointKeys = [...current.pointKeys, transition.pointKey];
+      const nextDepth = depth + 1;
+      if (nextDepth === 3) {
+        addMove(
+          state,
+          moves,
+          pieceToMove,
+          transition.position,
+          path,
+          occupied,
+          transition.panelIndex,
+          transition.pointKey
+        );
+      } else if (!occupant) {
+        queue.push({ ...transition, path, pointKeys });
+      }
+    }
+  }
+  return moves;
+}
+
 function pointsEqual(left, right) {
   return left.q === right.q && left.r === right.r;
 }
@@ -714,6 +915,7 @@ function straightPath(from, to) {
 }
 
 function kingMoves(state, pieceToMove, occupied) {
+  if (state.boardShape === 'solid') return solidKingMoves(state, pieceToMove, occupied);
   const moves = new Map();
   const currentIndex = KING_POINTS.findIndex(point => pointsEqual(point, pieceToMove.position));
   if (currentIndex < 0) return moves;
@@ -731,6 +933,48 @@ function kingMoves(state, pieceToMove, occupied) {
     });
     if (!blocked) addMove(state, moves, pieceToMove, target, path, occupied);
   });
+  return moves;
+}
+
+function solidKingMoves(state, pieceToMove, occupied) {
+  const moves = new Map();
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const startVertices = solidPointVertices(startPointKey);
+  if (startVertices.length !== 1) return moves;
+  const startVertex = startVertices[0];
+  const graph = solidSurfaceGraph();
+  for (const edgeId of [...SOLID_EDGE_IDS].filter(edge => edge.split(':').includes(startVertex))) {
+    const targetVertex = edgeId.split(':').find(vertex => vertex !== startVertex);
+    const targetEntry = [...graph.entries()].find(([pointKey]) => {
+      const vertices = solidPointVertices(pointKey);
+      return vertices.length === 1 && vertices[0] === targetVertex;
+    });
+    if (!targetEntry) continue;
+    const [targetPointKey, targetNode] = targetEntry;
+    const edgeNodes = [...graph.entries()]
+      .filter(([pointKey]) => {
+        const vertices = solidPointVertices(pointKey);
+        return vertices.every(vertex => edgeId.split(':').includes(vertex));
+      })
+      .sort(([leftKey], [rightKey]) =>
+        solidPointWeights(rightKey)[startVertex] - solidPointWeights(leftKey)[startVertex]);
+    const blocked = edgeNodes.slice(1, -1).some(([pointKey]) => occupied.has(pointKey));
+    if (blocked) continue;
+    const alias = targetNode.aliases.find(item => item.panelIndex === startPanel) ?? targetNode.aliases[0];
+    const path = edgeNodes.map(([, node]) =>
+      (node.aliases.find(item => item.panelIndex === alias.panelIndex) ?? node.aliases[0]).position);
+    addMove(
+      state,
+      moves,
+      pieceToMove,
+      alias.position,
+      path,
+      occupied,
+      alias.panelIndex,
+      targetPointKey
+    );
+  }
   return moves;
 }
 
@@ -768,9 +1012,63 @@ export function capturePositionEffect(attackerType, defenderType) {
   return 'hold';
 }
 
+function pointTouchesSolidFace(pointKey, panelIndex) {
+  const faceVertices = new Set(SOLID_SLOT_VERTICES[panelIndex]);
+  return solidPointVertices(pointKey).every(vertex => faceVertices.has(vertex));
+}
+
+function supportedSolidEdges(innerPieces) {
+  const supported = new Set();
+  for (const item of innerPieces) {
+    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
+    for (const edgeId of solidIncidentEdges(pointKey)) supported.add(edgeId);
+  }
+  return supported;
+}
+
+function sharedSolidPointIsSupported(pointKey, supportedEdges) {
+  return solidIncidentEdges(pointKey).some(edgeId => supportedEdges.has(edgeId));
+}
+
+function flipSolidFace(state, nextOuterPieces, panelIndex) {
+  const innerPieces = state.solidLayers?.inner ?? [];
+  const supportedEdges = supportedSolidEdges(innerPieces);
+  const outer = [];
+  const inner = [];
+
+  for (const item of nextOuterPieces) {
+    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
+    const vertices = solidPointVertices(pointKey);
+    const touchesFace = pointTouchesSolidFace(pointKey, panelIndex);
+    const sharedAndSupported = vertices.length < 3 &&
+      sharedSolidPointIsSupported(pointKey, supportedEdges);
+    (touchesFace && !sharedAndSupported ? inner : outer).push(item);
+  }
+  for (const item of innerPieces) {
+    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
+    const vertices = solidPointVertices(pointKey);
+    const touchesFace = pointTouchesSolidFace(pointKey, panelIndex);
+    const mayRise = vertices.length === 3 && touchesFace;
+    (mayRise ? outer : inner).push(item);
+  }
+
+  const solidFaceSides = [...(state.solidFaceSides ?? Array(6).fill('front'))];
+  solidFaceSides[panelIndex] = solidFaceSides[panelIndex] === 'back' ? 'front' : 'back';
+  return { solidLayers: { outer, inner }, solidFaceSides };
+}
+
+function moveForTarget(moves, target) {
+  if (validatePanelIndex(target?.panelIndex)) {
+    const exact = [...moves.values()].find(move =>
+      move.panelIndex === target.panelIndex && pointsEqual(move.target, target));
+    if (exact) return exact;
+  }
+  return moves.get(keyOf(target)) ?? [...moves.values()].find(move => pointsEqual(move.target, target));
+}
+
 export function applyMove(state, pieceId, target, promote = false, recordHistory = true) {
   const moves = legalMoves(state, pieceId);
-  const move = moves.get(keyOf(target));
+  const move = moveForTarget(moves, target);
   if (!move) return { state, error: '非法移动' };
   const movingPiece = state.pieces.find(item => item.id === pieceId);
   const captured = move.captureId
@@ -793,7 +1091,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         ...item,
         type: promotedType,
         position: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? { ...target }
+          ? { ...move.target }
           : { ...item.position },
         panelIndex: ['move', 'occupy', 'swap'].includes(positionEffect)
           ? move.panelIndex ?? panelIndexForPoint(target)
@@ -825,7 +1123,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const description = `${movingPiece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[movingPiece.type]} ` +
     (captured
       ? `在 ${keyOf(movingPiece.position)} 攻击 ${keyOf(target)}，吃${PIECE_NAMES[captured.type]}`
-      : `${keyOf(movingPiece.position)} → ${keyOf(target)}`) +
+      : `${keyOf(movingPiece.position)} → ${keyOf(move.target)}`) +
     captureResult +
     (capturedIsEliminated && positionEffect === 'occupy' ? '，攻击者占据目标点' : '') +
     (capturedIsEliminated && positionEffect === 'hold' ? '，攻击者留在原位' : '') +
@@ -833,14 +1131,27 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const nextTurn = state.turn === 'white' ? 'black' : 'white';
   const nextWinner = move.capturesKing ? movingPiece.side : null;
   const shouldFlip = Boolean(captured && state.boardStates);
+  const shouldFlipSolidFace = Boolean(
+    captured && state.boardShape === 'solid' && state.solidLayers
+  );
   const nextBoardSide = shouldFlip
-    ? state.boardSide === 'front' ? 'back' : 'front'
+    ? shouldFlipSolidFace
+      ? state.boardSide
+      : state.boardSide === 'front' ? 'back' : 'front'
     : state.boardSide;
   const boardStates = state.boardStates
     ? { ...state.boardStates, [state.boardSide]: nextPieces }
     : undefined;
+  const solidFlip = shouldFlipSolidFace
+    ? flipSolidFace(state, nextPieces, move.panelIndex)
+    : null;
+  const solidLayers = state.solidLayers
+    ? solidFlip?.solidLayers ?? { ...state.solidLayers, outer: nextPieces }
+    : undefined;
   const flipResult = shouldFlip
-    ? `，六边形棋盘翻到${nextBoardSide === 'front' ? 'A正面' : 'B反面'}`
+    ? shouldFlipSolidFace
+      ? `，立体棋盘第 ${move.panelIndex + 1} 面翻转`
+      : `，六边形棋盘翻到${nextBoardSide === 'front' ? 'A正面' : 'B反面'}`
     : '';
   const nextState = {
     ...state,
@@ -850,7 +1161,13 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     boardSide: nextBoardSide,
     flipCount: (state.flipCount ?? 0) + (shouldFlip ? 1 : 0),
     boardStates,
-    pieces: shouldFlip ? boardStates[nextBoardSide] : nextPieces,
+    ...(solidFlip ? { solidFaceSides: solidFlip.solidFaceSides } : {}),
+    ...(solidLayers ? { solidLayers } : {}),
+    pieces: solidLayers
+      ? solidLayers.outer
+      : shouldFlip
+        ? boardStates[nextBoardSide]
+        : nextPieces,
     history: recordHistory
       ? [...state.history, description + flipResult]
       : state.history
@@ -906,6 +1223,13 @@ function actionOrder(action) {
     (action.promote ? 100 : 0);
 }
 
+function actionTarget(action) {
+  return {
+    ...action.move.target,
+    ...(validatePanelIndex(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {})
+  };
+}
+
 function orderedActions(state) {
   return actionVariants(state).sort((left, right) => {
     const priority = actionOrder(right) - actionOrder(left);
@@ -927,7 +1251,7 @@ function repetitionAwareActions(state) {
     const result = applyMove(
       state,
       action.pieceId,
-      action.move.target,
+      actionTarget(action),
       action.promote,
       false
     );
