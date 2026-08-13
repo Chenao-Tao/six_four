@@ -19,6 +19,7 @@ function layoutSnapshot(name, source, builtIn = false) {
   return {
     name,
     ...(builtIn ? { builtIn: true } : {}),
+    boardShape: source.boardShape === 'solid' ? 'solid' : 'flat',
     boardStates: clonePiecesByFace(source.boardStates),
     faceLabels: {
       front: [...source.faceLabels.front],
@@ -34,6 +35,7 @@ function layoutSnapshot(name, source, builtIn = false) {
 function defaultLayout() {
   const state = createInitialState();
   return layoutSnapshot(DEFAULT_LAYOUT_NAME, {
+    boardShape: 'flat',
     boardStates: state.boardStates,
     faceLabels: state.boardFaceLabels,
     panelRotations: state.boardPanelRotations
@@ -45,6 +47,9 @@ function normalizedLayout(layout, requirePlayable) {
   if (!name) throw new Error('布局名称不能为空');
   if (name === DEFAULT_LAYOUT_NAME) throw new Error('默认布局不能被覆盖');
   if (name.length > 40) throw new Error('布局名称不能超过40个字符');
+  if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
+    throw new Error('棋盘形态必须是平面或立体');
+  }
   const validation = requirePlayable
     ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations)
     : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
@@ -56,7 +61,7 @@ function normalizedLayout(layout, requirePlayable) {
         panelRotations: validation.state.boardPanelRotations
       }
     : validation;
-  return layoutSnapshot(name, source);
+  return layoutSnapshot(name, { ...source, boardShape: layout?.boardShape });
 }
 
 export function createBrowserLayoutStore(storage) {

@@ -35,6 +35,19 @@ export function findPanelAtPoint(renderFaces, point) {
   return null;
 }
 
+export function findSolidTargetAtPoint(targets, point) {
+  let match = null;
+  for (const target of targets) {
+    const distance = Math.hypot(point.x - target.x, point.y - target.y);
+    if (distance > target.radius) continue;
+    if (!match || target.depth > match.depth ||
+      (target.depth === match.depth && distance < match.distance)) {
+      match = { ...target, distance };
+    }
+  }
+  return match;
+}
+
 export function mapPiecesToPanels(pieces) {
   return pieces.map(piece => {
     let panelIndex = Number.isInteger(piece.panelIndex) && piece.panelIndex >= 0 && piece.panelIndex < 6
@@ -170,7 +183,11 @@ export function solidEffectFrame(effect, now) {
   };
 }
 
-export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = () => {} } = {}) {
+export function createSolidBoardViewer(canvas, initialModel, {
+  onPanelSelect = () => {},
+  onPieceSelect = () => {},
+  onMoveSelect = () => {}
+} = {}) {
   const context = canvas.getContext('2d');
   const faces = modelFaces();
   let model = initialModel;
@@ -182,6 +199,7 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   let dragDistance = 0;
   let animationFrame = 0;
   let lastRenderFaces = [];
+  let lastInteractionTargets = [];
   let operationEffect = null;
 
   function project(point, width, height) {
@@ -374,6 +392,7 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
       };
     }).sort((left, right) => left.depth - right.depth);
     lastRenderFaces = renderFaces;
+    const interactionTargets = [];
 
     renderFaces.forEach(face => {
       const { panelIndex, vertices, projected } = face;
@@ -411,18 +430,49 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
         const world = barycentricPoint(vertices, piece.local);
         const position = project(add(world, scale(normal, 0.035)), width, height);
         const radius = Math.max(12, 17 * position.perspective * zoom);
+        const isSelectedPiece = model.selectedPieceId === piece.id;
         context.beginPath();
         context.arc(position.x, position.y, radius, 0, Math.PI * 2);
         context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
         context.fill();
-        context.lineWidth = 2.5;
-        context.strokeStyle = piece.side === 'white' ? '#7196ad' : '#d6eaf7';
+        context.lineWidth = isSelectedPiece ? 5 : 2.5;
+        context.strokeStyle = isSelectedPiece ? '#ffc96a' : piece.side === 'white' ? '#7196ad' : '#d6eaf7';
         context.stroke();
         context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
         context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
         context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+        interactionTargets.push({
+          type: 'piece',
+          pieceId: piece.id,
+          x: position.x,
+          y: position.y,
+          radius: radius + 7,
+          depth: position.z
+        });
+      });
+
+      (model.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
+        const world = barycentricPoint(vertices, move.local);
+        const position = project(add(world, scale(normal, 0.05)), width, height);
+        const radius = Math.max(9, 12 * position.perspective * zoom);
+        context.beginPath();
+        context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+        context.fillStyle = move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
+        context.fill();
+        context.lineWidth = 3;
+        context.strokeStyle = move.captureId ? '#ff6678' : '#61e7ff';
+        context.stroke();
+        interactionTargets.push({
+          type: 'move',
+          targetKey: move.targetKey,
+          x: position.x,
+          y: position.y,
+          radius: radius + 8,
+          depth: position.z
+        });
       });
     });
+    lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
   }
@@ -447,11 +497,17 @@ export function createSolidBoardViewer(canvas, initialModel, { onPanelSelect = (
   function pointerEnd(event) {
     if (dragging && dragDistance < 5 && event.type === 'pointerup') {
       const bounds = canvas.getBoundingClientRect();
-      const panelIndex = findPanelAtPoint(lastRenderFaces, {
+      const point = {
         x: event.clientX - bounds.left,
         y: event.clientY - bounds.top
-      });
-      if (panelIndex !== null) onPanelSelect(panelIndex);
+      };
+      const target = findSolidTargetAtPoint(lastInteractionTargets, point);
+      if (target?.type === 'move') onMoveSelect(target.targetKey);
+      else if (target?.type === 'piece') onPieceSelect(target.pieceId);
+      else {
+        const panelIndex = findPanelAtPoint(lastRenderFaces, point);
+        if (panelIndex !== null) onPanelSelect(panelIndex);
+      }
     }
     dragging = false;
     previousPointer = null;

@@ -29,6 +29,7 @@ function defaultLayout() {
   return {
     name: DEFAULT_LAYOUT_NAME,
     builtIn: true,
+    boardShape: 'flat',
     boardStates: clonePieces(state.boardStates),
     faceLabels: {
       front: [...state.boardFaceLabels.front],
@@ -78,6 +79,9 @@ function normalizedLayout(layout, requirePlayable) {
   if (!name) return { error: '布局名称不能为空' };
   if (name === DEFAULT_LAYOUT_NAME) return { error: '默认布局不能被覆盖' };
   if (name.length > 40) return { error: '布局名称不能超过40个字符' };
+  if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
+    return { error: '棋盘形态必须是平面或立体' };
+  }
   const validation = requirePlayable
     ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations)
     : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
@@ -92,6 +96,7 @@ function normalizedLayout(layout, requirePlayable) {
   return {
     layout: {
       name,
+      boardShape: layout?.boardShape === 'solid' ? 'solid' : 'flat',
       boardStates: clonePieces(source.boardStates),
       faceLabels: { front: [...source.faceLabels.front], back: [...source.faceLabels.back] },
       panelRotations: {

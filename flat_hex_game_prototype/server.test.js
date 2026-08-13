@@ -11,6 +11,7 @@ function layout(name) {
   const initial = createInitialState();
   return {
     name,
+    boardShape: 'solid',
     boardStates: {
       front: [{ id: 'white-king', side: 'white', type: 'king', position: { q: 0, r: 0 } }],
       back: [{ id: 'black-king', side: 'black', type: 'king', position: { q: 4, r: 0 } }]
@@ -59,6 +60,7 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
   assert.equal(library.activeLayoutName, '测试布局');
   const savedLayout = library.layouts.find(item => item.name === '测试布局');
   assert.ok(savedLayout);
+  assert.equal(savedLayout.boardShape, 'solid');
   assert.deepEqual(savedLayout.boardStates.front[0].position, { q: 0, r: 0 });
   assert.equal(savedLayout.boardStates.front[0].panelIndex, 0);
   assert.equal(savedLayout.boardStates.back[0].panelIndex, 0);

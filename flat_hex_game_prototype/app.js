@@ -27,8 +27,11 @@ import {
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY
-} from './layout-storage.js?v=vercel-layout-fallback-1';
-import { createSolidBoardViewer } from './solid-board.js?v=solid-operation-effects-1';
+} from './layout-storage.js?v=solid-board-shape-1';
+import {
+  createSolidBoardViewer,
+  mapPiecesToPanels
+} from './solid-board.js?v=solid-board-gameplay-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -46,7 +49,6 @@ const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
 const customizeButton = document.getElementById('customizeButton');
-const assembleSolidButton = document.getElementById('assembleSolidButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
 const editorStatus = document.getElementById('editorStatus');
@@ -58,6 +60,8 @@ const pieceEditorModal = document.getElementById('pieceEditorModal');
 const pieceEditorPoint = document.getElementById('pieceEditorPoint');
 const pieceModeButton = document.getElementById('pieceModeButton');
 const panelModeButton = document.getElementById('panelModeButton');
+const flatShapeButton = document.getElementById('flatShapeButton');
+const solidShapeButton = document.getElementById('solidShapeButton');
 const panelEditorActions = document.getElementById('panelEditorActions');
 const panelSelection = document.getElementById('panelSelection');
 const rotateSelectedPanelButton = document.getElementById('rotateSelectedPanelButton');
@@ -77,7 +81,11 @@ const rotateSolidPanelButton = document.getElementById('rotateSolidPanelButton')
 const flipSolidPanelButton = document.getElementById('flipSolidPanelButton');
 const swapSolidPanelButton = document.getElementById('swapSolidPanelButton');
 const resetSolidViewButton = document.getElementById('resetSolidViewButton');
+const resetSolidGameButton = document.getElementById('resetSolidGameButton');
+const saveSolidCustomButton = document.getElementById('saveSolidCustomButton');
 const closeSolidViewButton = document.getElementById('closeSolidViewButton');
+const solidCustomizeButton = document.getElementById('solidCustomizeButton');
+const solidViewerHelp = document.getElementById('solidViewerHelp');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -95,6 +103,7 @@ let draftPieceSequence = 0;
 let savedLayouts = [];
 let activeLayoutName = '默认布局';
 let activeInitialState = createInitialState();
+let activeBoardShape = 'flat';
 let solidBoardViewer = null;
 let solidSelectedPanel = null;
 let solidSwapPending = false;
@@ -169,6 +178,7 @@ function applyLayoutLibrary(library, selectedName = '') {
   savedLayouts = library.layouts;
   activeLayoutName = library.activeLayoutName;
   const activeLayout = savedLayouts.find(layout => layout.name === activeLayoutName);
+  activeBoardShape = activeLayout?.boardShape === 'solid' ? 'solid' : 'flat';
   if (activeLayout?.builtIn) {
     activeInitialState = createInitialState();
   } else if (activeLayout) {
@@ -181,7 +191,8 @@ function applyLayoutLibrary(library, selectedName = '') {
   } else {
     activeInitialState = createInitialState();
   }
-  activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName} · 保存位置：${layoutStorageLabel()}`;
+  activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName} · ` +
+    `${activeBoardShape === 'solid' ? '立体棋盘' : '平面棋盘'} · 保存位置：${layoutStorageLabel()}`;
   refreshSavedLayoutOptions(selectedName || activeLayoutName);
 }
 
@@ -193,6 +204,7 @@ async function initializeLayoutLibrary() {
       state = cloneGameState(activeInitialState);
       boardHelp.textContent = '服务器布局接口不可用，布局将保存在当前浏览器中。';
       render();
+      openActiveBoardShape();
       return;
     }
     const legacyLayouts = legacySavedLayouts();
@@ -216,6 +228,7 @@ async function initializeLayoutLibrary() {
       boardHelp.textContent = '部分旧缓存布局不符合当前规则，已保留在浏览器缓存中；其他布局已载入。';
     }
     render();
+    openActiveBoardShape();
   } catch (error) {
     boardHelp.textContent = `读取布局失败：${error.message}`;
   }
@@ -358,13 +371,31 @@ function isPreviewing() {
 
 function solidBoardModel() {
   const side = displayedBoardSide();
+  const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
+    const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
+    const mapped = mapSolidPoint(move.target, captured?.panelIndex);
+    return { ...mapped, targetKey: keyOf(move.target), captureId: move.captureId };
+  });
   return {
     side,
     pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
     faceLabels: [...displayedFaceLabels()[side]],
     panelRotations: [...displayedPanelRotations()[side]],
-    selectedPanel: solidSelectedPanel
+    selectedPanel: customEditor ? solidSelectedPanel : null,
+    selectedPieceId: customEditor ? null : selectedPieceId,
+    moveTargets
   };
+}
+
+function mapSolidPoint(position, panelIndex) {
+  const [mapped] = mapPiecesToPanels([{
+    id: 'solid-target',
+    side: 'white',
+    type: 'pawn',
+    position,
+    ...(Number.isInteger(panelIndex) ? { panelIndex } : {})
+  }]);
+  return { panelIndex: mapped.panelIndex, local: mapped.local };
 }
 
 function solidEditableData() {
@@ -393,7 +424,18 @@ function refreshSolidBoard(message = '') {
   const model = solidBoardModel();
   solidBoardViewer.update(model);
   if (message) solidViewerStatus.textContent = message;
+  const editingSolid = Boolean(customEditor);
   const selectedLabel = solidSelectedPanel === null ? null : model.faceLabels[solidSelectedPanel];
+  solidPanelSelection.classList.toggle('hidden', !editingSolid);
+  document.querySelector('.solid-panel-actions').classList.toggle('hidden', !editingSolid);
+  solidCustomizeButton.classList.toggle('hidden', editingSolid);
+  resetSolidGameButton.classList.toggle('hidden', editingSolid);
+  saveSolidCustomButton.classList.toggle('hidden', !editingSolid);
+  closeSolidViewButton.classList.toggle('hidden', !editingSolid);
+  closeSolidViewButton.textContent = '返回平面编辑';
+  solidViewerHelp.textContent = editingSolid
+    ? '点击选面 · 拖动旋转视角 · 滚轮缩放 · 保存时保留立体形态'
+    : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
   solidPanelSelection.textContent = solidSwapPending
     ? `已选择 ${selectedLabel}，请点击另一个立体面完成交换`
     : selectedLabel
@@ -405,8 +447,27 @@ function refreshSolidBoard(message = '') {
   swapSolidPanelButton.textContent = solidSwapPending ? '取消交换' : '交换面';
 }
 
+function selectSolidPiece(pieceId) {
+  if (!solidBoardViewer || customEditor) return;
+  if (selectedPieceId && pieceId !== selectedPieceId) {
+    const captureMove = captureMoveForClickedPiece(state, selectedPieceId, pieceId);
+    if (captureMove) {
+      chooseMove(captureMove);
+      return;
+    }
+  }
+  selectPiece(pieceId);
+  refreshSolidBoard();
+}
+
+function selectSolidMove(targetKey) {
+  if (!solidBoardViewer || customEditor || !selectedPieceId) return;
+  const move = selectedMoves.get(targetKey);
+  if (move) chooseMove(move);
+}
+
 function selectSolidPanel(panelIndex) {
-  if (!solidBoardViewer) return;
+  if (!solidBoardViewer || !customEditor) return;
   if (solidSwapPending && solidSelectedPanel === panelIndex) {
     const label = solidBoardModel().faceLabels[panelIndex];
     refreshSolidBoard(`${label} 已是待交换面，请点击另一个立体面。`);
@@ -496,14 +557,19 @@ function openSolidBoard() {
   if (animationLock || simulationLock || pendingPromotion || solidBoardViewer) return;
   stopAutoSimulation();
   closePieceEditor();
-  selectedPieceId = null;
-  selectedMoves = new Map();
+  if (customEditor) customEditor.boardShape = 'solid';
   solidSelectedPanel = null;
   solidSwapPending = false;
   const model = solidBoardModel();
   solidViewer.classList.remove('hidden');
-  solidViewerStatus.textContent = `${model.side === 'front' ? 'A' : 'B'} 面的六块三角板已组装；${model.pieces.length} 枚棋子来自当前平面布局。`;
-  solidBoardViewer = createSolidBoardViewer(solidBoardCanvas, model, { onPanelSelect: selectSolidPanel });
+  solidViewerStatus.textContent = customEditor
+    ? `${model.side === 'front' ? 'A' : 'B'} 面已组成立体；可继续调整板块并保存为立体棋盘。`
+    : `第 ${state.moveNumber} 手，${state.turn === 'white' ? '白方' : '黑方'}行动；点击己方棋子查看合法落点。`;
+  solidBoardViewer = createSolidBoardViewer(solidBoardCanvas, model, {
+    onPanelSelect: selectSolidPanel,
+    onPieceSelect: selectSolidPiece,
+    onMoveSelect: selectSolidMove
+  });
   refreshSolidBoard();
   render();
 }
@@ -515,8 +581,14 @@ function closeSolidBoard() {
   solidSelectedPanel = null;
   solidSwapPending = false;
   solidViewer.classList.add('hidden');
-  boardHelp.textContent = '六块三角板已展开回平面，立体编辑结果已同步。';
+  boardHelp.textContent = customEditor
+    ? '已返回平面编辑，保存形态仍为立体棋盘。'
+    : '已返回当前保存布局。';
   render();
+}
+
+function openActiveBoardShape() {
+  if (activeBoardShape === 'solid' && !solidBoardViewer && !customEditor) openSolidBoard();
 }
 
 function renderFaceLabels(side) {
@@ -718,7 +790,6 @@ function render() {
   resetButton.disabled = editing;
   previewButton.disabled = editing;
   customizeButton.disabled = editing;
-  assembleSolidButton.disabled = animationLock || simulationLock || Boolean(pendingPromotion);
   customEditorControls.classList.toggle('hidden', !editing);
   if (editing) {
     const pieceCount = customEditor.boardStates[boardSide].length;
@@ -730,6 +801,10 @@ function render() {
     panelModeButton.classList.toggle('active', customEditor.mode === 'panels');
     pieceModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'pieces'));
     panelModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'panels'));
+    flatShapeButton.classList.toggle('active', customEditor.boardShape === 'flat');
+    solidShapeButton.classList.toggle('active', customEditor.boardShape === 'solid');
+    flatShapeButton.setAttribute('aria-pressed', String(customEditor.boardShape === 'flat'));
+    solidShapeButton.setAttribute('aria-pressed', String(customEditor.boardShape === 'solid'));
     panelEditorActions.classList.toggle('hidden', customEditor.mode !== 'panels');
     clearEditorFaceButton.disabled = customEditor.mode !== 'pieces';
     const selectedLabel = customEditor.selectedPanel === null
@@ -763,6 +838,7 @@ function render() {
   } else if (!selectedPieceId) {
     selectedInfo.textContent = state.winner ? '整局结束。' : '尚未选择棋子';
   }
+  if (solidBoardViewer) refreshSolidBoard();
 }
 
 function selectPiece(pieceId) {
@@ -847,7 +923,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   const positionEffect = captured
     ? capturePositionEffect(mover.type, captured.type)
     : 'move';
-  await animateMove(pieceId, move.path, positionEffect, captured?.id);
+  if (!solidBoardViewer) await animateMove(pieceId, move.path, positionEffect, captured?.id);
   const result = applyMove(state, pieceId, move.target, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -857,7 +933,9 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   selectedMoves = new Map();
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
-  if (move.captureId && result.state.boardSide !== state.boardSide) {
+  if (solidBoardViewer) {
+    state = result.state;
+  } else if (move.captureId && result.state.boardSide !== state.boardSide) {
     await animateBoardFlip(result.state);
   } else {
     state = result.state;
@@ -871,6 +949,11 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
           ? '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
           : '攻击完成：攻击者留在原位，被攻击棋子已降级或移出。'
       : '移动完成，轮到另一方。');
+  if (solidBoardViewer) {
+    solidViewerStatus.textContent = state.winner
+      ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
+      : `移动完成；第 ${state.moveNumber} 手，${state.turn === 'white' ? '白方' : '黑方'}行动。`;
+  }
   render();
 }
 
@@ -965,6 +1048,7 @@ function enterCustomEditor() {
   customEditor = {
     side: 'front',
     mode: 'pieces',
+    boardShape: 'flat',
     selectedPanel: null,
     swapPending: false,
     boardStates: { front: [], back: [] },
@@ -1030,6 +1114,7 @@ async function saveCustomBoard() {
     return;
   }
   const snapshot = layoutSnapshotFromEditor(name, {
+    boardShape: customEditor.boardShape,
     boardStates: result.state.boardStates,
     faceLabels: result.state.boardFaceLabels,
     panelRotations: result.state.boardPanelRotations
@@ -1044,6 +1129,7 @@ async function saveCustomBoard() {
     boardHelp.textContent = `无法保存布局文件：${error.message}`;
     return;
   }
+  if (solidBoardViewer) closeSolidBoard();
   state = cloneGameState(activeInitialState);
   customEditor = null;
   previewSide = null;
@@ -1052,11 +1138,13 @@ async function saveCustomBoard() {
   closePieceEditor();
   boardHelp.textContent = `布局“${name}”已保存到${layoutStorageLabel()}、设为启用布局并开局。`;
   render();
+  openActiveBoardShape();
 }
 
 function layoutSnapshotFromEditor(name, layout = customEditor) {
   return {
     name,
+    boardShape: layout.boardShape === 'solid' ? 'solid' : 'flat',
     boardStates: clonePiecesByFace(layout.boardStates),
     faceLabels: {
       front: [...layout.faceLabels.front],
@@ -1128,12 +1216,14 @@ function loadLayoutFromLibrary() {
     front: [...validation.panelRotations.front],
     back: [...validation.panelRotations.back]
   };
+  customEditor.boardShape = layout.boardShape === 'solid' ? 'solid' : 'flat';
   customEditor.side = 'front';
   customEditor.selectedPanel = null;
   customEditor.swapPending = false;
   layoutNameInput.value = layout.name;
   boardHelp.textContent = `已载入布局“${layout.name}”，可继续编辑或保存并开局。`;
   render();
+  if (customEditor.boardShape === 'solid') openSolidBoard();
 }
 
 async function activateLayoutFromLibrary() {
@@ -1153,6 +1243,7 @@ async function activateLayoutFromLibrary() {
     closePieceEditor();
     boardHelp.textContent = `已启用布局“${name}”并开局；以后重新开局也从该布局开始。`;
     render();
+    openActiveBoardShape();
   } catch (error) {
     boardHelp.textContent = `无法启用布局：${error.message}`;
   }
@@ -1182,6 +1273,18 @@ function setEditorMode(mode) {
   boardHelp.textContent = mode === 'pieces'
     ? '棋子摆放模式：点击交点设置或替换棋子。'
     : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
+  render();
+}
+
+function setBoardShape(boardShape) {
+  if (!customEditor || !['flat', 'solid'].includes(boardShape)) return;
+  customEditor.boardShape = boardShape;
+  if (boardShape === 'solid') {
+    openSolidBoard();
+    return;
+  }
+  if (solidBoardViewer) closeSolidBoard();
+  boardHelp.textContent = '当前布局将保存为平面棋盘。';
   render();
 }
 
@@ -1285,6 +1388,9 @@ function resetGame() {
   promotionModal.classList.add('hidden');
   boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
+  if (solidBoardViewer) {
+    solidViewerStatus.textContent = `已重新开局；第 ${state.moveNumber} 手，白方行动。`;
+  }
 }
 
 async function toggleFacePreview() {
@@ -1371,11 +1477,16 @@ resetButton.addEventListener('click', resetGame);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
-assembleSolidButton.addEventListener('click', openSolidBoard);
+solidCustomizeButton.addEventListener('click', () => {
+  closeSolidBoard();
+  enterCustomEditor();
+});
 rotateSolidPanelButton.addEventListener('click', rotateSolidPanel);
 flipSolidPanelButton.addEventListener('click', flipSolidPanel);
 swapSolidPanelButton.addEventListener('click', beginSolidPanelSwap);
 resetSolidViewButton.addEventListener('click', () => solidBoardViewer?.resetView());
+resetSolidGameButton.addEventListener('click', resetGame);
+saveSolidCustomButton.addEventListener('click', saveCustomBoard);
 closeSolidViewButton.addEventListener('click', closeSolidBoard);
 switchEditorFaceButton.addEventListener('click', switchEditorFace);
 clearEditorFaceButton.addEventListener('click', clearEditorFace);
@@ -1383,6 +1494,8 @@ saveCustomButton.addEventListener('click', saveCustomBoard);
 cancelCustomButton.addEventListener('click', cancelCustomBoard);
 pieceModeButton.addEventListener('click', () => setEditorMode('pieces'));
 panelModeButton.addEventListener('click', () => setEditorMode('panels'));
+flatShapeButton.addEventListener('click', () => setBoardShape('flat'));
+solidShapeButton.addEventListener('click', () => setBoardShape('solid'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
 rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);

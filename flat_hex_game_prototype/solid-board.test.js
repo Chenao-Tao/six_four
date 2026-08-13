@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
-import { findPanelAtPoint, mapPiecesToPanels, solidEffectFrame } from './solid-board.js';
+import {
+  findPanelAtPoint,
+  findSolidTargetAtPoint,
+  mapPiecesToPanels,
+  solidEffectFrame
+} from './solid-board.js';
 
 test('平面棋子映射到六块立体板时不丢失、不复制且不修改原数据', () => {
   const pieces = [
@@ -58,6 +63,18 @@ test('立体面点击按绘制层级选中最靠近观察者的三角板', () =>
   assert.equal(findPanelAtPoint(faces, { x: 20, y: 20 }), 4);
   assert.equal(findPanelAtPoint(faces, { x: 5, y: 5 }), 1);
   assert.equal(findPanelAtPoint(faces, { x: 120, y: 120 }), null);
+});
+
+test('立体交互优先命中更靠近观察者的棋子或合法落点', () => {
+  const targets = [
+    { type: 'piece', pieceId: 'far-piece', x: 50, y: 50, radius: 20, depth: 0.2 },
+    { type: 'move', targetKey: '1,0', x: 54, y: 50, radius: 16, depth: 0.8 },
+    { type: 'piece', pieceId: 'near-piece', x: 50, y: 50, radius: 18, depth: 1.1 }
+  ];
+
+  assert.equal(findSolidTargetAtPoint(targets, { x: 52, y: 50 }).pieceId, 'near-piece');
+  assert.equal(findSolidTargetAtPoint(targets, { x: 31, y: 50 }).pieceId, 'far-piece');
+  assert.equal(findSolidTargetAtPoint(targets, { x: 100, y: 100 }), null);
 });
 
 test('立体操作特效提供稳定进度并在时长结束后清除', () => {

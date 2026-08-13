@@ -87,11 +87,15 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .solid-viewer-panel small { display: block; margin-top: 10px; }
 .solid-panel-selection { margin: 12px 0 9px; padding: 9px 10px; color: var(--gold); border: 1px solid rgba(255,201,106,.28); border-radius: 9px; background: rgba(20,20,16,.7); font-size: 13px; }
 .solid-panel-actions { margin-bottom: 10px; }
+.solid-panel-selection.hidden, .solid-panel-actions.hidden, #solidCustomizeButton.hidden, #resetSolidGameButton.hidden, #saveSolidCustomButton.hidden, #closeSolidViewButton.hidden { display: none; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }
 .editor-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .editor-modes button.active { color: #071015; background: var(--cyan); }
+.board-shape-control { margin-bottom: 10px; padding: 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; background: rgba(5,12,18,.48); }
+.board-shape-control > span { display: block; margin-bottom: 7px; color: #9fb4c5; font-size: 12px; font-weight: 700; }
+.board-shape-control .editor-modes { margin-bottom: 0; }
 .panel-editor-actions { margin-bottom: 10px; padding: 10px; border: 1px solid rgba(255,201,106,.25); border-radius: 9px; background: rgba(22,25,25,.65); }
 .panel-editor-actions.hidden { display: none; }
 .panel-selection { margin-bottom: 8px; color: var(--gold); font-size: 12px; }
@@ -147,7 +151,7 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .piece-label.black { fill: #f1f7fc; }
 .winner-glow { animation: pulse 1s ease-in-out infinite alternate; }
 @keyframes pulse { from { filter: drop-shadow(0 0 6px #ffd76f); } to { filter: drop-shadow(0 0 20px #fff1a6); } }
-.modal { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(2,5,8,.72); }
+.modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(2,5,8,.72); }
 .modal.hidden { display: none; }
 .modal-card { width: min(360px, calc(100vw - 32px)); padding: 22px; border: 1px solid #55728a; border-radius: 16px; background: #131d27; }
 .piece-editor-card { width: min(480px, calc(100vw - 32px)); }

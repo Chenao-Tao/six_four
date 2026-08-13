@@ -91,8 +91,11 @@ test('布局接口返回404时自动使用浏览器存储且保留其他错误',
   assert.match(app, /服务器布局接口不可用，布局将保存在当前浏览器中/);
 });
 
-test('平面六块三角板可组成立体并保留棋子布局', () => {
-  assert.match(html, /id="assembleSolidButton"/);
+test('自定义棋盘可以选择平面或立体保存形态', () => {
+  assert.doesNotMatch(html, /id="assembleSolidButton"/);
+  assert.match(html, /id="flatShapeButton"/);
+  assert.match(html, /id="solidShapeButton"/);
+  assert.match(html, /id="saveSolidCustomButton"/);
   assert.match(html, /id="solidViewer"/);
   assert.match(html, /id="solidBoardCanvas"/);
   assert.match(html, /id="closeSolidViewButton"/);
@@ -100,7 +103,20 @@ test('平面六块三角板可组成立体并保留棋子布局', () => {
   assert.match(app, /function solidBoardModel\(\)/);
   assert.match(app, /function openSolidBoard\(\)/);
   assert.match(app, /function closeSolidBoard\(\)/);
+  assert.match(app, /function setBoardShape\(boardShape\)/);
+  assert.match(app, /saveSolidCustomButton\.addEventListener\('click', saveCustomBoard\)/);
+  assert.match(app, /boardShape: layout\.boardShape === 'solid' \? 'solid' : 'flat'/);
+  assert.match(app, /if \(customEditor\.boardShape === 'solid'\) openSolidBoard\(\)/);
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
+});
+
+test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
+  assert.match(app, /onPieceSelect: selectSolidPiece/);
+  assert.match(app, /onMoveSelect: selectSolidMove/);
+  assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
+  assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
+  assert.match(app, /if \(move\) chooseMove\(move\)/);
+  assert.match(app, /const result = applyMove\(state, pieceId, move\.target, promote\)/);
 });
 
 test('六面体可选择已有板块并同步旋转、翻面和交换操作', () => {
