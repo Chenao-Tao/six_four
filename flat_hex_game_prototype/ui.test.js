@@ -96,6 +96,8 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(html, /id="flatShapeButton"/);
   assert.match(html, /id="solidShapeButton"/);
   assert.match(html, /id="saveSolidCustomButton"/);
+  assert.match(html, /id="solidPanelTray"/);
+  assert.match(html, /id="solidPanelList"/);
   assert.match(html, /id="solidViewer"/);
   assert.match(html, /id="solidBoardCanvas"/);
   assert.match(html, /id="closeSolidViewButton"/);
@@ -119,24 +121,24 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /const result = applyMove\(state, pieceId, move\.target, promote\)/);
 });
 
-test('六面体可选择已有板块并同步旋转、翻面和交换操作', () => {
+test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {
   assert.match(html, /id="solidPanelSelection"/);
   assert.match(html, /id="rotateSolidPanelButton"/);
   assert.match(html, /id="flipSolidPanelButton"/);
-  assert.match(html, /id="swapSolidPanelButton"/);
+  assert.match(html, /id="removeSolidPanelButton"/);
   assert.match(app, /function selectSolidPanel\(/);
+  assert.match(app, /function selectAssemblyPanel\(/);
   assert.match(app, /function rotateSolidPanel\(/);
   assert.match(app, /function flipSolidPanel\(/);
-  assert.match(app, /function beginSolidPanelSwap\(/);
+  assert.match(app, /function removeSolidPanel\(/);
+  assert.match(app, /placeAssemblyPanel\(customEditor\.solidAssembly/);
+  assert.match(app, /assemblyToLayout\(customEditor\.solidAssembly\)/);
   assert.match(app, /solidBoardViewer\.update\(model\)/);
-  assert.match(app, /flipBoardPanel\([\s\S]*?target\.boardStates/);
-  assert.match(app, /swapBoardPanels\([\s\S]*?target\.boardStates/);
   const solidMarkup = html.match(/<div class="solid-viewer[\s\S]*?<\/div>\s*<script/)[0];
   assert.doesNotMatch(solidMarkup, /data-editor-type|清空该点|棋子摆放/);
 });
 
-test('立体编辑的旋转、翻面和交换操作会触发对应特效', () => {
+test('立体装配的旋转和翻面操作会触发对应特效', () => {
   assert.match(app, /playEffect\('rotate', \[solidSelectedPanel\]\)/);
   assert.match(app, /playEffect\('flip', \[solidSelectedPanel\]\)/);
-  assert.match(app, /playEffect\('swap', \[firstPanelIndex, panelIndex\]\)/);
 });

@@ -396,35 +396,49 @@ export function createSolidBoardViewer(canvas, initialModel, {
 
     renderFaces.forEach(face => {
       const { panelIndex, vertices, projected } = face;
-      const label = model.faceLabels[panelIndex] ?? `面 ${panelIndex + 1}`;
+      const label = model.faceLabels[panelIndex];
+      const isEmptySlot = model.assemblyMode && !label;
       const normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
       const viewNormal = rotatePoint(normal, rotationX, rotationY);
       const light = Math.max(0, viewNormal.z) * 24;
-      const isBackFace = label.endsWith('B');
+      const isBackFace = label?.endsWith('B');
       const base = isBackFace ? 190 + light : 25 + light;
       const fill = `rgb(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18})`;
       const lineColor = isBackFace ? 'rgba(15,28,38,.55)' : 'rgba(190,235,255,.52)';
       const isSelected = model.selectedPanel === panelIndex;
-      drawPath(projected, fill, isSelected ? '#ffc96a' : isBackFace ? '#263d4d' : '#a8d8ee', isSelected ? 5 : 2);
+      if (isEmptySlot) context.setLineDash([10, 8]);
+      drawPath(
+        projected,
+        isEmptySlot ? 'rgba(13, 25, 35, .16)' : fill,
+        isSelected ? '#ffc96a' : isEmptySlot ? 'rgba(144, 192, 216, .58)' : isBackFace ? '#263d4d' : '#a8d8ee',
+        isSelected ? 5 : 2
+      );
+      context.setLineDash([]);
       if (isSelected) drawPath(projected, 'rgba(255,201,106,.14)', null);
 
-      context.lineWidth = 1;
-      context.strokeStyle = lineColor;
-      gridSegments(vertices).forEach(([from, to]) => {
-        const start = project(from, width, height);
-        const end = project(to, width, height);
-        context.beginPath();
-        context.moveTo(start.x, start.y);
-        context.lineTo(end.x, end.y);
-        context.stroke();
-      });
+      if (!isEmptySlot) {
+        context.lineWidth = 1;
+        context.strokeStyle = lineColor;
+        gridSegments(vertices).forEach(([from, to]) => {
+          const start = project(from, width, height);
+          const end = project(to, width, height);
+          context.beginPath();
+          context.moveTo(start.x, start.y);
+          context.lineTo(end.x, end.y);
+          context.stroke();
+        });
+      }
 
       const labelPoint = project(barycentricPoint(vertices, { center: 1 / 3, u: 1 / 3, v: 1 / 3 }), width, height);
-      context.fillStyle = isBackFace ? '#203746' : '#d8f3ff';
+      context.fillStyle = isEmptySlot ? 'rgba(184, 222, 240, .74)' : isBackFace ? '#203746' : '#d8f3ff';
       context.font = '700 13px "Microsoft YaHei", sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
-      context.fillText(`${label} · ${model.panelRotations[panelIndex] ?? 0}°`, labelPoint.x, labelPoint.y);
+      context.fillText(
+        isEmptySlot ? `空槽 ${panelIndex + 1}` : `${label} · ${model.panelRotations[panelIndex] ?? 0}°`,
+        labelPoint.x,
+        labelPoint.y
+      );
 
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
         const world = barycentricPoint(vertices, piece.local);
