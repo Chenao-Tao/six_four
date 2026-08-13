@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('模拟控制保留重开、背面预览和算法按钮，并移除吃子演示', () => {
   assert.doesNotMatch(html, /captureDemoButton|载入吃子演示/);
@@ -23,6 +24,12 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
 test('实际吃子翻面退出预览并采用规则层返回的新朝上面', () => {
   assert.match(app, /async function animateBoardFlip\(nextState\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
+});
+
+test('所有平面翻面动画使用垂直镜像轴', () => {
+  assert.match(styles, /@keyframes flip-whole-board[\s\S]*?rotateY\(88deg\)/);
+  assert.doesNotMatch(styles, /@keyframes flip-whole-board[\s\S]*?rotateX\(/);
+  assert.match(html, />垂直镜像翻面</);
 });
 
 test('自定义棋盘提供双面编辑、选点设子与保存取消入口', () => {

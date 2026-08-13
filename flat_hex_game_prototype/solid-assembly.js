@@ -1,4 +1,10 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=simulation-operation-preview-1';
+import {
+  BOARD_RADIUS,
+  CORNERS,
+  panelIndexForPoint,
+  solidPointKey,
+  verticalMirrorPanelIndex
+} from './game.js?v=vertical-mirror-flip-1';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 
@@ -109,7 +115,7 @@ function panelById(assembly, panelId) {
 }
 
 function facePiecesAtSlot(panel, face, rotation, slotIndex, hidden = false) {
-  const targetSlot = hidden ? 5 - slotIndex : slotIndex;
+  const targetSlot = hidden ? verticalMirrorPanelIndex(slotIndex) : slotIndex;
   const targetRotation = hidden ? 360 - rotation : rotation;
   return panel.faces[face].map(piece => {
     const local = rotateLocal(hidden ? mirrorLocal(piece.local) : piece.local, targetRotation);
@@ -135,7 +141,7 @@ function collisionError(assembly) {
       if (!slot) continue;
       const panel = panelById(assembly, slot.panelId);
       const face = hidden ? oppositeFace(slot.face) : slot.face;
-      const targetSlot = hidden ? 5 - slotIndex : slotIndex;
+      const targetSlot = hidden ? verticalMirrorPanelIndex(slotIndex) : slotIndex;
       const pieces = facePiecesAtSlot(panel, face, slot.rotation, slotIndex, hidden);
       for (const piece of pieces) {
         const key = solidPointKey(piece.position, targetSlot);
@@ -279,7 +285,7 @@ export function assemblyToLayout(assembly) {
   const boardStates = { front: [], back: [] };
   assembly.slots.forEach((slot, slotIndex) => {
     const panel = panelById(assembly, slot.panelId);
-    const oppositeIndex = 5 - slotIndex;
+    const oppositeIndex = verticalMirrorPanelIndex(slotIndex);
     faceLabels.front[slotIndex] = `${slot.panelId}${slot.face}`;
     faceLabels.back[oppositeIndex] = `${slot.panelId}${oppositeFace(slot.face)}`;
     panelRotations.front[slotIndex] = slot.rotation;

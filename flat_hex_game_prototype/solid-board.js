@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=simulation-operation-preview-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=vertical-mirror-flip-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -336,7 +336,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
     context.lineTo(center.x, Math.max(...face.projected.map(point => point.y)) + 8);
     context.stroke();
     context.restore();
-    drawOperationLabel('翻转正反面', { x: center.x, y: center.y - 42 }, frame.alpha);
+    drawOperationLabel('垂直镜像翻面', { x: center.x, y: center.y - 42 }, frame.alpha);
   }
 
   function drawSwapEffect(firstFace, secondFace, frame) {

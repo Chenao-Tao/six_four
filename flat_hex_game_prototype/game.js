@@ -65,8 +65,15 @@ let cachedSolidSurfaceGraph = null;
 // 布局三当前朝上面使用 1A/2A/3A/5A/6A/4B，翻面后是实体板互补面。
 export const BOARD_FACE_LABELS = {
   front: ['5A', '6A', '3A', '4B', '1A', '2A'],
-  back: ['2B', '1B', '4A', '3B', '6B', '5B']
+  back: ['3B', '6B', '5B', '2B', '1B', '4A']
 };
+
+const VERTICAL_MIRROR_PANEL_INDICES = [2, 1, 0, 5, 4, 3];
+const LEGACY_HORIZONTAL_MIRROR_PANEL_INDICES = [5, 4, 3, 2, 1, 0];
+
+export function verticalMirrorPanelIndex(panelIndex) {
+  return validatePanelIndex(panelIndex) ? VERTICAL_MIRROR_PANEL_INDICES[panelIndex] : null;
+}
 
 export const BOARD_PANEL_ROTATIONS = {
   front: [0, 0, 0, 0, 0, 0],
@@ -91,6 +98,11 @@ function oppositePanelFace(label) {
   return `${label.slice(0, -1)}${label.endsWith('A') ? 'B' : 'A'}`;
 }
 
+function faceLabelsMatchMirror(faceLabels, mirrorIndices) {
+  return mirrorIndices.every((oppositeIndex, index) =>
+    faceLabels.back[oppositeIndex] === oppositePanelFace(faceLabels.front[index]));
+}
+
 function validateFaceLabels(faceLabels) {
   if (!faceLabels || !Array.isArray(faceLabels.front) || !Array.isArray(faceLabels.back)) {
     return '板块布局数据无效';
@@ -104,10 +116,8 @@ function validateFaceLabels(faceLabels) {
       return '板块布局的每一面必须各包含 1 至 6 号实体板';
     }
   }
-  for (let index = 0; index < 6; index++) {
-    if (faceLabels.back[5 - index] !== oppositePanelFace(faceLabels.front[index])) {
-      return '板块布局的正反面没有保持实体板对应关系';
-    }
+  if (!faceLabelsMatchMirror(faceLabels, VERTICAL_MIRROR_PANEL_INDICES)) {
+    return '板块布局的正反面没有保持实体板对应关系';
   }
   return null;
 }
@@ -124,11 +134,23 @@ function validatePanelRotations(panelRotations) {
   }
   for (let index = 0; index < 6; index++) {
     const mirroredRotation = (360 - panelRotations.front[index]) % 360;
-    if (panelRotations.back[5 - index] !== mirroredRotation) {
+    if (panelRotations.back[verticalMirrorPanelIndex(index)] !== mirroredRotation) {
       return '板块朝向的正反面没有保持镜像对应关系';
     }
   }
   return null;
+}
+
+function rotationsMatchMirror(panelRotations, mirrorIndices) {
+  return mirrorIndices.every((oppositeIndex, index) =>
+    panelRotations.back[oppositeIndex] === (360 - panelRotations.front[index]) % 360);
+}
+
+function isLegacyHorizontalMirrorLayout(faceLabels, panelRotations) {
+  return faceLabels?.front?.length === 6 && faceLabels?.back?.length === 6 &&
+    panelRotations?.front?.length === 6 && panelRotations?.back?.length === 6 &&
+    faceLabelsMatchMirror(faceLabels, LEGACY_HORIZONTAL_MIRROR_PANEL_INDICES) &&
+    rotationsMatchMirror(panelRotations, LEGACY_HORIZONTAL_MIRROR_PANEL_INDICES);
 }
 
 function validatePanelIndex(index) {
@@ -272,7 +294,7 @@ function piecePanelIndex(piece) {
 function physicalBackPieces(pieces) {
   return pieces.map(item => {
     const backPanel = piecePanelIndex(item);
-    const physicalPanel = 5 - backPanel;
+    const physicalPanel = verticalMirrorPanelIndex(backPanel);
     return {
       ...item,
       position: pointFromPanelCoordinates(panelCoordinates(item.position, backPanel), physicalPanel, true),
@@ -302,6 +324,45 @@ function movePanelPieces(pieces, fromIndex, toIndex, mirrored = false) {
       panelIndex: toIndex
     };
   });
+}
+
+function migrateLegacyHorizontalMirrorLayout(boardStates, faceLabels, panelRotations) {
+  if (!isLegacyHorizontalMirrorLayout(faceLabels, panelRotations)) {
+    return { boardStates, faceLabels, panelRotations };
+  }
+  const migratedBackPieces = [];
+  const migratedBackLabels = Array(6);
+  const migratedBackRotations = Array(6);
+  for (let frontIndex = 0; frontIndex < 6; frontIndex += 1) {
+    const oldBackIndex = LEGACY_HORIZONTAL_MIRROR_PANEL_INDICES[frontIndex];
+    const newBackIndex = verticalMirrorPanelIndex(frontIndex);
+    migratedBackLabels[newBackIndex] = faceLabels.back[oldBackIndex];
+    migratedBackRotations[newBackIndex] = panelRotations.back[oldBackIndex];
+  }
+  for (const piece of boardStates?.back ?? []) {
+    const oldBackIndex = piecePanelIndex(piece);
+    if (!validatePanelIndex(oldBackIndex)) {
+      migratedBackPieces.push({ ...piece, position: { ...piece.position } });
+      continue;
+    }
+    const frontIndex = LEGACY_HORIZONTAL_MIRROR_PANEL_INDICES[oldBackIndex];
+    const newBackIndex = verticalMirrorPanelIndex(frontIndex);
+    migratedBackPieces.push(movePanelPieces([piece], oldBackIndex, newBackIndex)[0]);
+  }
+  return {
+    boardStates: {
+      front: boardStates?.front ?? [],
+      back: migratedBackPieces
+    },
+    faceLabels: {
+      front: [...faceLabels.front],
+      back: migratedBackLabels
+    },
+    panelRotations: {
+      front: [...panelRotations.front],
+      back: migratedBackRotations
+    }
+  };
 }
 
 function rotatePointOnPanel(point, panelIndex, clockwise = true) {
@@ -347,7 +408,7 @@ export function flipBoardPanel(
   const next = cloneFaceLabels(faceLabels);
   const nextRotations = clonePanelRotations(panelRotations);
   const oppositeSide = side === 'front' ? 'back' : 'front';
-  const oppositeIndex = 5 - panelIndex;
+  const oppositeIndex = verticalMirrorPanelIndex(panelIndex);
   next[side][panelIndex] = oppositePanelFace(next[side][panelIndex]);
   next[oppositeSide][oppositeIndex] = oppositePanelFace(next[oppositeSide][oppositeIndex]);
   let nextBoardStates = null;
@@ -401,8 +462,8 @@ export function swapBoardPanels(
   [next[side][firstIndex], next[side][secondIndex]] =
     [next[side][secondIndex], next[side][firstIndex]];
   const oppositeSide = side === 'front' ? 'back' : 'front';
-  const firstOppositeIndex = 5 - firstIndex;
-  const secondOppositeIndex = 5 - secondIndex;
+  const firstOppositeIndex = verticalMirrorPanelIndex(firstIndex);
+  const secondOppositeIndex = verticalMirrorPanelIndex(secondIndex);
   [next[oppositeSide][firstOppositeIndex], next[oppositeSide][secondOppositeIndex]] =
     [next[oppositeSide][secondOppositeIndex], next[oppositeSide][firstOppositeIndex]];
   [nextRotations[side][firstIndex], nextRotations[side][secondIndex]] =
@@ -450,7 +511,7 @@ export function rotateBoardPanel(
   if (rotationsError) return { error: rotationsError };
   const nextRotations = clonePanelRotations(panelRotations);
   const oppositeSide = side === 'front' ? 'back' : 'front';
-  const oppositeIndex = 5 - panelIndex;
+  const oppositeIndex = verticalMirrorPanelIndex(panelIndex);
   let nextBoardStates = null;
   if (boardStates) {
     if (!Array.isArray(boardStates.front) || !Array.isArray(boardStates.back)) {
@@ -498,8 +559,8 @@ function layoutThreeFrontPieces() {
 }
 
 function layoutThreeBackPieces() {
-  return [
-    // 实拍图二：翻面后 1 面仍在上，2/3 面位于右侧。
+  const legacyHorizontalMirrorPieces = [
+    // 实拍图二原先按水平轴翻面标定；垂直轴翻面后的显示位置相差 180°。
     piece('back-wK', 'white', 'king', 0, 2),
     piece('back-wQ', 'white', 'queen', 0, 1),
     piece('back-wB1', 'white', 'bishop', -2, -1),
@@ -513,6 +574,11 @@ function layoutThreeBackPieces() {
     piece('back-bP1', 'black', 'pawn', -3, 0),
     piece('back-bP2', 'black', 'pawn', 1, 1)
   ];
+  return legacyHorizontalMirrorPieces.map(item => ({
+    ...item,
+    position: { q: -item.position.q, r: -item.position.r },
+    panelIndex: (item.panelIndex + 3) % 6
+  }));
 }
 
 function doubleSidedState(frontPieces, backPieces, extra = {}) {
@@ -606,9 +672,10 @@ function normalizeCustomFace(face, pieces, boardShape) {
 }
 
 function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings, boardShape) {
-  const front = normalizeCustomFace('front', boardStates?.front, boardShape);
+  const migrated = migrateLegacyHorizontalMirrorLayout(boardStates, faceLabels, panelRotations);
+  const front = normalizeCustomFace('front', migrated.boardStates?.front, boardShape);
   if (front.error) return { error: front.error };
-  const back = normalizeCustomFace('back', boardStates?.back, boardShape);
+  const back = normalizeCustomFace('back', migrated.boardStates?.back, boardShape);
   if (back.error) return { error: back.error };
   for (const side of ['white', 'black']) {
     const kingCount = front.kingCounts[side] + back.kingCounts[side];
@@ -618,14 +685,14 @@ function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKi
       return { error: `双面棋盘必须且只能有一枚${sideName}王` };
     }
   }
-  const faceLabelsError = validateFaceLabels(faceLabels);
+  const faceLabelsError = validateFaceLabels(migrated.faceLabels);
   if (faceLabelsError) return { error: faceLabelsError };
-  const rotationsError = validatePanelRotations(panelRotations);
+  const rotationsError = validatePanelRotations(migrated.panelRotations);
   if (rotationsError) return { error: rotationsError };
   return {
     boardStates: { front: front.pieces, back: back.pieces },
-    faceLabels: cloneFaceLabels(faceLabels),
-    panelRotations: clonePanelRotations(panelRotations)
+    faceLabels: cloneFaceLabels(migrated.faceLabels),
+    panelRotations: clonePanelRotations(migrated.panelRotations)
   };
 }
 

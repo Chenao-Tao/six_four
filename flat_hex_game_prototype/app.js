@@ -22,17 +22,18 @@ import {
   promotionTypeForMove,
   rotateBoardPanel,
   stepwiseGameSearch,
-  swapBoardPanels
-} from './game.js?v=simulation-operation-preview-1';
+  swapBoardPanels,
+  verticalMirrorPanelIndex
+} from './game.js?v=vertical-mirror-flip-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=simulation-operation-preview-1';
+} from './layout-storage.js?v=vertical-mirror-flip-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=simulation-operation-preview-1';
+} from './solid-board.js?v=vertical-mirror-flip-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +43,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=simulation-operation-preview-1';
+} from './solid-assembly.js?v=vertical-mirror-flip-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -423,7 +424,7 @@ function solidBoardModel() {
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
     state.solidFaceSides.forEach((faceSide, panelIndex) => {
       if (faceSide !== 'back') return;
-      const oppositeIndex = 5 - panelIndex;
+      const oppositeIndex = verticalMirrorPanelIndex(panelIndex);
       faceLabels[panelIndex] = displayedFaceLabels().back[oppositeIndex];
       panelRotations[panelIndex] = displayedPanelRotations().back[oppositeIndex];
     });

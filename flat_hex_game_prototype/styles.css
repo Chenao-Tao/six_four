@@ -50,10 +50,10 @@ h2 { margin-bottom: 12px; font-size: 16px; }
 }
 .board-shell.flipping { animation: flip-whole-board 900ms cubic-bezier(.55,.08,.35,.98); }
 @keyframes flip-whole-board {
-  0% { transform: rotateX(0deg) scale(1); filter: drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
-  49% { transform: rotateX(88deg) scale(.94); filter: drop-shadow(0 5px 8px rgba(97,231,255,.7)); }
-  50% { transform: rotateX(-88deg) scale(.94); }
-  100% { transform: rotateX(0deg) scale(1); filter: drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
+  0% { transform: rotateY(0deg) scale(1); filter: drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
+  49% { transform: rotateY(88deg) scale(.94); filter: drop-shadow(0 5px 8px rgba(97,231,255,.7)); }
+  50% { transform: rotateY(-88deg) scale(.94); }
+  100% { transform: rotateY(0deg) scale(1); filter: drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
 }
 #board { display: block; width: 100%; height: auto; overflow: visible; }
 .face-badge { position: absolute; top: 16px; left: 18px; z-index: 3; padding: 8px 12px; border: 1px solid rgba(97,231,255,.28); border-radius: 999px; color: #bcefff; background: rgba(7,16,24,.78); font-size: 12px; }
