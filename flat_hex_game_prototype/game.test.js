@@ -308,7 +308,7 @@ test('立体王沿棱移动时忽略棱上棋子但受目标顶点占用约束',
   assert.equal(capture?.captureId, 'target');
 });
 
-test('立体吃子只翻目标面并交换该面内外层棋子', () => {
+test('立体吃子不旋转棋盘并整体交换内外层棋盘与棋子', () => {
   const state = {
     ...solidStateOf([
       { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
@@ -331,15 +331,16 @@ test('立体吃子只翻目标面并交换该面内外层棋子', () => {
 
   const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
 
-  assert.equal(result.solidFaceSides[0], 'back');
-  assert.equal(result.solidFaceSides[1], 'front');
+  assert.deepEqual(result.solidFaceSides, Array(6).fill('back'));
   assert.equal(findPiece(result, 'outer'), undefined);
   assert.ok(findPiece(result, 'inner'));
-  assert.ok(findPiece(result, 'other-face'));
+  assert.equal(findPiece(result, 'other-face'), undefined);
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wP'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'outer'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'other-face'));
 });
 
-test('公共棱吃子翻转攻击动作进入棱前所在面并正常结算', () => {
+test('公共棱吃子正常结算后也整体交换棋盘与棋子层级', () => {
   const outer = [
     { ...piece('wB', 'white', 'bishop', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', -1, 1), panelIndex: 1 }
@@ -361,12 +362,12 @@ test('公共棱吃子翻转攻击动作进入棱前所在面并正常结算', ()
   ).state;
 
   assert.equal(findPiece(result, 'bP'), undefined);
-  assert.ok(findPiece(result, 'wB'), '象吃兵后应留在外层原位');
-  assert.equal(result.solidFaceSides[0], 'front');
-  assert.equal(result.solidFaceSides[1], 'back');
+  assert.equal(findPiece(result, 'wB'), undefined);
+  assert.deepEqual(result.solidFaceSides, Array(6).fill('back'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'wB'));
 });
 
-test('背面公共棱有棋子时整条棱不下沉也不上浮', () => {
+test('公共棱正下方有棋子时两枚棋子直接交换层级', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
@@ -384,13 +385,13 @@ test('背面公共棱有棋子时整条棱不下沉也不上浮', () => {
 
   const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
 
-  assert.ok(findPiece(result, 'edge-outer'));
+  assert.equal(findPiece(result, 'edge-outer'), undefined);
   assert.equal(findPiece(result, 'wP'), undefined);
-  assert.equal(findPiece(result, 'edge-inner'), undefined);
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-inner'));
+  assert.ok(findPiece(result, 'edge-inner'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-outer'));
 });
 
-test('公共顶点被任意相交背面棱支撑时保持外层', () => {
+test('公共顶点棋子与其他位置一样整体上浮下沉', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
@@ -408,10 +409,10 @@ test('公共顶点被任意相交背面棱支撑时保持外层', () => {
 
   const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
 
-  assert.ok(findPiece(result, 'apex'));
+  assert.equal(findPiece(result, 'apex'), undefined);
   assert.equal(findPiece(result, 'wP'), undefined);
-  assert.equal(findPiece(result, 'support'), undefined);
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'support'));
+  assert.ok(findPiece(result, 'support'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'apex'));
 });
 
 test('皇后的每个合法动作都必须完整走三步', () => {
@@ -528,7 +529,7 @@ test('正反面板块统一使用垂直轴镜像槽位', () => {
   assert.equal(verticalMirrorPanelIndex(6), null);
 });
 
-test('双面棋盘仅在吃子后翻面，并保存原面结算后的局面', () => {
+test('双面棋盘仅在吃子后整体交换棋盘与棋子层级且不旋转', () => {
   const initial = createInitialState();
   const movablePawn = initial.pieces.find(item => item.id === 'wP2');
   const normalMove = [...legalMoves(initial, movablePawn.id).values()]
@@ -538,32 +539,75 @@ test('双面棋盘仅在吃子后翻面，并保存原面结算后的局面', ()
 
   const demo = createCaptureDemoState();
   const captured = applyMove(demo, 'wP1', { q: 0, r: -4 }).state;
-  assert.equal(captured.boardSide, 'back');
-  assert.strictEqual(captured.pieces, captured.boardStates.back);
-  assert.equal(captured.boardStates.front.some(item => item.id === 'bK'), false);
-  assert.deepEqual(
-    captured.boardStates.front.find(item => item.id === 'wP1').position,
-    { q: 0, r: -4 }
-  );
-  assert.equal(captured.history.at(-1).includes('棋盘翻到B反面'), true);
+  assert.equal(captured.boardSide, 'front');
+  assert.strictEqual(captured.pieces, captured.boardStates.front);
+  assert.ok(captured.boardStates.front.some(item => item.id === 'back-wQ'));
+  assert.ok(captured.boardStates.back.some(item => item.id === 'wP1'));
+  assert.equal(captured.boardStates.back.some(item => item.id === 'bK'), false);
+  assert.equal(captured.history.at(-1).includes('棋盘与棋子整体交换上下层'), true);
 });
 
-test('连续两次吃子翻回原面时保留两面的结算结果', () => {
+test('吃子换层让4A在同一槽位下沉并由4B原位上浮', () => {
+  const state = createCaptureDemoState();
+  state.boardFaceLabels.front[3] = '4A';
+  state.boardFaceLabels.back[5] = '4B';
+  const rotated = rotateBoardPanel(
+    state.boardFaceLabels,
+    state.boardPanelRotations,
+    'front',
+    0
+  );
+  state.boardPanelRotations = rotated.panelRotations;
+
+  const result = applyMove(state, 'wP1', { q: 0, r: -4 }).state;
+
+  assert.equal(result.boardSide, 'front');
+  assert.equal(result.boardFaceLabels.front[3], '4B');
+  assert.deepEqual(result.boardFaceLabels.front, ['5B', '6B', '3B', '4B', '1B', '2B']);
+  assert.equal(result.boardPanelRotations.front[0], 120);
+  assert.ok(result.boardStates.front.some(item => item.id === 'back-wQ'));
+});
+
+test('平面棋盘同一物理交点上下都有棋子时直接交换层级', () => {
+  const state = createCustomState({
+    front: [
+      piece('wk', 'white', 'king', 4, 0),
+      piece('bk', 'black', 'king', -4, 0),
+      piece('wp', 'white', 'pawn', 0, -1),
+      piece('bp', 'black', 'pawn', 0, 0)
+    ],
+    back: [piece('lower', 'black', 'bishop', 0, 0)]
+  }).state;
+  const attackerId = state.pieces.find(item => item.type === 'pawn' && item.side === 'white').id;
+  const result = applyMove(state, attackerId, { q: 0, r: 0 }).state;
+
+  assert.equal(result.pieces.length, 1);
+  assert.equal(result.pieces[0].type, 'bishop');
+  assert.deepEqual(result.pieces[0].position, { q: 0, r: 0 });
+  assert.ok(result.boardStates.back.some(item => item.side === 'white' && item.type === 'pawn'));
+});
+
+test('连续两次吃子会在固定棋盘上往返交换两层结算结果', () => {
   const initial = createCaptureDemoState();
   initial.boardStates.back = [
     piece('bK', 'black', 'king', 4, 0),
     piece('wQ', 'white', 'queen', 0, 4)
   ];
   const afterFrontCapture = applyMove(initial, 'wB1', { q: 1, r: 1 }).state;
-  assert.equal(afterFrontCapture.boardSide, 'back');
-  assert.equal(afterFrontCapture.boardStates.front.some(item => item.id === 'bP1'), false);
+  assert.equal(afterFrontCapture.boardSide, 'front');
+  assert.equal(afterFrontCapture.boardStates.back.some(item => item.id === 'bP1'), false);
+  assert.deepEqual(afterFrontCapture.boardFaceLabels.front, ['5B', '6B', '3B', '4A', '1B', '2B']);
 
-  const afterBackCapture = applyMove(afterFrontCapture, 'bK', { q: 0, r: 4 }).state;
+  const risenKing = afterFrontCapture.pieces.find(item => item.id === 'bK');
+  const capture = [...legalMoves(afterFrontCapture, risenKing.id).values()].find(move => move.captureId);
+  const afterBackCapture = applyMove(afterFrontCapture, risenKing.id, capture.target).state;
 
   assert.equal(afterBackCapture.boardSide, 'front');
   assert.equal(afterBackCapture.flipCount, 2);
   assert.equal(afterBackCapture.boardStates.front.some(item => item.id === 'bP1'), false);
-  assert.equal(afterBackCapture.boardStates.back.find(item => item.id === 'wQ').type, 'bishop');
+  assert.ok(afterBackCapture.boardStates.front.some(item => item.id === 'wB1'));
+  assert.deepEqual(afterBackCapture.boardFaceLabels, initial.boardFaceLabels);
+  assert.deepEqual(afterBackCapture.boardPanelRotations, initial.boardPanelRotations);
   assert.strictEqual(afterBackCapture.pieces, afterBackCapture.boardStates.front);
 });
 

@@ -4,9 +4,10 @@ import { createServer } from 'node:http';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createCustomLayout, createCustomState, createInitialState } from './game.js';
+import { createCustomLayout, createCustomState } from './game.js';
+import { DEFAULT_LAYOUT_NAME, isBuiltInLayoutName, mergeBuiltInLayouts } from './built-in-layouts.js';
 
-export const DEFAULT_LAYOUT_NAME = '默认布局';
+export { DEFAULT_LAYOUT_NAME };
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultLayoutFile = join(moduleDirectory, 'layout-data', 'layouts.json');
@@ -24,26 +25,8 @@ function clonePieces(boardStates) {
   };
 }
 
-function defaultLayout() {
-  const state = createInitialState();
-  return {
-    name: DEFAULT_LAYOUT_NAME,
-    builtIn: true,
-    boardShape: 'flat',
-    boardStates: clonePieces(state.boardStates),
-    faceLabels: {
-      front: [...state.boardFaceLabels.front],
-      back: [...state.boardFaceLabels.back]
-    },
-    panelRotations: {
-      front: [...state.boardPanelRotations.front],
-      back: [...state.boardPanelRotations.back]
-    }
-  };
-}
-
 function initialLibrary() {
-  return { version: 1, activeLayoutName: DEFAULT_LAYOUT_NAME, layouts: [defaultLayout()] };
+  return { version: 1, activeLayoutName: DEFAULT_LAYOUT_NAME, layouts: mergeBuiltInLayouts([]) };
 }
 
 async function writeLibrary(layoutFile, library) {
@@ -59,9 +42,7 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
     if (!Array.isArray(library.layouts) || typeof library.activeLayoutName !== 'string') {
       throw new TypeError('布局文件结构无效');
     }
-    if (!library.layouts.some(layout => layout.name === DEFAULT_LAYOUT_NAME)) {
-      library.layouts.unshift(defaultLayout());
-    }
+    library.layouts = mergeBuiltInLayouts(library.layouts);
     if (!library.layouts.some(layout => layout.name === library.activeLayoutName)) {
       library.activeLayoutName = DEFAULT_LAYOUT_NAME;
     }
@@ -77,7 +58,7 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
 function normalizedLayout(layout, requirePlayable) {
   const name = typeof layout?.name === 'string' ? layout.name.trim() : '';
   if (!name) return { error: '布局名称不能为空' };
-  if (name === DEFAULT_LAYOUT_NAME) return { error: '默认布局不能被覆盖' };
+  if (isBuiltInLayoutName(name)) return { error: '内置布局不能被覆盖' };
   if (name.length > 40) return { error: '布局名称不能超过40个字符' };
   if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
     return { error: '棋盘形态必须是平面或立体' };
@@ -202,7 +183,7 @@ export function createAppServer({
           const next = await readLibrary(layoutFile, persistLibrary);
           const layout = next.layouts.find(item => item.name === body.name);
           if (!layout) return { error: '布局不存在', status: 404 };
-          if (!layout.builtIn) {
+          if (!layout.isDefault) {
             const validation = createCustomState(
               layout.boardStates,
               layout.faceLabels,
@@ -221,8 +202,8 @@ export function createAppServer({
       }
       if (pathname.startsWith('/api/layouts/') && request.method === 'DELETE') {
         const name = pathname.slice('/api/layouts/'.length);
-        if (!name || name === DEFAULT_LAYOUT_NAME) {
-          sendJson(response, 400, { error: '默认布局不能删除' });
+        if (!name || isBuiltInLayoutName(name)) {
+          sendJson(response, 400, { error: '内置布局不能删除' });
           return;
         }
         const library = await mutate(async () => {

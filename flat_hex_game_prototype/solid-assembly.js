@@ -4,7 +4,7 @@ import {
   panelIndexForPoint,
   solidPointKey,
   verticalMirrorPanelIndex
-} from './game.js?v=vertical-mirror-flip-1';
+} from './game.js?v=board-layer-exchange-3';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 

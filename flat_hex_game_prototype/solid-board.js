@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=vertical-mirror-flip-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=board-layer-exchange-3';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -220,6 +220,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let lastInteractionTargets = [];
   let operationEffect = null;
   let cameraMotion = null;
+  let layerExchange = null;
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -456,12 +457,34 @@ export function createSolidBoardViewer(canvas, initialModel, {
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     context.clearRect(0, 0, width, height);
 
-    const mappedPieces = mapPiecesToPanels(model.pieces);
+    let displayedModel = model;
+    let boardLayerMotion = null;
+    if (layerExchange) {
+      const progress = Math.max(0, Math.min(1, (now - layerExchange.startedAt) / layerExchange.duration));
+      const rising = progress >= 0.5;
+      const phaseProgress = rising ? (progress - 0.5) * 2 : progress * 2;
+      displayedModel = rising ? layerExchange.nextModel : model;
+      boardLayerMotion = rising
+        ? { scale: 0.82 + 0.18 * phaseProgress, alpha: phaseProgress }
+        : { scale: 1 - 0.18 * phaseProgress, alpha: 1 - phaseProgress };
+      if (progress >= 1) {
+        model = layerExchange.nextModel;
+        const resolve = layerExchange.resolve;
+        layerExchange = null;
+        displayedModel = model;
+        boardLayerMotion = null;
+        resolve();
+      }
+    }
+    const mappedPieces = mapPiecesToPanels(displayedModel.pieces);
     const renderFaces = faces.map((vertices, panelIndex) => {
-      const projected = vertices.map(vertex => project(vertex, width, height));
+      const animatedVertices = boardLayerMotion
+        ? vertices.map(vertex => scale(vertex, boardLayerMotion.scale))
+        : vertices;
+      const projected = animatedVertices.map(vertex => project(vertex, width, height));
       return {
         panelIndex,
-        vertices,
+        vertices: animatedVertices,
         projected,
         depth: projected.reduce((sum, point) => sum + point.z, 0) / 3
       };
@@ -478,7 +501,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
       const world = barycentricPoint(face.vertices, piece.local);
       const position = project(add(world, scale(normal, 0.055)), width, height);
       const radius = Math.max(12, 17 * position.perspective * zoom);
-      const isSelectedPiece = model.selectedPieceId === piece.id;
+      const isSelectedPiece = displayedModel.selectedPieceId === piece.id;
+      context.save();
       context.beginPath();
       context.arc(position.x, position.y, radius, 0, Math.PI * 2);
       context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
@@ -497,12 +521,15 @@ export function createSolidBoardViewer(canvas, initialModel, {
         radius: radius + 7,
         depth: position.z
       });
+      context.restore();
     }
 
+    context.save();
+    context.globalAlpha = boardLayerMotion?.alpha ?? 1;
     renderFaces.forEach(face => {
       const { panelIndex, vertices, projected } = face;
-      const label = model.faceLabels[panelIndex];
-      const isEmptySlot = model.assemblyMode && !label;
+      const label = displayedModel.faceLabels[panelIndex];
+      const isEmptySlot = displayedModel.assemblyMode && !label;
       const normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
       const viewNormal = rotatePoint(normal, rotationX, rotationY);
       const light = Math.max(0, viewNormal.z) * 24;
@@ -510,7 +537,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       const base = isBackFace ? 190 + light : 25 + light;
       const fill = `rgb(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18})`;
       const lineColor = isBackFace ? 'rgba(15,28,38,.55)' : 'rgba(190,235,255,.52)';
-      const isSelected = model.selectedPanel === panelIndex;
+      const isSelected = displayedModel.selectedPanel === panelIndex;
       if (isEmptySlot) context.setLineDash([10, 8]);
       drawPath(
         projected,
@@ -540,7 +567,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.fillText(
-        isEmptySlot ? `空槽 ${panelIndex + 1}` : `${label} · ${model.panelRotations[panelIndex] ?? 0}°`,
+        isEmptySlot ? `空槽 ${panelIndex + 1}` : `${label} · ${displayedModel.panelRotations[panelIndex] ?? 0}°`,
         labelPoint.x,
         labelPoint.y
       );
@@ -550,7 +577,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
         else drawPiece(face, piece);
       });
 
-      (model.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
+      (displayedModel.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
         const world = barycentricPoint(vertices, move.local);
         const position = project(add(world, scale(normal, 0.05)), width, height);
         const radius = Math.max(9, 12 * position.perspective * zoom);
@@ -573,6 +600,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
     });
     drawPlannedMove(renderFaces);
     sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
+    context.restore();
     lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
@@ -632,6 +660,17 @@ export function createSolidBoardViewer(canvas, initialModel, {
     update(nextModel) {
       model = nextModel;
     },
+    exchangeLayers(nextModel) {
+      if (layerExchange) return Promise.resolve(false);
+      return new Promise(resolve => {
+        layerExchange = {
+          nextModel,
+          startedAt: performance.now(),
+          duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 220 : 680,
+          resolve
+        };
+      });
+    },
     playEffect(type, panelIndices) {
       const uniquePanels = [...new Set(panelIndices)]
         .filter(panelIndex => Number.isInteger(panelIndex) && panelIndex >= 0 && panelIndex < 6);
@@ -676,6 +715,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
       return true;
     },
     destroy() {
+      layerExchange?.resolve(false);
+      layerExchange = null;
       cancelAnimationFrame(animationFrame);
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('pointermove', pointerMove);

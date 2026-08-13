@@ -21,9 +21,16 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /previewSide = previewSide === null \? oppositeBoardSide\(activeBoardSide\(\)\) : null/);
 });
 
-test('实际吃子翻面退出预览并采用规则层返回的新朝上面', () => {
-  assert.match(app, /async function animateBoardFlip\(nextState\) \{[\s\S]*?previewSide = null/);
+test('实际吃子换层退出预览并采用规则层返回的新外层棋盘', () => {
+  assert.match(app, /async function animateBoardLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
+});
+
+test('吃子换层动画携带整层棋盘且不旋转平面棋盘', () => {
+  assert.match(styles, /\.board-shell\.layer-sinking/);
+  assert.match(styles, /\.board-shell\.layer-rising/);
+  assert.doesNotMatch(app, /animateBoardFlip/);
+  assert.match(app, /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
 });
 
 test('所有平面翻面动画使用垂直镜像轴', () => {
@@ -120,6 +127,18 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
 });
 
+test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
+  const boardCardStart = html.indexOf('<div class="board-card">');
+  const solidViewerStart = html.indexOf('<div class="solid-viewer hidden"');
+  const sidebarStart = html.indexOf('<aside>');
+
+  assert.ok(boardCardStart >= 0);
+  assert.ok(solidViewerStart > boardCardStart);
+  assert.ok(solidViewerStart < sidebarStart);
+  assert.match(styles, /\.solid-viewer\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;/);
+  assert.doesNotMatch(styles, /\.solid-viewer\s*\{[^}]*position:\s*fixed;/);
+});
+
 test('立体棋盘保留算法模拟和重开回到平面主界面的入口', () => {
   assert.match(html, /id="solidStepButton"/);
   assert.match(html, /id="solidAutoButton"/);
@@ -160,7 +179,7 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /if \(move\) chooseMove\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
   assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
-  assert.match(app, /solidFaceSides\.forEach/);
+  assert.match(app, /visibleFaceSides\.forEach/);
   assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
 });
 
@@ -181,7 +200,8 @@ test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操�
   assert.match(app, /placeAssemblyPanel\(customEditor\.solidAssembly/);
   assert.match(app, /assemblyToLayout\(customEditor\.solidAssembly\)/);
   assert.match(app, /solidBoardViewer\.update\(model\)/);
-  const solidMarkup = html.match(/<div class="solid-viewer[\s\S]*?<\/div>\s*<script/)[0];
+  const solidStart = html.indexOf('<div class="solid-viewer');
+  const solidMarkup = html.slice(solidStart, html.indexOf('<aside>', solidStart));
   assert.doesNotMatch(solidMarkup, /data-editor-type|清空该点|棋子摆放/);
 });
 

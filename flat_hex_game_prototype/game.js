@@ -303,14 +303,43 @@ function physicalBackPieces(pieces) {
   });
 }
 
+function physicalBackPanelValues(values, transform = value => value) {
+  return VERTICAL_MIRROR_PANEL_INDICES.map(sourceIndex => transform(values[sourceIndex]));
+}
+
+function exchangeFlatBoardLayers(state, nextCurrentPieces) {
+  const currentSide = state.boardSide;
+  const oppositeSide = currentSide === 'back' ? 'front' : 'back';
+  const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
+  const panelRotations = state.boardPanelRotations ?? BOARD_PANEL_ROTATIONS;
+
+  return {
+    boardStates: {
+      ...state.boardStates,
+      [currentSide]: physicalBackPieces(state.boardStates[oppositeSide]),
+      [oppositeSide]: physicalBackPieces(nextCurrentPieces)
+    },
+    boardFaceLabels: {
+      front: physicalBackPanelValues(faceLabels.back),
+      back: physicalBackPanelValues(faceLabels.front)
+    },
+    boardPanelRotations: {
+      front: physicalBackPanelValues(panelRotations.back, rotation => (360 - rotation) % 360),
+      back: physicalBackPanelValues(panelRotations.front, rotation => (360 - rotation) % 360)
+    }
+  };
+}
+
 function pointFromPanelCoordinates(coordinates, panelIndex, mirrored = false) {
   const firstCorner = CORNERS[panelIndex];
   const secondCorner = CORNERS[(panelIndex + 1) % 6];
   const first = mirrored ? coordinates.second : coordinates.first;
   const second = mirrored ? coordinates.first : coordinates.second;
+  const q = Math.round(first * firstCorner.q + second * secondCorner.q);
+  const r = Math.round(first * firstCorner.r + second * secondCorner.r);
   return {
-    q: Math.round(first * firstCorner.q + second * secondCorner.q),
-    r: Math.round(first * firstCorner.r + second * secondCorner.r)
+    q: Object.is(q, -0) ? 0 : q,
+    r: Object.is(r, -0) ? 0 : r
   };
 }
 
@@ -1076,49 +1105,17 @@ export function capturePositionEffect(attackerType, defenderType) {
   return 'hold';
 }
 
-function pointTouchesSolidFace(pointKey, panelIndex) {
-  const faceVertices = new Set(SOLID_SLOT_VERTICES[panelIndex]);
-  return solidPointVertices(pointKey).every(vertex => faceVertices.has(vertex));
-}
-
-function supportedSolidEdges(innerPieces) {
-  const supported = new Set();
-  for (const item of innerPieces) {
-    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
-    for (const edgeId of solidIncidentEdges(pointKey)) supported.add(edgeId);
-  }
-  return supported;
-}
-
-function sharedSolidPointIsSupported(pointKey, supportedEdges) {
-  return solidIncidentEdges(pointKey).some(edgeId => supportedEdges.has(edgeId));
-}
-
-function flipSolidFace(state, nextOuterPieces, panelIndex) {
-  const innerPieces = state.solidLayers?.inner ?? [];
-  const supportedEdges = supportedSolidEdges(innerPieces);
-  const outer = [];
-  const inner = [];
-
-  for (const item of nextOuterPieces) {
-    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
-    const vertices = solidPointVertices(pointKey);
-    const touchesFace = pointTouchesSolidFace(pointKey, panelIndex);
-    const sharedAndSupported = vertices.length < 3 &&
-      sharedSolidPointIsSupported(pointKey, supportedEdges);
-    (touchesFace && !sharedAndSupported ? inner : outer).push(item);
-  }
-  for (const item of innerPieces) {
-    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
-    const vertices = solidPointVertices(pointKey);
-    const touchesFace = pointTouchesSolidFace(pointKey, panelIndex);
-    const mayRise = vertices.length === 3 && touchesFace;
-    (mayRise ? outer : inner).push(item);
-  }
-
-  const solidFaceSides = [...(state.solidFaceSides ?? Array(6).fill('front'))];
-  solidFaceSides[panelIndex] = solidFaceSides[panelIndex] === 'back' ? 'front' : 'back';
-  return { solidLayers: { outer, inner }, solidFaceSides };
+function exchangeSolidLayers(state, nextOuterPieces) {
+  return {
+    outer: (state.solidLayers?.inner ?? []).map(item => ({
+      ...item,
+      position: { ...item.position }
+    })),
+    inner: nextOuterPieces.map(item => ({
+      ...item,
+      position: { ...item.position }
+    }))
+  };
 }
 
 function moveForTarget(moves, target) {
@@ -1194,49 +1191,55 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
   const nextTurn = state.turn === 'white' ? 'black' : 'white';
   const nextWinner = move.capturesKing ? movingPiece.side : null;
-  const shouldFlip = Boolean(captured && state.boardStates);
-  const shouldFlipSolidFace = Boolean(
+  const shouldExchangeLayers = Boolean(captured && (state.boardStates || state.solidLayers));
+  const shouldExchangeSolidLayers = Boolean(
     captured && state.boardShape === 'solid' && state.solidLayers
   );
-  const solidFlipPanel = shouldFlipSolidFace
-    ? move.panelIndex
-    : null;
-  const nextBoardSide = shouldFlip
-    ? shouldFlipSolidFace
-      ? state.boardSide
-      : state.boardSide === 'front' ? 'back' : 'front'
-    : state.boardSide;
-  const boardStates = state.boardStates
-    ? { ...state.boardStates, [state.boardSide]: nextPieces }
-    : undefined;
-  const solidFlip = shouldFlipSolidFace
-    ? flipSolidFace(state, nextPieces, solidFlipPanel)
-    : null;
+  const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
-    ? solidFlip?.solidLayers ?? { ...state.solidLayers, outer: nextPieces }
+    ? shouldExchangeSolidLayers
+      ? exchangeSolidLayers(state, nextPieces)
+      : { ...state.solidLayers, outer: nextPieces }
     : undefined;
-  const flipResult = shouldFlip
-    ? shouldFlipSolidFace
-      ? `，立体棋盘第 ${solidFlipPanel + 1} 面翻转`
-      : `，六边形棋盘翻到${nextBoardSide === 'front' ? 'A正面' : 'B反面'}`
+  const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers
+    ? exchangeFlatBoardLayers(state, nextPieces)
+    : null;
+  const boardStates = state.boardStates
+    ? shouldExchangeLayers
+      ? shouldExchangeSolidLayers
+        ? {
+            front: solidLayers.outer,
+            back: physicalBackPieces(solidLayers.inner)
+          }
+        : flatLayerExchange.boardStates
+      : { ...state.boardStates, [state.boardSide]: nextPieces }
+    : undefined;
+  const layerExchangeResult = shouldExchangeLayers
+    ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
     : '';
+  const solidFaceSides = shouldExchangeSolidLayers
+    ? (state.solidFaceSides ?? Array(6).fill('front'))
+        .map(side => side === 'back' ? 'front' : 'back')
+    : state.solidFaceSides;
   const nextState = {
     ...state,
     turn: nextTurn,
     winner: nextWinner,
     moveNumber: state.moveNumber + 1,
     boardSide: nextBoardSide,
-    flipCount: (state.flipCount ?? 0) + (shouldFlip ? 1 : 0),
+    flipCount: (state.flipCount ?? 0) + (shouldExchangeLayers ? 1 : 0),
+    layerExchangeCount: (state.layerExchangeCount ?? state.flipCount ?? 0) +
+      (shouldExchangeLayers ? 1 : 0),
     boardStates,
-    ...(solidFlip ? { solidFaceSides: solidFlip.solidFaceSides } : {}),
+    boardFaceLabels: flatLayerExchange?.boardFaceLabels ?? state.boardFaceLabels,
+    boardPanelRotations: flatLayerExchange?.boardPanelRotations ?? state.boardPanelRotations,
+    ...(solidFaceSides ? { solidFaceSides } : {}),
     ...(solidLayers ? { solidLayers } : {}),
     pieces: solidLayers
       ? solidLayers.outer
-      : shouldFlip
-        ? boardStates[nextBoardSide]
-        : nextPieces,
+      : boardStates?.[nextBoardSide] ?? nextPieces,
     history: recordHistory
-      ? [...state.history, description + flipResult]
+      ? [...state.history, description + layerExchangeResult]
       : state.history
   };
   const previousPositions = state.positionHistory ?? [positionSignature(state)];
