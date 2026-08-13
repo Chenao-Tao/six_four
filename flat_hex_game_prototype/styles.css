@@ -49,20 +49,16 @@ h2 { margin-bottom: 12px; font-size: 16px; }
   transform: translateY(8px);
 }
 .board-shell.flipping { animation: flip-whole-board 900ms cubic-bezier(.55,.08,.35,.98); }
-.board-shell.pieces-sinking .piece { animation: pieces-sink 280ms ease-in forwards; }
-.board-shell.pieces-rising .piece { animation: pieces-rise 320ms ease-out both; }
-.board-shell.pieces-sinking .piece > * { animation: piece-shrink 280ms ease-in forwards; }
-.board-shell.pieces-rising .piece > * { animation: piece-grow 320ms ease-out both; }
-@keyframes pieces-sink {
-  from { opacity: 1; filter: blur(0); }
-  to { opacity: 0; filter: blur(5px); }
+.board-shell.layer-sinking { animation: layer-sink 280ms ease-in forwards; }
+.board-shell.layer-rising { animation: layer-rise 320ms ease-out both; }
+@keyframes layer-sink {
+  from { opacity: 1; transform: scale(1); filter: blur(0) drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
+  to { opacity: 0; transform: scale(.82); filter: blur(6px) drop-shadow(0 5px 8px rgba(0,0,0,.18)); }
 }
-@keyframes pieces-rise {
-  from { opacity: 0; filter: blur(5px); }
-  to { opacity: 1; filter: blur(0); }
+@keyframes layer-rise {
+  from { opacity: 0; transform: scale(.82); filter: blur(6px) drop-shadow(0 5px 8px rgba(97,231,255,.18)); }
+  to { opacity: 1; transform: scale(1); filter: blur(0) drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
 }
-@keyframes piece-shrink { from { transform: scale(1); } to { transform: scale(.28); } }
-@keyframes piece-grow { from { transform: scale(.28); } to { transform: scale(1); } }
 @keyframes flip-whole-board {
   0% { transform: rotateY(0deg) scale(1); filter: drop-shadow(0 24px 28px rgba(0,0,0,.36)); }
   49% { transform: rotateY(88deg) scale(.94); filter: drop-shadow(0 5px 8px rgba(97,231,255,.7)); }

@@ -21,14 +21,14 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /previewSide = previewSide === null \? oppositeBoardSide\(activeBoardSide\(\)\) : null/);
 });
 
-test('实际吃子换层退出预览并采用规则层返回的新外层棋子', () => {
-  assert.match(app, /async function animatePieceLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
+test('实际吃子换层退出预览并采用规则层返回的新外层棋盘', () => {
+  assert.match(app, /async function animateBoardLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
 });
 
-test('吃子换层只动画棋子而不旋转平面棋盘', () => {
-  assert.match(styles, /\.board-shell\.pieces-sinking \.piece/);
-  assert.match(styles, /\.board-shell\.pieces-rising \.piece/);
+test('吃子换层动画携带整层棋盘且不旋转平面棋盘', () => {
+  assert.match(styles, /\.board-shell\.layer-sinking/);
+  assert.match(styles, /\.board-shell\.layer-rising/);
   assert.doesNotMatch(app, /animateBoardFlip/);
   assert.match(app, /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
 });
@@ -179,7 +179,7 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /if \(move\) chooseMove\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
   assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
-  assert.match(app, /solidFaceSides\.forEach/);
+  assert.match(app, /visibleFaceSides\.forEach/);
   assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
 });
 

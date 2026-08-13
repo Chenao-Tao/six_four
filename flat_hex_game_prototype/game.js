@@ -1164,17 +1164,19 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
   const nextTurn = state.turn === 'white' ? 'black' : 'white';
   const nextWinner = move.capturesKing ? movingPiece.side : null;
-  const shouldExchangeLayers = Boolean(captured && state.boardStates);
+  const shouldExchangeLayers = Boolean(captured && (state.boardStates || state.solidLayers));
   const shouldExchangeSolidLayers = Boolean(
     captured && state.boardShape === 'solid' && state.solidLayers
   );
-  const nextBoardSide = state.boardSide;
+  const oppositeSide = state.boardSide === 'back' ? 'front' : 'back';
+  const nextBoardSide = shouldExchangeLayers && !shouldExchangeSolidLayers
+    ? oppositeSide
+    : state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
       ? exchangeSolidLayers(state, nextPieces)
       : { ...state.solidLayers, outer: nextPieces }
     : undefined;
-  const oppositeSide = state.boardSide === 'front' ? 'back' : 'front';
   const boardStates = state.boardStates
     ? shouldExchangeLayers
       ? shouldExchangeSolidLayers
@@ -1182,16 +1184,16 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             front: solidLayers.outer,
             back: physicalBackPieces(solidLayers.inner)
           }
-        : {
-            ...state.boardStates,
-            [state.boardSide]: physicalBackPieces(state.boardStates[oppositeSide]),
-            [oppositeSide]: physicalBackPieces(nextPieces)
-          }
+        : { ...state.boardStates, [state.boardSide]: nextPieces }
       : { ...state.boardStates, [state.boardSide]: nextPieces }
     : undefined;
   const layerExchangeResult = shouldExchangeLayers
-    ? '，棋盘保持不动，棋子整体交换上下层'
+    ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
     : '';
+  const solidFaceSides = shouldExchangeSolidLayers
+    ? (state.solidFaceSides ?? Array(6).fill('front'))
+        .map(side => side === 'back' ? 'front' : 'back')
+    : state.solidFaceSides;
   const nextState = {
     ...state,
     turn: nextTurn,
@@ -1202,6 +1204,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     layerExchangeCount: (state.layerExchangeCount ?? state.flipCount ?? 0) +
       (shouldExchangeLayers ? 1 : 0),
     boardStates,
+    ...(solidFaceSides ? { solidFaceSides } : {}),
     ...(solidLayers ? { solidLayers } : {}),
     pieces: solidLayers
       ? solidLayers.outer

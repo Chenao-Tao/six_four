@@ -24,16 +24,16 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=piece-layer-exchange-1';
+} from './game.js?v=board-layer-exchange-2';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=piece-layer-exchange-1';
+} from './layout-storage.js?v=board-layer-exchange-2';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=piece-layer-exchange-1';
+} from './solid-board.js?v=board-layer-exchange-2';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -43,7 +43,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=piece-layer-exchange-1';
+} from './solid-assembly.js?v=board-layer-exchange-2';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -419,10 +419,13 @@ function solidBoardModel() {
     };
   }
   const side = displayedBoardSide();
-  const faceLabels = [...displayedFaceLabels()[side]];
-  const panelRotations = [...displayedPanelRotations()[side]];
+  const faceLabels = [...displayedFaceLabels().front];
+  const panelRotations = [...displayedPanelRotations().front];
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
-    state.solidFaceSides.forEach((faceSide, panelIndex) => {
+    const visibleFaceSides = previewSide === null
+      ? state.solidFaceSides
+      : state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back');
+    visibleFaceSides.forEach((faceSide, panelIndex) => {
       if (faceSide !== 'back') return;
       const oppositeIndex = verticalMirrorPanelIndex(panelIndex);
       faceLabels[panelIndex] = displayedFaceLabels().back[oppositeIndex];
@@ -1077,18 +1080,18 @@ async function animateMove(pieceId, path, positionEffect, defenderId = null) {
   animationLock = false;
 }
 
-async function animatePieceLayerExchange(nextState) {
+async function animateBoardLayerExchange(nextState) {
   animationLock = true;
   previewSide = null;
-  boardShell.classList.add('pieces-sinking');
-  boardHelp.textContent = '发生吃子：当前层棋子正在下沉，正下方棋子即将上浮……';
+  boardShell.classList.add('layer-sinking');
+  boardHelp.textContent = '发生吃子：当前棋盘层正在下沉，正下方的棋盘与棋子即将上浮……';
   await new Promise(resolve => setTimeout(resolve, 280));
   state = nextState;
   render();
-  boardShell.classList.remove('pieces-sinking');
-  boardShell.classList.add('pieces-rising');
+  boardShell.classList.remove('layer-sinking');
+  boardShell.classList.add('layer-rising');
   await new Promise(resolve => setTimeout(resolve, 320));
-  boardShell.classList.remove('pieces-rising');
+  boardShell.classList.remove('layer-rising');
   animationLock = false;
 }
 
@@ -1126,7 +1129,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   } else if (solidBoardViewer) {
     state = result.state;
   } else if (move.captureId) {
-    await animatePieceLayerExchange(result.state);
+    await animateBoardLayerExchange(result.state);
   } else {
     state = result.state;
   }
