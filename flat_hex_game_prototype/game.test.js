@@ -312,7 +312,7 @@ test('立体吃子只翻目标面并交换该面内外层棋子', () => {
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wP'));
 });
 
-test('公共棱吃子翻转攻击棋来源面而非目标别名面', () => {
+test('公共棱吃子翻转攻击动作进入棱前所在面并正常结算', () => {
   const outer = [
     { ...piece('wB', 'white', 'bishop', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', -1, 1), panelIndex: 1 }
@@ -326,15 +326,17 @@ test('公共棱吃子翻转攻击棋来源面而非目标别名面', () => {
   const move = [...legalMoves(state, 'wB').values()]
     .find(item => item.captureId === 'bP');
 
-  assert.equal(move.panelIndex, 1, '回归场景必须使用相邻面的公共棱坐标别名');
+  assert.equal(move.panelIndex, 1, '回归场景必须从相邻面进入公共棱');
   const result = applyMove(
     state,
     'wB',
     { ...move.target, panelIndex: move.panelIndex }
   ).state;
 
-  assert.equal(result.solidFaceSides[0], 'back');
-  assert.equal(result.solidFaceSides[1], 'front');
+  assert.equal(findPiece(result, 'bP'), undefined);
+  assert.ok(findPiece(result, 'wB'), '象吃兵后应留在外层原位');
+  assert.equal(result.solidFaceSides[0], 'front');
+  assert.equal(result.solidFaceSides[1], 'back');
 });
 
 test('背面公共棱有棋子时整条棱不下沉也不上浮', () => {

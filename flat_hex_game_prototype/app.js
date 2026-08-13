@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=solid-surface-movement-1';
+} from './game.js?v=solid-capture-approach-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=solid-surface-movement-1';
+} from './layout-storage.js?v=solid-capture-approach-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=solid-surface-movement-1';
+} from './solid-board.js?v=solid-capture-approach-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-surface-movement-1';
+} from './solid-assembly.js?v=solid-capture-approach-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');

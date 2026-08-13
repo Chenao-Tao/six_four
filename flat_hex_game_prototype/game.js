@@ -1066,13 +1066,6 @@ function moveForTarget(moves, target) {
   return moves.get(keyOf(target)) ?? [...moves.values()].find(move => pointsEqual(move.target, target));
 }
 
-function solidCaptureFlipPanel(movingPiece, move) {
-  const pointKey = move.pointKey ?? solidPointKey(move.target, move.panelIndex);
-  return pointKey && solidPointVertices(pointKey).length === 2
-    ? piecePanelIndex(movingPiece)
-    : move.panelIndex;
-}
-
 export function applyMove(state, pieceId, target, promote = false, recordHistory = true) {
   const moves = legalMoves(state, pieceId);
   const move = moveForTarget(moves, target);
@@ -1142,7 +1135,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     captured && state.boardShape === 'solid' && state.solidLayers
   );
   const solidFlipPanel = shouldFlipSolidFace
-    ? solidCaptureFlipPanel(movingPiece, move)
+    ? move.panelIndex
     : null;
   const nextBoardSide = shouldFlip
     ? shouldFlipSolidFace
