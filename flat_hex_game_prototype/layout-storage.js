@@ -7,6 +7,12 @@ import {
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';
 export const DEFAULT_LAYOUT_NAME = '默认布局';
+const FILE_STORAGE_ERROR_CODES = new Set(['EPERM', 'EACCES', 'EROFS']);
+
+export function shouldFallbackToBrowserStorage(status, body) {
+  return status === 404 ||
+    (status === 500 && FILE_STORAGE_ERROR_CODES.has(body?.code));
+}
 
 function clonePiecesByFace(boardStates) {
   return {

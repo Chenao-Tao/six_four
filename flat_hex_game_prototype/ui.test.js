@@ -84,8 +84,9 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(html, /静态部署时自动保存在当前浏览器/);
 });
 
-test('布局接口返回404时自动使用浏览器存储且保留其他错误', () => {
-  assert.match(app, /if \(response\.status === 404\) \{[\s\S]*?layoutStorageMode = 'browser'/);
+test('布局接口不存在或文件不可写时自动使用浏览器存储且保留其他错误', () => {
+  assert.match(app, /shouldFallbackToBrowserStorage\(response\.status, body\)/);
+  assert.match(app, /layoutStorageMode = 'browser'/);
   assert.match(app, /return browserLayoutStore\.request\(path, options\)/);
   assert.match(app, /if \(!response\.ok\) throw new Error/);
   assert.match(app, /服务器布局接口不可用，布局将保存在当前浏览器中/);

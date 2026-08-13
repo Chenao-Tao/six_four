@@ -5,7 +5,8 @@ import { createInitialState } from './game.js';
 import {
   createBrowserLayoutStore,
   DEFAULT_LAYOUT_NAME,
-  LAYOUT_LIBRARY_STORAGE_KEY
+  LAYOUT_LIBRARY_STORAGE_KEY,
+  shouldFallbackToBrowserStorage
 } from './layout-storage.js';
 
 function memoryStorage() {
@@ -22,6 +23,15 @@ function memoryStorage() {
     }
   };
 }
+
+test('布局接口不存在或项目文件不可写时回退浏览器存储', () => {
+  assert.equal(shouldFallbackToBrowserStorage(404, {}), true);
+  for (const code of ['EPERM', 'EACCES', 'EROFS']) {
+    assert.equal(shouldFallbackToBrowserStorage(500, { code }), true);
+  }
+  assert.equal(shouldFallbackToBrowserStorage(500, { code: 'EIO' }), false);
+  assert.equal(shouldFallbackToBrowserStorage(400, { code: 'EPERM' }), false);
+});
 
 function customLayout(name) {
   const initial = createInitialState();

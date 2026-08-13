@@ -53,7 +53,7 @@ async function writeLibrary(layoutFile, library) {
   await rename(temporaryFile, layoutFile);
 }
 
-async function readLibrary(layoutFile) {
+async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
   try {
     const library = JSON.parse(await readFile(layoutFile, 'utf8'));
     if (!Array.isArray(library.layouts) || typeof library.activeLayoutName !== 'string') {
@@ -69,7 +69,7 @@ async function readLibrary(layoutFile) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     const library = initialLibrary();
-    await writeLibrary(layoutFile, library);
+    await persistLibrary(layoutFile, library);
     return library;
   }
 }
@@ -144,7 +144,11 @@ async function serveStatic(rootDirectory, pathname, response) {
   createReadStream(file).pipe(response);
 }
 
-export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = defaultLayoutFile } = {}) {
+export function createAppServer({
+  rootDirectory = moduleDirectory,
+  layoutFile = defaultLayoutFile,
+  persistLibrary = writeLibrary
+} = {}) {
   let mutationQueue = Promise.resolve();
   const mutate = operation => {
     const result = mutationQueue.then(operation, operation);
@@ -157,7 +161,7 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
     const pathname = decodeURIComponent(url.pathname);
     try {
       if (pathname === '/api/layouts' && request.method === 'GET') {
-        sendJson(response, 200, await readLibrary(layoutFile));
+        sendJson(response, 200, await readLibrary(layoutFile, persistLibrary));
         return;
       }
       if (pathname === '/api/layouts' && request.method === 'POST') {
@@ -168,7 +172,7 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
           return;
         }
         const library = await mutate(async () => {
-          const next = await readLibrary(layoutFile);
+          const next = await readLibrary(layoutFile, persistLibrary);
           if (!body.activate && next.activeLayoutName === normalized.layout.name) {
             const playable = createCustomState(
               normalized.layout.boardStates,
@@ -184,7 +188,7 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
           else next.layouts.push(normalized.layout);
           next.layouts.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
           if (body.activate) next.activeLayoutName = normalized.layout.name;
-          await writeLibrary(layoutFile, next);
+          await persistLibrary(layoutFile, next);
           return next;
         });
         if (library.error) sendJson(response, library.status, { error: library.error });
@@ -194,7 +198,7 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
       if (pathname === '/api/layouts/active' && request.method === 'PUT') {
         const body = await readJsonBody(request);
         const library = await mutate(async () => {
-          const next = await readLibrary(layoutFile);
+          const next = await readLibrary(layoutFile, persistLibrary);
           const layout = next.layouts.find(item => item.name === body.name);
           if (!layout) return { error: '布局不存在', status: 404 };
           if (!layout.builtIn) {
@@ -202,7 +206,7 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
             if (validation.error) return { error: validation.error, status: 400 };
           }
           next.activeLayoutName = layout.name;
-          await writeLibrary(layoutFile, next);
+          await persistLibrary(layoutFile, next);
           return next;
         });
         if (library.error) sendJson(response, library.status, { error: library.error });
@@ -216,12 +220,12 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
           return;
         }
         const library = await mutate(async () => {
-          const next = await readLibrary(layoutFile);
+          const next = await readLibrary(layoutFile, persistLibrary);
           const originalLength = next.layouts.length;
           next.layouts = next.layouts.filter(layout => layout.name !== name);
           if (next.layouts.length === originalLength) return { error: '布局不存在', status: 404 };
           if (next.activeLayoutName === name) next.activeLayoutName = DEFAULT_LAYOUT_NAME;
-          await writeLibrary(layoutFile, next);
+          await persistLibrary(layoutFile, next);
           return next;
         });
         if (library.error) sendJson(response, library.status, { error: library.error });
@@ -235,7 +239,10 @@ export function createAppServer({ rootDirectory = moduleDirectory, layoutFile = 
       await serveStatic(rootDirectory, pathname, response);
     } catch (error) {
       const status = error instanceof SyntaxError || error instanceof RangeError ? 400 : 500;
-      sendJson(response, status, { error: error.message });
+      sendJson(response, status, {
+        error: error.message,
+        ...(typeof error.code === 'string' ? { code: error.code } : {})
+      });
     }
   });
 }

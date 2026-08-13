@@ -26,8 +26,9 @@ import {
 } from './game.js?v=panel-piece-ownership-1';
 import {
   createBrowserLayoutStore,
-  LEGACY_LAYOUT_STORAGE_KEY
-} from './layout-storage.js?v=solid-board-shape-1';
+  LEGACY_LAYOUT_STORAGE_KEY,
+  shouldFallbackToBrowserStorage
+} from './layout-storage.js?v=filesystem-fallback-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
@@ -180,7 +181,7 @@ async function requestLayoutLibrary(path = '/api/layouts', options = {}) {
     headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers
   });
   const body = await response.json().catch(() => ({ error: `服务器返回 ${response.status}` }));
-  if (response.status === 404) {
+  if (shouldFallbackToBrowserStorage(response.status, body)) {
     layoutStorageMode = 'browser';
     return browserLayoutStore.request(path, options);
   }
