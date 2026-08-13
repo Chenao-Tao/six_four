@@ -120,6 +120,18 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
 });
 
+test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
+  const boardCardStart = html.indexOf('<div class="board-card">');
+  const solidViewerStart = html.indexOf('<div class="solid-viewer hidden"');
+  const sidebarStart = html.indexOf('<aside>');
+
+  assert.ok(boardCardStart >= 0);
+  assert.ok(solidViewerStart > boardCardStart);
+  assert.ok(solidViewerStart < sidebarStart);
+  assert.match(styles, /\.solid-viewer\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;/);
+  assert.doesNotMatch(styles, /\.solid-viewer\s*\{[^}]*position:\s*fixed;/);
+});
+
 test('立体棋盘保留算法模拟和重开回到平面主界面的入口', () => {
   assert.match(html, /id="solidStepButton"/);
   assert.match(html, /id="solidAutoButton"/);
@@ -181,7 +193,8 @@ test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操�
   assert.match(app, /placeAssemblyPanel\(customEditor\.solidAssembly/);
   assert.match(app, /assemblyToLayout\(customEditor\.solidAssembly\)/);
   assert.match(app, /solidBoardViewer\.update\(model\)/);
-  const solidMarkup = html.match(/<div class="solid-viewer[\s\S]*?<\/div>\s*<script/)[0];
+  const solidStart = html.indexOf('<div class="solid-viewer');
+  const solidMarkup = html.slice(solidStart, html.indexOf('<aside>', solidStart));
   assert.doesNotMatch(solidMarkup, /data-editor-type|清空该点|棋子摆放/);
 });
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=solid-board-gameplay-1">
+  <link rel="stylesheet" href="styles.css?v=inline-solid-editor-1">
 </head>
 <body>
   <main class="app-shell">
@@ -21,6 +21,45 @@
           </div>
         </div>
         <div class="board-help" id="boardHelp">点击己方棋子，查看合法移动位置。</div>
+        <div class="solid-viewer hidden" id="solidViewer" role="region" aria-labelledby="solidViewerTitle">
+          <canvas id="solidBoardCanvas" aria-label="由六块三角板组成的双锥六面体"></canvas>
+          <section class="solid-viewer-panel">
+            <h2 id="solidViewerTitle">立体棋盘</h2>
+            <p id="solidViewerStatus">点击己方棋子查看合法落点。</p>
+            <div class="solid-panel-selection" id="solidPanelSelection">请选择一块待安装三角板</div>
+            <div class="solid-slot-picker hidden" id="solidSlotPicker" aria-label="六面体骨架槽位">
+              <span>骨架槽位</span>
+              <div id="solidSlotList"></div>
+            </div>
+            <section class="solid-panel-preview hidden" id="solidPanelPreview" aria-live="polite">
+              <div class="solid-panel-preview-heading">
+                <h3 id="solidPanelPreviewTitle">三角板预览</h3>
+                <span>当前状态</span>
+              </div>
+              <svg id="solidPanelPreviewSvg" viewBox="0 0 220 196" role="img" aria-labelledby="solidPanelPreviewTitle"></svg>
+              <p id="solidPanelPreviewMeta"></p>
+            </section>
+            <div class="buttons solid-panel-actions">
+              <button id="rotateSolidPanelButton" disabled>旋转120°</button>
+              <button id="flipSolidPanelButton" disabled>垂直镜像翻面</button>
+              <button id="removeSolidPanelButton" disabled>从骨架拆下</button>
+            </div>
+            <div class="buttons">
+              <button id="resetSolidViewButton">复位视角</button>
+              <button id="solidStepButton">算法演示一步</button>
+              <button id="solidAutoButton">连续模拟</button>
+              <button id="resetSolidGameButton">重新开局</button>
+              <button id="saveSolidCustomButton" class="primary">保存立体并开局</button>
+              <button id="solidCustomizeButton">自定义棋盘</button>
+              <button id="closeSolidViewButton" class="primary">返回保存布局</button>
+            </div>
+            <small id="solidViewerHelp">点击棋子和落点 · 拖动旋转视角 · 滚轮缩放</small>
+          </section>
+          <aside class="solid-panel-tray hidden" id="solidPanelTray" aria-label="待安装三角板">
+            <h2>三角板</h2>
+            <div id="solidPanelList"></div>
+          </aside>
+        </div>
       </div>
       <aside>
         <section class="card">
@@ -136,45 +175,6 @@
         <button data-editor-action="close">取消</button>
       </div>
     </div>
-  </div>
-  <div class="solid-viewer hidden" id="solidViewer" role="dialog" aria-modal="true" aria-labelledby="solidViewerTitle">
-    <canvas id="solidBoardCanvas" aria-label="由六块三角板组成的双锥六面体"></canvas>
-    <section class="solid-viewer-panel">
-      <h2 id="solidViewerTitle">立体棋盘</h2>
-      <p id="solidViewerStatus">点击己方棋子查看合法落点。</p>
-      <div class="solid-panel-selection" id="solidPanelSelection">请选择一块待安装三角板</div>
-      <div class="solid-slot-picker hidden" id="solidSlotPicker" aria-label="六面体骨架槽位">
-        <span>骨架槽位</span>
-        <div id="solidSlotList"></div>
-      </div>
-      <section class="solid-panel-preview hidden" id="solidPanelPreview" aria-live="polite">
-        <div class="solid-panel-preview-heading">
-          <h3 id="solidPanelPreviewTitle">三角板预览</h3>
-          <span>当前状态</span>
-        </div>
-        <svg id="solidPanelPreviewSvg" viewBox="0 0 220 196" role="img" aria-labelledby="solidPanelPreviewTitle"></svg>
-        <p id="solidPanelPreviewMeta"></p>
-      </section>
-      <div class="buttons solid-panel-actions">
-        <button id="rotateSolidPanelButton" disabled>旋转120°</button>
-        <button id="flipSolidPanelButton" disabled>垂直镜像翻面</button>
-        <button id="removeSolidPanelButton" disabled>从骨架拆下</button>
-      </div>
-      <div class="buttons">
-        <button id="resetSolidViewButton">复位视角</button>
-        <button id="solidStepButton">算法演示一步</button>
-        <button id="solidAutoButton">连续模拟</button>
-        <button id="resetSolidGameButton">重新开局</button>
-        <button id="saveSolidCustomButton" class="primary">保存立体并开局</button>
-        <button id="solidCustomizeButton">自定义棋盘</button>
-        <button id="closeSolidViewButton" class="primary">返回保存布局</button>
-      </div>
-      <small id="solidViewerHelp">点击棋子和落点 · 拖动旋转视角 · 滚轮缩放</small>
-    </section>
-    <aside class="solid-panel-tray hidden" id="solidPanelTray" aria-label="待安装三角板">
-      <h2>三角板</h2>
-      <div id="solidPanelList"></div>
-    </aside>
   </div>
   <script type="module" src="app.js?v=vertical-mirror-flip-1"></script>
 </body>

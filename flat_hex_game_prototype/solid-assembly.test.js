@@ -73,6 +73,18 @@ test('待选三角板可以独立旋转和翻面，拆下后恢复为可选状�
   assert.equal(assembly.panels.find(panel => panel.id === '1').installedSlot, null);
 });
 
+test('立体装配编辑使用独立草稿，不改变同配置的平面布局结构', () => {
+  const flatLayout = initialLayout();
+  const originalFlatLayout = structuredClone(flatLayout);
+  let assembly = createSolidAssembly(flatLayout);
+
+  assembly = rotateAssemblyPanel(assembly, '1').assembly;
+  assembly = flipAssemblyPanel(assembly, '1').assembly;
+  assembly = placeAssemblyPanel(assembly, '1', 4).assembly;
+
+  assert.deepEqual(flatLayout, originalFlatLayout);
+});
+
 test('选中三角板预览返回当前面、安装状态和旋转后的棋子位置', () => {
   const layout = initialLayout();
   layout.boardStates = {
