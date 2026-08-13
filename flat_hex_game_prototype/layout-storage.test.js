@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createInitialState } from './game.js';
+import { createCustomState, createInitialState } from './game.js';
 import {
   createBrowserLayoutStore,
   DEFAULT_LAYOUT_NAME,
   LAYOUT_LIBRARY_STORAGE_KEY,
   shouldFallbackToBrowserStorage
 } from './layout-storage.js';
+import { builtInLayouts } from './built-in-layouts.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -56,6 +57,9 @@ test('浏览器布局存储提供默认布局并持久化保存与启用状态',
   const initial = store.request();
   assert.equal(initial.activeLayoutName, DEFAULT_LAYOUT_NAME);
   assert.equal(initial.layouts[0].builtIn, true);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn).length, 4);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'solid').length, 1);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'flat').length, 3);
 
   const saved = store.request('/api/layouts', {
     method: 'POST',
@@ -68,6 +72,40 @@ test('浏览器布局存储提供默认布局并持久化保存与启用状态',
 
   const restartedStore = createBrowserLayoutStore(storage);
   assert.equal(restartedStore.request().activeLayoutName, '线上布局');
+});
+
+test('已有浏览器布局库会自动补齐内置可玩布局且保留用户布局', () => {
+  const storage = memoryStorage();
+  storage.setItem(LAYOUT_LIBRARY_STORAGE_KEY, JSON.stringify({
+    version: 1,
+    activeLayoutName: '用户布局',
+    layouts: [customLayout('用户布局')]
+  }));
+
+  const library = createBrowserLayoutStore(storage).request();
+
+  assert.equal(library.activeLayoutName, '用户布局');
+  assert.ok(library.layouts.some(layout => layout.name === '用户布局'));
+  assert.equal(library.layouts.filter(layout => layout.builtIn).length, 4);
+});
+
+test('全部内置布局都可直接开局且不能被覆盖', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  for (const layout of builtInLayouts()) {
+    const playable = layout.isDefault
+      ? { state: createInitialState() }
+      : createCustomState(
+          layout.boardStates,
+          layout.faceLabels,
+          layout.panelRotations,
+          layout.boardShape
+        );
+    assert.ok(playable.state, layout.name);
+    assert.throws(() => store.request('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout, activate: false })
+    }), /内置布局不能被覆盖/);
+  }
 });
 
 test('旧布局缺少棋盘形态时按平面布局兼容读取', () => {

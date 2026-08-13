@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=vertical-mirror-flip-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=piece-layer-exchange-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -220,6 +220,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let lastInteractionTargets = [];
   let operationEffect = null;
   let cameraMotion = null;
+  let layerExchange = null;
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -456,7 +457,26 @@ export function createSolidBoardViewer(canvas, initialModel, {
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     context.clearRect(0, 0, width, height);
 
-    const mappedPieces = mapPiecesToPanels(model.pieces);
+    let displayedModel = model;
+    let pieceLayerMotion = null;
+    if (layerExchange) {
+      const progress = Math.max(0, Math.min(1, (now - layerExchange.startedAt) / layerExchange.duration));
+      const rising = progress >= 0.5;
+      const phaseProgress = rising ? (progress - 0.5) * 2 : progress * 2;
+      displayedModel = rising ? layerExchange.nextModel : model;
+      pieceLayerMotion = rising
+        ? { normalOffset: -0.12 + 0.175 * phaseProgress, alpha: phaseProgress }
+        : { normalOffset: 0.055 - 0.175 * phaseProgress, alpha: 1 - phaseProgress };
+      if (progress >= 1) {
+        model = layerExchange.nextModel;
+        const resolve = layerExchange.resolve;
+        layerExchange = null;
+        displayedModel = model;
+        pieceLayerMotion = null;
+        resolve();
+      }
+    }
+    const mappedPieces = mapPiecesToPanels(displayedModel.pieces);
     const renderFaces = faces.map((vertices, panelIndex) => {
       const projected = vertices.map(vertex => project(vertex, width, height));
       return {
@@ -476,9 +496,11 @@ export function createSolidBoardViewer(canvas, initialModel, {
         subtract(face.vertices[2], face.vertices[0])
       ));
       const world = barycentricPoint(face.vertices, piece.local);
-      const position = project(add(world, scale(normal, 0.055)), width, height);
+      const position = project(add(world, scale(normal, pieceLayerMotion?.normalOffset ?? 0.055)), width, height);
       const radius = Math.max(12, 17 * position.perspective * zoom);
       const isSelectedPiece = model.selectedPieceId === piece.id;
+      context.save();
+      context.globalAlpha = pieceLayerMotion?.alpha ?? 1;
       context.beginPath();
       context.arc(position.x, position.y, radius, 0, Math.PI * 2);
       context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
@@ -497,6 +519,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
         radius: radius + 7,
         depth: position.z
       });
+      context.restore();
     }
 
     renderFaces.forEach(face => {
@@ -632,6 +655,17 @@ export function createSolidBoardViewer(canvas, initialModel, {
     update(nextModel) {
       model = nextModel;
     },
+    exchangeLayers(nextModel) {
+      if (layerExchange) return Promise.resolve(false);
+      return new Promise(resolve => {
+        layerExchange = {
+          nextModel,
+          startedAt: performance.now(),
+          duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 220 : 680,
+          resolve
+        };
+      });
+    },
     playEffect(type, panelIndices) {
       const uniquePanels = [...new Set(panelIndices)]
         .filter(panelIndex => Number.isInteger(panelIndex) && panelIndex >= 0 && panelIndex < 6);
@@ -676,6 +710,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
       return true;
     },
     destroy() {
+      layerExchange?.resolve(false);
+      layerExchange = null;
       cancelAnimationFrame(animationFrame);
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('pointermove', pointerMove);

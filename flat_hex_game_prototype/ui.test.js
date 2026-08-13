@@ -21,9 +21,16 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /previewSide = previewSide === null \? oppositeBoardSide\(activeBoardSide\(\)\) : null/);
 });
 
-test('实际吃子翻面退出预览并采用规则层返回的新朝上面', () => {
-  assert.match(app, /async function animateBoardFlip\(nextState\) \{[\s\S]*?previewSide = null/);
+test('实际吃子换层退出预览并采用规则层返回的新外层棋子', () => {
+  assert.match(app, /async function animatePieceLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
+});
+
+test('吃子换层只动画棋子而不旋转平面棋盘', () => {
+  assert.match(styles, /\.board-shell\.pieces-sinking \.piece/);
+  assert.match(styles, /\.board-shell\.pieces-rising \.piece/);
+  assert.doesNotMatch(app, /animateBoardFlip/);
+  assert.match(app, /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
 });
 
 test('所有平面翻面动画使用垂直镜像轴', () => {

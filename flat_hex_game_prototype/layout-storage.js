@@ -1,12 +1,16 @@
 import {
   createCustomLayout,
-  createCustomState,
-  createInitialState
-} from './game.js?v=vertical-mirror-flip-1';
+  createCustomState
+} from './game.js?v=piece-layer-exchange-1';
+import {
+  DEFAULT_LAYOUT_NAME,
+  isBuiltInLayoutName,
+  mergeBuiltInLayouts
+} from './built-in-layouts.js?v=piece-layer-exchange-1';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';
-export const DEFAULT_LAYOUT_NAME = '默认布局';
+export { DEFAULT_LAYOUT_NAME };
 const FILE_STORAGE_ERROR_CODES = new Set(['EPERM', 'EACCES', 'EROFS']);
 
 export function shouldFallbackToBrowserStorage(status, body) {
@@ -38,20 +42,10 @@ function layoutSnapshot(name, source, builtIn = false) {
   };
 }
 
-function defaultLayout() {
-  const state = createInitialState();
-  return layoutSnapshot(DEFAULT_LAYOUT_NAME, {
-    boardShape: 'flat',
-    boardStates: state.boardStates,
-    faceLabels: state.boardFaceLabels,
-    panelRotations: state.boardPanelRotations
-  }, true);
-}
-
 function normalizedLayout(layout, requirePlayable) {
   const name = typeof layout?.name === 'string' ? layout.name.trim() : '';
   if (!name) throw new Error('布局名称不能为空');
-  if (name === DEFAULT_LAYOUT_NAME) throw new Error('默认布局不能被覆盖');
+  if (isBuiltInLayoutName(name)) throw new Error('内置布局不能被覆盖');
   if (name.length > 40) throw new Error('布局名称不能超过40个字符');
   if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
     throw new Error('棋盘形态必须是平面或立体');
@@ -90,9 +84,7 @@ export function createBrowserLayoutStore(storage) {
       if (!Array.isArray(library.layouts) || typeof library.activeLayoutName !== 'string') {
         throw new TypeError('浏览器布局存档结构无效');
       }
-      if (!library.layouts.some(layout => layout.name === DEFAULT_LAYOUT_NAME)) {
-        library.layouts.unshift(defaultLayout());
-      }
+      library.layouts = mergeBuiltInLayouts(library.layouts);
       if (!library.layouts.some(layout => layout.name === library.activeLayoutName)) {
         library.activeLayoutName = DEFAULT_LAYOUT_NAME;
       }
@@ -102,7 +94,7 @@ export function createBrowserLayoutStore(storage) {
     const library = {
       version: 1,
       activeLayoutName: DEFAULT_LAYOUT_NAME,
-      layouts: [defaultLayout(), ...legacyLayouts]
+      layouts: mergeBuiltInLayouts(legacyLayouts)
     };
     write(library);
     if (legacyLayouts.length) storage.removeItem(LEGACY_LAYOUT_STORAGE_KEY);
@@ -136,7 +128,7 @@ export function createBrowserLayoutStore(storage) {
     if (path === '/api/layouts/active' && method === 'PUT') {
       const layout = library.layouts.find(item => item.name === body.name);
       if (!layout) throw new Error('布局不存在');
-      if (!layout.builtIn) {
+      if (!layout.isDefault) {
         const validation = createCustomState(
           layout.boardStates,
           layout.faceLabels,
@@ -151,7 +143,8 @@ export function createBrowserLayoutStore(storage) {
     }
     if (path.startsWith('/api/layouts/') && method === 'DELETE') {
       const name = decodeURIComponent(path.slice('/api/layouts/'.length));
-      if (!name || name === DEFAULT_LAYOUT_NAME) throw new Error('默认布局不能删除');
+      const selected = library.layouts.find(layout => layout.name === name);
+      if (!name || selected?.builtIn) throw new Error('内置布局不能删除');
       const originalLength = library.layouts.length;
       library.layouts = library.layouts.filter(layout => layout.name !== name);
       if (library.layouts.length === originalLength) throw new Error('布局不存在');

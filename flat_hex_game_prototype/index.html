@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=inline-solid-editor-1">
+  <link rel="stylesheet" href="styles.css?v=piece-layer-exchange-1">
 </head>
 <body>
   <main class="app-shell">
@@ -128,7 +128,7 @@
             <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象留在原位；兵吃兵/王后占据目标；王吃后双方原位不变。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
             <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
-            <li><b>双面棋盘</b>：当前朝上面才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后整块六边形实际翻面，原背面成为新的可操作面。</li>
+            <li><b>双层棋盘</b>：当前上层才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后棋盘保持不动，上层棋子整体下沉、正下方的下层棋子整体上浮，两层棋子交换位置。</li>
             <li><b>板块拆装</b>：三角板旋转120°时板上的棋子跟随旋转；也可单独翻面或选择两块板交换位置，另一面同步更新。</li>
             <li><b>布局存储</b>：本地服务保存到项目 JSON 文件；静态部署时自动保存在当前浏览器。“启用并开局”或“保存并开局”会设为重开的起始布局。开局布局要求 A、B 两面合计只有一枚白王和一枚黑王。</li>
           </ul>
@@ -176,6 +176,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=vertical-mirror-flip-1"></script>
+  <script type="module" src="app.js?v=piece-layer-exchange-1"></script>
 </body>
 </html>

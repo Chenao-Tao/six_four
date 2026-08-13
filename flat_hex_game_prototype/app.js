@@ -24,16 +24,16 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=vertical-mirror-flip-1';
+} from './game.js?v=piece-layer-exchange-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=vertical-mirror-flip-1';
+} from './layout-storage.js?v=piece-layer-exchange-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=vertical-mirror-flip-1';
+} from './solid-board.js?v=piece-layer-exchange-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -43,7 +43,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=vertical-mirror-flip-1';
+} from './solid-assembly.js?v=piece-layer-exchange-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -212,7 +212,7 @@ function applyLayoutLibrary(library, selectedName = '') {
   activeLayoutName = library.activeLayoutName;
   const activeLayout = savedLayouts.find(layout => layout.name === activeLayoutName);
   activeBoardShape = activeLayout?.boardShape === 'solid' ? 'solid' : 'flat';
-  if (activeLayout?.builtIn) {
+  if (activeLayout?.isDefault) {
     activeInitialState = createInitialState();
   } else if (activeLayout) {
     const result = createCustomState(
@@ -957,7 +957,7 @@ function render() {
       (customEditor.mode === 'pieces' ? '点击交点设子' : '选择三角板拆装')
     : previewing
       ? `背面预览 · ${sideName} · 禁止移动`
-      : `当前朝上 · ${sideName} · 已翻 ${state.flipCount ?? 0} 次`;
+      : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
   stepButton.disabled = previewing || editing;
@@ -1077,16 +1077,18 @@ async function animateMove(pieceId, path, positionEffect, defenderId = null) {
   animationLock = false;
 }
 
-async function animateBoardFlip(nextState) {
+async function animatePieceLayerExchange(nextState) {
   animationLock = true;
   previewSide = null;
-  boardShell.classList.add('flipping');
-  boardHelp.textContent = '发生吃子：六边形棋盘正在整体翻面……';
-  await new Promise(resolve => setTimeout(resolve, 430));
+  boardShell.classList.add('pieces-sinking');
+  boardHelp.textContent = '发生吃子：当前层棋子正在下沉，正下方棋子即将上浮……';
+  await new Promise(resolve => setTimeout(resolve, 280));
   state = nextState;
   render();
-  await new Promise(resolve => setTimeout(resolve, 470));
-  boardShell.classList.remove('flipping');
+  boardShell.classList.remove('pieces-sinking');
+  boardShell.classList.add('pieces-rising');
+  await new Promise(resolve => setTimeout(resolve, 320));
+  boardShell.classList.remove('pieces-rising');
   animationLock = false;
 }
 
@@ -1113,10 +1115,18 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
-  if (solidBoardViewer) {
+  if (solidBoardViewer && move.captureId) {
+    animationLock = true;
     state = result.state;
-  } else if (move.captureId && result.state.boardSide !== state.boardSide) {
-    await animateBoardFlip(result.state);
+    try {
+      await solidBoardViewer.exchangeLayers(solidBoardModel());
+    } finally {
+      animationLock = false;
+    }
+  } else if (solidBoardViewer) {
+    state = result.state;
+  } else if (move.captureId) {
+    await animatePieceLayerExchange(result.state);
   } else {
     state = result.state;
   }

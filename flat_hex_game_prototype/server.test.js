@@ -50,7 +50,8 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
 
   const stored = JSON.parse(await readFile(layoutFile, 'utf8'));
   assert.equal(stored.activeLayoutName, '测试布局');
-  assert.equal(stored.layouts.length, 2);
+  assert.equal(stored.layouts.length, 5);
+  assert.equal(stored.layouts.filter(item => item.builtIn).length, 4);
 
   const secondServer = createAppServer({ layoutFile });
   const secondBaseUrl = await listen(secondServer);
@@ -108,6 +109,37 @@ test('未完成草稿可以落盘但不能启用，删除活动布局后回到�
   }).then(response => response.json());
   assert.equal(deleted.activeLayoutName, '默认布局');
   assert.equal(deleted.layouts.some(item => item.name === '可用布局'), false);
+});
+
+test('服务端内置布局可直接启用且不能覆盖或删除', async t => {
+  const tempDirectory = await mkdtemp(join(tmpdir(), 'flat-hex-layouts-'));
+  const server = createAppServer({ layoutFile: join(tempDirectory, 'layouts.json') });
+  const baseUrl = await listen(server);
+  t.after(() => close(server));
+  t.after(() => rm(tempDirectory, { recursive: true, force: true }));
+
+  const library = await fetch(`${baseUrl}/api/layouts`).then(response => response.json());
+  const preset = library.layouts.find(item => item.name === '预设·立体升沉测试');
+  assert.ok(preset);
+
+  const activated = await fetch(`${baseUrl}/api/layouts/active`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: preset.name })
+  });
+  assert.equal(activated.status, 200);
+
+  const overwrite = await fetch(`${baseUrl}/api/layouts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ layout: { ...layout('预设·立体升沉测试'), name: preset.name } })
+  });
+  assert.equal(overwrite.status, 400);
+
+  const deleted = await fetch(`${baseUrl}/api/layouts/${encodeURIComponent(preset.name)}`, {
+    method: 'DELETE'
+  });
+  assert.equal(deleted.status, 400);
 });
 
 test('布局文件不可写时接口返回可识别的文件系统错误码', async t => {
