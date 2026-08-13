@@ -561,13 +561,12 @@ function layoutThreeFrontPieces() {
 function layoutThreeBackPieces() {
   const legacyHorizontalMirrorPieces = [
     // 实拍图二原先按水平轴翻面标定；垂直轴翻面后的显示位置相差 180°。
-    piece('back-wK', 'white', 'king', 0, 2),
+    // 王只保留在正面，背面不放置王：双面合计必须且仅有一枚白王和一枚黑王。
     piece('back-wQ', 'white', 'queen', 0, 1),
     piece('back-wB1', 'white', 'bishop', -2, -1),
     piece('back-wB2', 'white', 'bishop', 1, 0),
     piece('back-wP1', 'white', 'pawn', -1, -2),
     piece('back-wP2', 'white', 'pawn', -2, 1),
-    piece('back-bK', 'black', 'king', -1, -1),
     piece('back-bQ', 'black', 'queen', 2, 0),
     piece('back-bB1', 'black', 'bishop', -1, 0),
     piece('back-bB2', 'black', 'bishop', -2, -1),

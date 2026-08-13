@@ -508,12 +508,15 @@ test('布局三由参考图的互补面拼成正反六边形', () => {
   const state = createInitialState();
   assert.equal(state.boardSide, 'front');
   assert.equal(state.boardStates.front.length, 12);
-  assert.equal(state.boardStates.back.length, 12);
+  assert.equal(state.boardStates.back.length, 10);
   assert.strictEqual(state.pieces, state.boardStates.front);
   assert.deepEqual(state.boardStates.front.find(item => item.id === 'wK').position, { q: 0, r: -4 });
   assert.deepEqual(state.boardStates.front.find(item => item.id === 'bK').position, { q: -4, r: 0 });
   assert.equal(new Set(state.boardStates.front.map(item => keyOf(item.position))).size, 12);
-  assert.equal(new Set(state.boardStates.back.map(item => keyOf(item.position))).size, 11);
+  assert.equal(new Set(state.boardStates.back.map(item => keyOf(item.position))).size, 9);
+  const kings = [...state.boardStates.front, ...state.boardStates.back].filter(item => item.type === 'king');
+  assert.equal(kings.filter(item => item.side === 'white').length, 1);
+  assert.equal(kings.filter(item => item.side === 'black').length, 1);
 });
 
 test('正反面板块统一使用垂直轴镜像槽位', () => {
@@ -589,13 +592,11 @@ test('布局三棋子身份与交点严格匹配参考图', () => {
   assert.deepEqual(compactPieces(state.boardStates.back), [
     'back-bB1:black:bishop@1,0',
     'back-bB2:black:bishop@2,1',
-    'back-bK:black:king@1,1',
     'back-bP1:black:pawn@3,0',
     'back-bP2:black:pawn@-1,-1',
     'back-bQ:black:queen@-2,0',
     'back-wB1:white:bishop@2,1',
     'back-wB2:white:bishop@-1,0',
-    'back-wK:white:king@0,-2',
     'back-wP1:white:pawn@1,2',
     'back-wP2:white:pawn@2,-1',
     'back-wQ:white:queen@0,-1'
