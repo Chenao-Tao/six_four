@@ -5,6 +5,7 @@ import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
 import {
   findPanelAtPoint,
   findSolidTargetAtPoint,
+  isSharedSolidPoint,
   mapPiecesToPanels,
   solidCameraAngles,
   solidEffectFrame
@@ -96,4 +97,10 @@ test('立体相机跟随目标点会生成有限且可复现的旋转角', () =>
   assert.equal(Number.isFinite(side.rotationX), true);
   assert.equal(Number.isFinite(side.rotationY), true);
   assert.equal(side.rotationY, -Math.PI / 2);
+});
+
+test('公共棱和公共顶点棋子会进入最后绘制层', () => {
+  assert.equal(isSharedSolidPoint({ center: 0, u: 0.5, v: 0.5 }), true);
+  assert.equal(isSharedSolidPoint({ center: 0, u: 1, v: 0 }), true);
+  assert.equal(isSharedSolidPoint({ center: 0.25, u: 0.5, v: 0.25 }), false);
 });

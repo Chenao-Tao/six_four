@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=simulation-pause-follow-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=simulation-operation-preview-1';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 

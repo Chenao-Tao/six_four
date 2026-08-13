@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=simulation-pause-follow-1';
+} from './game.js?v=simulation-operation-preview-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=simulation-pause-follow-1';
+} from './layout-storage.js?v=simulation-operation-preview-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=simulation-pause-follow-1';
+} from './solid-board.js?v=simulation-operation-preview-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=simulation-pause-follow-1';
+} from './solid-assembly.js?v=simulation-operation-preview-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -118,6 +118,7 @@ let autoTimer = null;
 let autoPaused = false;
 let simulationPauseRequested = false;
 let simulationRunId = 0;
+let simulationPreview = null;
 let animationLock = false;
 let simulationLock = false;
 let previewSide = null;
@@ -432,6 +433,24 @@ function solidBoardModel() {
     const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
     return { ...mapped, targetKey: move.mapKey ?? keyOf(move.target), captureId: move.captureId };
   });
+  const previewMover = simulationPreview
+    ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
+    : null;
+  const previewCaptured = simulationPreview?.move.captureId
+    ? displayedPieces().find(piece => piece.id === simulationPreview.move.captureId)
+    : null;
+  const plannedMove = previewMover
+    ? {
+        pieceId: previewMover.id,
+        captureId: simulationPreview.move.captureId,
+        label: simulationPreview.label,
+        from: mapSolidPoint(previewMover.position, previewMover.panelIndex),
+        to: mapSolidPoint(
+          simulationPreview.move.target,
+          simulationPreview.move.panelIndex ?? previewCaptured?.panelIndex ?? previewMover.panelIndex
+        )
+      }
+    : null;
   return {
     side,
     pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
@@ -439,7 +458,8 @@ function solidBoardModel() {
     panelRotations,
     selectedPanel: customEditor ? solidSelectedPanel : null,
     selectedPieceId: customEditor ? null : selectedPieceId,
-    moveTargets
+    moveTargets,
+    plannedMove
   };
 }
 
@@ -1007,6 +1027,7 @@ function selectPiece(pieceId) {
     boardHelp.textContent = '只能选择当前行动方的棋子。';
     return;
   }
+  simulationPreview = null;
   selectedPieceId = pieceId;
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
@@ -1088,6 +1109,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   }
   selectedPieceId = null;
   selectedMoves = new Map();
+  simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
   if (solidBoardViewer) {
@@ -1151,6 +1173,30 @@ function stopAutoSimulation() {
   autoButton.textContent = '连续模拟';
   solidAutoButton.classList.remove('active');
   solidAutoButton.textContent = '连续模拟';
+}
+
+function simulationActionLabel(action, mover, prefix = '即将执行') {
+  const captured = action.move.captureId
+    ? state.pieces.find(piece => piece.id === action.move.captureId)
+    : null;
+  const side = mover.side === 'white' ? '白方' : '黑方';
+  const from = keyOf(mover.position);
+  const target = keyOf(action.move.target);
+  const operation = captured
+    ? `从 ${from} 攻击 ${target} 的${captured.side === 'white' ? '白方' : '黑方'}${PIECE_NAMES[captured.type]}`
+    : `从 ${from} 移动到 ${target}`;
+  return `${prefix}：${side}${PIECE_NAMES[mover.type]}${operation}`;
+}
+
+function previewSimulationAction(action, mover, prefix) {
+  const label = simulationActionLabel(action, mover, prefix);
+  selectedPieceId = action.pieceId;
+  selectedMoves = new Map([[action.move.mapKey ?? keyOf(action.move.target), action.move]]);
+  simulationPreview = { pieceId: action.pieceId, move: action.move, label };
+  selectedInfo.textContent = label;
+  boardHelp.textContent = label;
+  if (solidBoardViewer) solidViewerStatus.textContent = label;
+  return label;
 }
 
 function setAutoSimulationButtonState(text, active) {
@@ -1239,6 +1285,7 @@ function enterCustomEditor() {
   previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
+  simulationPreview = null;
   customEditor = {
     side: 'front',
     mode: 'pieces',
@@ -1614,6 +1661,7 @@ function resetGame() {
   previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
+  simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
   if (wasSolid) closeSolidBoard();
@@ -1663,17 +1711,10 @@ async function simulateStep() {
       if (simulationPauseRequested || runId !== simulationRunId) return;
       action = step;
       const stepMover = state.pieces.find(item => item.id === step.pieceId);
-      selectedPieceId = step.pieceId;
-      selectedMoves = legalMoves(state, step.pieceId);
-      selectedInfo.textContent = `分步博弈 ${step.searchDepth}/3：` +
+      const candidateLabel = previewSimulationAction(step, stepMover, `第 ${step.searchDepth} 层候选操作`);
+      selectedInfo.textContent = `${candidateLabel}；` +
         `${PIECE_NAMES[stepMover.type]}${step.move.captureId ? '攻击' : '移动'}，` +
         `评估 ${step.score}，搜索 ${step.searchedNodes} 节点，剪枝 ${step.prunedBranches} 次`;
-      boardHelp.textContent = step.searchDepth === 1
-        ? '第1步：评估当前行动的直接收益。'
-        : step.searchDepth === 2
-          ? '第2步：加入对手的最优回应。'
-          : '第3步：加入己方反制并确定最终动作。';
-      if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
       solidBoardViewer?.followPiece(step.pieceId);
       render();
       await new Promise(resolve => setTimeout(resolve, 360));
@@ -1683,9 +1724,8 @@ async function simulateStep() {
       boardHelp.textContent = '当前一方没有合法移动。';
       return;
     }
-    selectedPieceId = action.pieceId;
-    selectedMoves = legalMoves(state, action.pieceId);
     const mover = state.pieces.find(item => item.id === action.pieceId);
+    const operationLabel = previewSimulationAction(action, mover, '即将执行');
     const promotionType = promotionTypeForMove(state, action.pieceId, action.move);
     const choice = promotionType
       ? action.promote
@@ -1695,15 +1735,15 @@ async function simulateStep() {
     const repetitionNote = action.repetitionCount > 0
       ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
       : '，已避开近期重复局面';
-    selectedInfo.textContent = `分步博弈最终选择（${action.searchDepth} 层）：` +
+    selectedInfo.textContent = `${operationLabel}；分步博弈最终选择（${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
-    if (solidBoardViewer) solidViewerStatus.textContent = selectedInfo.textContent;
+    if (solidBoardViewer) solidViewerStatus.textContent = operationLabel;
     solidBoardViewer?.followPoint(
       action.move.target,
       action.move.panelIndex ?? mover.panelIndex
     );
     render();
-    await new Promise(resolve => setTimeout(resolve, 240));
+    await new Promise(resolve => setTimeout(resolve, 720));
     if (simulationPauseRequested || runId !== simulationRunId) return;
     const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
       `剪枝 ${action.prunedBranches} 次，执行评估值 ${action.score} 的动作。`;

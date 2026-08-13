@@ -135,6 +135,15 @@ test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角',
   assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion\)/);
 });
 
+test('算法模拟会预告唯一的即将执行动作', () => {
+  assert.match(app, /let simulationPreview = null/);
+  assert.match(app, /function simulationActionLabel\(/);
+  assert.match(app, /function previewSimulationAction\(/);
+  assert.match(app, /selectedMoves = new Map\(\[\[action\.move\.mapKey/);
+  assert.match(app, /previewSimulationAction\(action, mover, '即将执行'\)/);
+  assert.match(app, /plannedMove/);
+});
+
 test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
   assert.match(app, /createCustomState\([\s\S]*?activeBoardShape\s*\)/);
   assert.match(app, /onPieceSelect: selectSolidPiece/);
