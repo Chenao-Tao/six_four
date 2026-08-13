@@ -102,6 +102,8 @@ const solidPanelPreview = document.getElementById('solidPanelPreview');
 const solidPanelPreviewTitle = document.getElementById('solidPanelPreviewTitle');
 const solidPanelPreviewSvg = document.getElementById('solidPanelPreviewSvg');
 const solidPanelPreviewMeta = document.getElementById('solidPanelPreviewMeta');
+const solidSlotPicker = document.getElementById('solidSlotPicker');
+const solidSlotList = document.getElementById('solidSlotList');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -524,6 +526,27 @@ function renderSolidPanelTray() {
   });
 }
 
+function renderSolidSlotPicker() {
+  solidSlotList.replaceChildren();
+  if (!customEditor?.solidAssembly) return;
+  customEditor.solidAssembly.slots.forEach((slot, slotIndex) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'solid-slot-button';
+    button.classList.toggle('occupied', Boolean(slot));
+    button.classList.toggle('selected', solidSelectedPanel === slotIndex);
+    const label = document.createElement('strong');
+    label.textContent = `槽位 ${slotIndex + 1}`;
+    const status = document.createElement('small');
+    status.textContent = slot
+      ? `${slot.panelId}${slot.face} · ${slot.rotation}°`
+      : solidSelectedPanelId ? '点击安装' : '空槽';
+    button.append(label, status);
+    button.addEventListener('click', () => selectSolidPanel(slotIndex));
+    solidSlotList.appendChild(button);
+  });
+}
+
 function refreshSolidBoard(message = '') {
   if (!solidBoardViewer) return;
   const model = solidBoardModel();
@@ -534,6 +557,7 @@ function refreshSolidBoard(message = '') {
   solidPanelSelection.classList.toggle('hidden', !editingSolid);
   document.querySelector('.solid-panel-actions').classList.toggle('hidden', !editingSolid);
   solidPanelTray.classList.toggle('hidden', !editingSolid);
+  solidSlotPicker.classList.toggle('hidden', !editingSolid);
   solidCustomizeButton.classList.toggle('hidden', editingSolid);
   resetSolidGameButton.classList.toggle('hidden', editingSolid);
   saveSolidCustomButton.classList.toggle('hidden', !editingSolid);
@@ -553,6 +577,7 @@ function refreshSolidBoard(message = '') {
     flipSolidPanelButton.disabled = !selectedPanel;
     removeSolidPanelButton.disabled = !selectedPanel || selectedPanel.installedSlot === null;
     saveSolidCustomButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
+    renderSolidSlotPicker();
     renderSolidPanelTray();
   }
 }

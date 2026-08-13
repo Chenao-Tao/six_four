@@ -126,11 +126,15 @@ test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操�
   assert.match(html, /id="rotateSolidPanelButton"/);
   assert.match(html, /id="flipSolidPanelButton"/);
   assert.match(html, /id="removeSolidPanelButton"/);
+  assert.match(html, /id="solidSlotPicker"/);
+  assert.match(html, /id="solidSlotList"/);
   assert.match(app, /function selectSolidPanel\(/);
   assert.match(app, /function selectAssemblyPanel\(/);
   assert.match(app, /function rotateSolidPanel\(/);
   assert.match(app, /function flipSolidPanel\(/);
   assert.match(app, /function removeSolidPanel\(/);
+  assert.match(app, /function renderSolidSlotPicker\(\)/);
+  assert.match(app, /button\.addEventListener\('click', \(\) => selectSolidPanel\(slotIndex\)\)/);
   assert.match(app, /placeAssemblyPanel\(customEditor\.solidAssembly/);
   assert.match(app, /assemblyToLayout\(customEditor\.solidAssembly\)/);
   assert.match(app, /solidBoardViewer\.update\(model\)/);
