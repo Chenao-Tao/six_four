@@ -229,6 +229,21 @@ export function assemblyViewModel(assembly) {
   return { pieces, faceLabels, panelRotations };
 }
 
+export function assemblyPanelPreview(assembly, panelId) {
+  const panel = panelById(assembly, panelId);
+  if (!panel) return null;
+  return {
+    id: panel.id,
+    face: panel.face,
+    rotation: panel.rotation,
+    installedSlot: panel.installedSlot,
+    pieces: panel.faces[panel.face].map(piece => ({
+      ...clonePiece(piece),
+      local: rotateLocal(piece.local, panel.rotation)
+    }))
+  };
+}
+
 export function rotateAssemblyPanel(assembly, panelId) {
   const next = cloneAssembly(assembly);
   const panel = panelById(next, panelId);

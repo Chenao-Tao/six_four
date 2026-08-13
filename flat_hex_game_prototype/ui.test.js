@@ -138,6 +138,17 @@ test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操�
   assert.doesNotMatch(solidMarkup, /data-editor-type|清空该点|棋子摆放/);
 });
 
+test('选中立体三角板后显示当前面、角度、槽位和棋子预览', () => {
+  assert.match(html, /id="solidPanelPreview"/);
+  assert.match(html, /id="solidPanelPreviewSvg"/);
+  assert.match(html, /id="solidPanelPreviewMeta"/);
+  assert.match(app, /assemblyPanelPreview/);
+  assert.match(app, /function renderSolidPanelPreview\(\)/);
+  assert.match(app, /renderSolidPanelPreview\(\);\s*if \(editingSolid\)/);
+  assert.match(app, /白方 \$\{whiteCount\} 枚 \/ 黑方 \$\{blackCount\} 枚/);
+  assert.match(app, /class: `solid-panel-preview-piece \$\{piece\.side\}`/);
+});
+
 test('立体装配的旋转和翻面操作会触发对应特效', () => {
   assert.match(app, /playEffect\('rotate', \[solidSelectedPanel\]\)/);
   assert.match(app, /playEffect\('flip', \[solidSelectedPanel\]\)/);

@@ -143,6 +143,14 @@
       <h2 id="solidViewerTitle">立体棋盘</h2>
       <p id="solidViewerStatus">点击己方棋子查看合法落点。</p>
       <div class="solid-panel-selection" id="solidPanelSelection">请选择一块待安装三角板</div>
+      <section class="solid-panel-preview hidden" id="solidPanelPreview" aria-live="polite">
+        <div class="solid-panel-preview-heading">
+          <h3 id="solidPanelPreviewTitle">三角板预览</h3>
+          <span>当前状态</span>
+        </div>
+        <svg id="solidPanelPreviewSvg" viewBox="0 0 220 196" role="img" aria-labelledby="solidPanelPreviewTitle"></svg>
+        <p id="solidPanelPreviewMeta"></p>
+      </section>
       <div class="buttons solid-panel-actions">
         <button id="rotateSolidPanelButton" disabled>旋转120°</button>
         <button id="flipSolidPanelButton" disabled>翻转正反面</button>
@@ -162,6 +170,6 @@
       <div id="solidPanelList"></div>
     </aside>
   </div>
-  <script type="module" src="app.js?v=solid-assembly-workbench-1"></script>
+  <script type="module" src="app.js?v=solid-panel-preview-1"></script>
 </body>
 </html>

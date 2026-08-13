@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { CORNERS, createCustomLayout, createCustomState, createInitialState } from './game.js';
 import { createBrowserLayoutStore } from './layout-storage.js';
 import {
+  assemblyPanelPreview,
   assemblyToLayout,
   assemblyViewModel,
   createSolidAssembly,
@@ -70,6 +71,34 @@ test('待选三角板可以独立旋转和翻面，拆下后恢复为可选状�
   assembly = removeAssemblyPanel(assembly, 4).assembly;
   assert.equal(assembly.slots[4], null);
   assert.equal(assembly.panels.find(panel => panel.id === '1').installedSlot, null);
+});
+
+test('选中三角板预览返回当前面、安装状态和旋转后的棋子位置', () => {
+  const layout = initialLayout();
+  layout.boardStates = {
+    front: [
+      { id: 'preview-piece', side: 'white', type: 'pawn', position: { q: 1, r: 0 }, panelIndex: 0 }
+    ],
+    back: []
+  };
+  let assembly = createSolidAssembly(layout);
+  const initial = assemblyPanelPreview(assembly, '5');
+  assembly = rotateAssemblyPanel(assembly, '5').assembly;
+  assembly = placeAssemblyPanel(assembly, '5', 2).assembly;
+  const rotated = assemblyPanelPreview(assembly, '5');
+
+  assert.equal(initial.face, 'A');
+  assert.equal(initial.installedSlot, null);
+  assert.equal(initial.pieces.length, 1);
+  assert.deepEqual(initial.pieces[0].local, { center: 0.75, u: 0.25, v: 0 });
+  assert.equal(rotated.rotation, 120);
+  assert.equal(rotated.installedSlot, 2);
+  assert.deepEqual(rotated.pieces[0].local, { center: 0, u: 0.75, v: 0.25 });
+  assembly = flipAssemblyPanel(assembly, '5').assembly;
+  const flipped = assemblyPanelPreview(assembly, '5');
+  assert.equal(flipped.face, 'B');
+  assert.equal(flipped.pieces.length, 0);
+  assert.equal(assemblyPanelPreview(assembly, 'missing'), null);
 });
 
 test('安装板块会在动作当场拒绝三维同点的棋子冲突且不修改草稿', () => {

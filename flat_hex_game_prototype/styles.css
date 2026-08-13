@@ -98,6 +98,21 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .solid-tray-panel.active { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(255,201,106,.18); }
 .solid-tray-panel.installed { color: #a9bbc8; background: rgba(31,47,60,.72); }
 .solid-panel-selection { margin: 12px 0 9px; padding: 9px 10px; color: var(--gold); border: 1px solid rgba(255,201,106,.28); border-radius: 9px; background: rgba(20,20,16,.7); font-size: 13px; }
+.solid-panel-preview { margin: 0 0 12px; padding: 10px 0 12px; border-top: 1px solid rgba(255,255,255,.1); border-bottom: 1px solid rgba(255,255,255,.1); }
+.solid-panel-preview.hidden { display: none; }
+.solid-panel-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.solid-panel-preview-heading h3 { margin: 0; color: #eaf2f8; font-size: 14px; }
+.solid-panel-preview-heading span { color: var(--gold); font-size: 11px; font-weight: 700; }
+#solidPanelPreviewSvg { display: block; width: min(220px, 100%); height: 174px; margin: 4px auto 0; overflow: visible; }
+.solid-panel-preview-face { fill: rgba(34,56,74,.92); stroke: #9fdcf3; stroke-width: 3; }
+.solid-panel-preview-grid { stroke: rgba(184,222,240,.34); stroke-width: 1.2; }
+.solid-panel-preview-piece circle { stroke-width: 2.5; }
+.solid-panel-preview-piece text { font-size: 13px; font-weight: 750; }
+.solid-panel-preview-piece.white circle { fill: #edf6ff; stroke: #7196ad; }
+.solid-panel-preview-piece.white text { fill: #101820; }
+.solid-panel-preview-piece.black circle { fill: #111922; stroke: #d6eaf7; }
+.solid-panel-preview-piece.black text { fill: #f3f9fd; }
+#solidPanelPreviewMeta { margin: 0; color: #91a4b5; font-size: 12px; text-align: center; }
 .solid-panel-actions { margin-bottom: 10px; }
 .solid-panel-selection.hidden, .solid-panel-actions.hidden, #solidCustomizeButton.hidden, #resetSolidGameButton.hidden, #saveSolidCustomButton.hidden, #closeSolidViewButton.hidden { display: none; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
@@ -178,6 +193,7 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 1fr; }
   .board-card { min-height: auto; }
-  .solid-panel-tray { top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; }
+  .solid-viewer-panel { top: 12px; right: 12px; left: 12px; width: auto; max-height: calc(55vh - 18px); overflow-y: auto; }
+  .solid-panel-tray { top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; max-height: 40vh; overflow-y: auto; }
   #solidPanelList { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

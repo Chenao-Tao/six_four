@@ -33,6 +33,7 @@ import {
   mapPiecesToPanels
 } from './solid-board.js?v=solid-assembly-workbench-1';
 import {
+  assemblyPanelPreview,
   assemblyToLayout,
   assemblyViewModel,
   createSolidAssembly,
@@ -40,7 +41,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-assembly-workbench-1';
+} from './solid-assembly.js?v=solid-panel-preview-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -97,6 +98,10 @@ const solidCustomizeButton = document.getElementById('solidCustomizeButton');
 const solidViewerHelp = document.getElementById('solidViewerHelp');
 const solidPanelTray = document.getElementById('solidPanelTray');
 const solidPanelList = document.getElementById('solidPanelList');
+const solidPanelPreview = document.getElementById('solidPanelPreview');
+const solidPanelPreviewTitle = document.getElementById('solidPanelPreviewTitle');
+const solidPanelPreviewSvg = document.getElementById('solidPanelPreviewSvg');
+const solidPanelPreviewMeta = document.getElementById('solidPanelPreviewMeta');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -424,6 +429,77 @@ function selectedAssemblyPanel() {
   return customEditor?.solidAssembly?.panels.find(panel => panel.id === solidSelectedPanelId) ?? null;
 }
 
+function panelPreviewPoint(local) {
+  const vertices = [
+    { x: 110, y: 18 },
+    { x: 202, y: 178 },
+    { x: 18, y: 178 }
+  ];
+  return {
+    x: vertices[0].x * local.center + vertices[1].x * local.u + vertices[2].x * local.v,
+    y: vertices[0].y * local.center + vertices[1].y * local.u + vertices[2].y * local.v
+  };
+}
+
+function renderSolidPanelPreview() {
+  solidPanelPreviewSvg.replaceChildren();
+  const preview = customEditor?.solidAssembly && solidSelectedPanelId
+    ? assemblyPanelPreview(customEditor.solidAssembly, solidSelectedPanelId)
+    : null;
+  solidPanelPreview.classList.toggle('hidden', !preview);
+  if (!preview) return;
+
+  solidPanelPreviewTitle.textContent = `${preview.id}${preview.face} 三角板预览`;
+  const position = preview.installedSlot === null ? '待安装' : `已安装到槽位 ${preview.installedSlot + 1}`;
+  const whiteCount = preview.pieces.filter(piece => piece.side === 'white').length;
+  const blackCount = preview.pieces.length - whiteCount;
+  solidPanelPreviewMeta.textContent = `${position} · 方向 ${preview.rotation}° · ` +
+    `白方 ${whiteCount} 枚 / 黑方 ${blackCount} 枚`;
+
+  const triangle = svgElement('polygon', {
+    class: 'solid-panel-preview-face',
+    points: '110,18 202,178 18,178'
+  });
+  solidPanelPreviewSvg.appendChild(triangle);
+
+  for (let index = 1; index < BOARD_RADIUS; index += 1) {
+    const value = index / BOARD_RADIUS;
+    const segments = [
+      [{ center: value, u: 1 - value, v: 0 }, { center: value, u: 0, v: 1 - value }],
+      [{ center: 1 - value, u: value, v: 0 }, { center: 0, u: value, v: 1 - value }],
+      [{ center: 1 - value, u: 0, v: value }, { center: 0, u: 1 - value, v: value }]
+    ];
+    segments.forEach(([from, to]) => {
+      const start = panelPreviewPoint(from);
+      const end = panelPreviewPoint(to);
+      solidPanelPreviewSvg.appendChild(svgElement('line', {
+        class: 'solid-panel-preview-grid',
+        x1: start.x,
+        y1: start.y,
+        x2: end.x,
+        y2: end.y
+      }));
+    });
+  }
+
+  preview.pieces.forEach(piece => {
+    const point = panelPreviewPoint(piece.local);
+    const group = svgElement('g', { class: `solid-panel-preview-piece ${piece.side}` });
+    group.appendChild(svgElement('circle', { cx: point.x, cy: point.y, r: 13 }));
+    const label = svgElement('text', {
+      x: point.x,
+      y: point.y + 5,
+      'text-anchor': 'middle'
+    });
+    label.textContent = pieceSymbol(piece.type);
+    group.appendChild(label);
+    const title = svgElement('title');
+    title.textContent = `${piece.side === 'white' ? '白方' : '黑方'}${PIECE_NAMES[piece.type]}`;
+    group.appendChild(title);
+    solidPanelPreviewSvg.appendChild(group);
+  });
+}
+
 function renderSolidPanelTray() {
   solidPanelList.replaceChildren();
   if (!customEditor?.solidAssembly) return;
@@ -466,6 +542,7 @@ function refreshSolidBoard(message = '') {
   solidViewerHelp.textContent = editingSolid
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
+  renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
     solidPanelSelection.textContent = selectedPanel
