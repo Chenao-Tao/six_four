@@ -45,6 +45,14 @@ export const CORNERS = DIRECTIONS.map(direction => ({
   r: direction[1] * BOARD_RADIUS
 }));
 export const KING_POINTS = [{ q: 0, r: 0 }, ...CORNERS];
+const SOLID_SLOT_VERTICES = [
+  ['top', 'a', 'b'],
+  ['top', 'b', 'c'],
+  ['top', 'c', 'a'],
+  ['bottom', 'b', 'a'],
+  ['bottom', 'c', 'b'],
+  ['bottom', 'a', 'c']
+];
 
 // 顺序与 UI 六个扇区一致：右下、下、左下、左上、上、右上。
 // 布局三当前朝上面使用 1A/2A/3A/5A/6A/4B，翻面后是实体板互补面。
@@ -141,6 +149,18 @@ function panelCoordinates(point, panelIndex) {
     first: (point.q * second.r - point.r * second.q) / determinant,
     second: (first.q * point.r - first.r * point.q) / determinant
   };
+}
+
+export function solidPointKey(position, panelIndex) {
+  if (!validatePanelIndex(panelIndex) || !pointIsOnPanel(position, panelIndex)) return null;
+  const coordinates = panelCoordinates(position, panelIndex);
+  const weights = { top: 0, bottom: 0, a: 0, b: 0, c: 0 };
+  const vertices = SOLID_SLOT_VERTICES[panelIndex];
+  [1 - coordinates.first - coordinates.second, coordinates.first, coordinates.second]
+    .forEach((weight, index) => {
+      weights[vertices[index]] = Math.round(weight * BOARD_RADIUS);
+    });
+  return `${weights.top},${weights.bottom},${weights.a},${weights.b},${weights.c}`;
 }
 
 function pointIsOnPanel(point, panelIndex) {
@@ -416,7 +436,12 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
 
 export function positionSignature(state) {
   const serializePieces = pieces => pieces
-    .map(item => `${item.id}:${item.side}:${item.type}:${keyOf(item.position)}`)
+    .map(item => {
+      const positionKey = state.boardShape === 'solid'
+        ? solidPointKey(item.position, piecePanelIndex(item))
+        : keyOf(item.position);
+      return `${item.id}:${item.side}:${item.type}:${positionKey}`;
+    })
     .join('|');
   const position = state.boardStates
     ? `front[${serializePieces(state.boardStates.front)}]:back[${serializePieces(state.boardStates.back)}]`
@@ -439,7 +464,7 @@ const VALID_PIECE_SIDES = new Set(['white', 'black']);
 const VALID_PIECE_TYPES = new Set(Object.keys(PIECE_NAMES));
 const KING_POINT_KEYS = new Set(KING_POINTS.map(keyOf));
 
-function normalizeCustomFace(face, pieces) {
+function normalizeCustomFace(face, pieces, boardShape) {
   const faceName = face === 'front' ? 'A 面' : 'B 面';
   if (!Array.isArray(pieces)) return { error: `${faceName}棋子数据无效` };
   const occupied = new Set();
@@ -455,30 +480,34 @@ function normalizeCustomFace(face, pieces) {
       return { error: `${faceName}第 ${index + 1} 枚棋子位于棋盘外` };
     }
     const positionKey = keyOf(position);
-    if (occupied.has(positionKey)) return { error: `${faceName}同一交点只能放一枚棋子` };
+    const panelIndex = validatePanelIndex(item.panelIndex) && pointIsOnPanel(position, item.panelIndex)
+      ? item.panelIndex
+      : panelIndexForPoint(position);
+    const occupiedKey = boardShape === 'solid'
+      ? solidPointKey(position, panelIndex)
+      : positionKey;
+    if (occupied.has(occupiedKey)) return { error: `${faceName}同一交点只能放一枚棋子` };
     if (item.type === 'king' && !KING_POINT_KEYS.has(positionKey)) {
       return { error: `${faceName}的王只能放在中心或六个外角` };
     }
-    occupied.add(positionKey);
+    occupied.add(occupiedKey);
     if (item.type === 'king') kingCounts[item.side] += 1;
     normalized.push({
       id: `custom-${face}-${item.side}-${item.type}-${index + 1}`,
       side: item.side,
       type: item.type,
       position: { q: position.q, r: position.r },
-      panelIndex: validatePanelIndex(item.panelIndex) && pointIsOnPanel(position, item.panelIndex)
-        ? item.panelIndex
-        : panelIndexForPoint(position)
+      panelIndex
     });
   }
 
   return { pieces: normalized, kingCounts };
 }
 
-function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings) {
-  const front = normalizeCustomFace('front', boardStates?.front);
+function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings, boardShape) {
+  const front = normalizeCustomFace('front', boardStates?.front, boardShape);
   if (front.error) return { error: front.error };
-  const back = normalizeCustomFace('back', boardStates?.back);
+  const back = normalizeCustomFace('back', boardStates?.back, boardShape);
   if (back.error) return { error: back.error };
   for (const side of ['white', 'black']) {
     const kingCount = front.kingCounts[side] + back.kingCounts[side];
@@ -502,23 +531,34 @@ function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKi
 export function createCustomLayout(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
-  panelRotations = BOARD_PANEL_ROTATIONS
+  panelRotations = BOARD_PANEL_ROTATIONS,
+  boardShape = 'flat'
 ) {
-  return normalizeCustomBoard(boardStates, faceLabels, panelRotations, false);
+  const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
+  return normalizeCustomBoard(boardStates, faceLabels, panelRotations, false, normalizedBoardShape);
 }
 
 export function createCustomState(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
-  panelRotations = BOARD_PANEL_ROTATIONS
+  panelRotations = BOARD_PANEL_ROTATIONS,
+  boardShape = 'flat'
 ) {
-  const layout = normalizeCustomBoard(boardStates, faceLabels, panelRotations, true);
+  const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
+  const layout = normalizeCustomBoard(
+    boardStates,
+    faceLabels,
+    panelRotations,
+    true,
+    normalizedBoardShape
+  );
   if (layout.error) return { error: layout.error };
   return {
     state: withInitialPositionHistory(doubleSidedState(
       layout.boardStates.front,
       layout.boardStates.back,
       {
+        boardShape: normalizedBoardShape,
         boardFaceLabels: layout.faceLabels,
         boardPanelRotations: layout.panelRotations,
         history: ['自定义棋盘已保存：白方先行']
@@ -548,8 +588,24 @@ export function createCaptureDemoState() {
   ));
 }
 
+function boardPointKey(state, position, panelIndex) {
+  return state.boardShape === 'solid'
+    ? solidPointKey(position, panelIndex)
+    : keyOf(position);
+}
+
+function movePanelIndex(pieceToMove, target) {
+  const currentPanel = piecePanelIndex(pieceToMove);
+  return currentPanel !== null && pointIsOnPanel(target, currentPanel)
+    ? currentPanel
+    : panelIndexForPoint(target);
+}
+
 function occupants(state) {
-  return new Map(state.pieces.map(item => [keyOf(item.position), item]));
+  return new Map(state.pieces.map(item => [
+    boardPointKey(state, item.position, piecePanelIndex(item)),
+    item
+  ]));
 }
 
 function canCapture(attackerType, defenderType) {
@@ -567,40 +623,52 @@ function canLand(pieceToMove, occupant) {
   return canCapture(pieceToMove.type, occupant.type);
 }
 
-function addMove(moves, pieceToMove, target, path, occupied) {
-  const occupant = occupied.get(keyOf(target));
+function addMove(state, moves, pieceToMove, target, path, occupied, panelIndex = movePanelIndex(pieceToMove, target)) {
+  const pointKey = boardPointKey(state, target, panelIndex);
+  if (!pointKey) return false;
+  const occupant = occupied.get(pointKey);
   if (!canLand(pieceToMove, occupant)) return false;
+  if ([...moves.values()].some(move => move.pointKey === pointKey)) return !occupant;
   moves.set(keyOf(target), {
     target,
     path,
+    panelIndex,
+    pointKey,
     captureId: occupant?.id ?? null,
     capturesKing: occupant?.type === 'king'
   });
   return !occupant;
 }
 
-function pawnMoves(pieceToMove, occupied) {
+function pawnMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   DIRECTIONS.forEach(direction => {
     const target = add(pieceToMove.position, direction);
-    if (isOnBoard(target)) addMove(moves, pieceToMove, target, [pieceToMove.position, target], occupied);
+    if (isOnBoard(target)) {
+      addMove(state, moves, pieceToMove, target, [pieceToMove.position, target], occupied);
+    }
   });
   return moves;
 }
 
-function bishopMoves(pieceToMove, occupied) {
+function bishopMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   BISHOP_DIRECTIONS.forEach(direction => {
     const target = add(pieceToMove.position, direction);
     if (!isOnBoard(target)) return;
-    addMove(moves, pieceToMove, target, [pieceToMove.position, target], occupied);
+    addMove(state, moves, pieceToMove, target, [pieceToMove.position, target], occupied);
   });
   return moves;
 }
 
-function queenMoves(pieceToMove, occupied) {
+function queenMoves(state, pieceToMove, occupied) {
   const moves = new Map();
-  const queue = [{ point: pieceToMove.position, path: [pieceToMove.position] }];
+  const startPanel = piecePanelIndex(pieceToMove);
+  const queue = [{
+    point: pieceToMove.position,
+    path: [pieceToMove.position],
+    pointKeys: [boardPointKey(state, pieceToMove.position, startPanel)]
+  }];
   while (queue.length) {
     const current = queue.shift();
     const depth = current.path.length - 1;
@@ -609,15 +677,20 @@ function queenMoves(pieceToMove, occupied) {
       const target = add(current.point, direction);
       if (!isOnBoard(target)) return;
       const targetKey = keyOf(target);
-      if (current.path.some(point => keyOf(point) === targetKey)) return;
-      const occupant = occupied.get(targetKey);
+      const panelIndex = movePanelIndex(pieceToMove, target);
+      const pointKey = boardPointKey(state, target, panelIndex);
+      if (!pointKey || current.pointKeys.includes(pointKey)) return;
+      const occupant = pointKey ? occupied.get(pointKey) : null;
       const path = [...current.path, target];
+      const pointKeys = [...current.pointKeys, pointKey];
       const nextDepth = depth + 1;
       if (nextDepth === 3) {
-        if (!moves.has(targetKey)) addMove(moves, pieceToMove, target, path, occupied);
+        if (!moves.has(targetKey)) {
+          addMove(state, moves, pieceToMove, target, path, occupied);
+        }
         return;
       }
-      if (!occupant) queue.push({ point: target, path });
+      if (!occupant) queue.push({ point: target, path, pointKeys });
     });
   }
   return moves;
@@ -640,7 +713,7 @@ function straightPath(from, to) {
   return Array.from({ length: distance + 1 }, (_, index) => add(from, direction, index));
 }
 
-function kingMoves(pieceToMove, occupied) {
+function kingMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   const currentIndex = KING_POINTS.findIndex(point => pointsEqual(point, pieceToMove.position));
   if (currentIndex < 0) return moves;
@@ -652,8 +725,11 @@ function kingMoves(pieceToMove, occupied) {
   targets.forEach(target => {
     const path = straightPath(pieceToMove.position, target);
     if (!path) return;
-    const blocked = path.slice(1, -1).some(point => occupied.has(keyOf(point)));
-    if (!blocked) addMove(moves, pieceToMove, target, path, occupied);
+    const blocked = path.slice(1, -1).some(point => {
+      const pointKey = boardPointKey(state, point, movePanelIndex(pieceToMove, point));
+      return pointKey ? occupied.has(pointKey) : false;
+    });
+    if (!blocked) addMove(state, moves, pieceToMove, target, path, occupied);
   });
   return moves;
 }
@@ -663,17 +739,17 @@ export function legalMoves(state, pieceId) {
   const pieceToMove = state.pieces.find(item => item.id === pieceId);
   if (!pieceToMove || pieceToMove.side !== state.turn) return new Map();
   const occupied = occupants(state);
-  if (pieceToMove.type === 'pawn') return pawnMoves(pieceToMove, occupied);
-  if (pieceToMove.type === 'bishop') return bishopMoves(pieceToMove, occupied);
-  if (pieceToMove.type === 'queen') return queenMoves(pieceToMove, occupied);
-  return kingMoves(pieceToMove, occupied);
+  if (pieceToMove.type === 'pawn') return pawnMoves(state, pieceToMove, occupied);
+  if (pieceToMove.type === 'bishop') return bishopMoves(state, pieceToMove, occupied);
+  if (pieceToMove.type === 'queen') return queenMoves(state, pieceToMove, occupied);
+  return kingMoves(state, pieceToMove, occupied);
 }
 
 export function captureMoveForClickedPiece(state, attackerId, defenderId) {
   const defender = state.pieces.find(item => item.id === defenderId);
   if (!defender) return null;
-  const move = legalMoves(state, attackerId).get(keyOf(defender.position));
-  return move?.captureId === defenderId ? move : null;
+  return [...legalMoves(state, attackerId).values()]
+    .find(move => move.captureId === defenderId) ?? null;
 }
 
 export function promotionTypeForMove(state, pieceId, move) {
@@ -720,7 +796,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
           ? { ...target }
           : { ...item.position },
         panelIndex: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? panelIndexForPoint(target)
+          ? move.panelIndex ?? panelIndexForPoint(target)
           : piecePanelIndex(item)
       }];
     }
@@ -733,7 +809,9 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         ? { ...movingPiece.position }
         : { ...item.position },
       panelIndex: positionEffect === 'swap'
-        ? panelIndexForPoint(movingPiece.position)
+        ? state.boardShape === 'solid'
+          ? piecePanelIndex(movingPiece)
+          : panelIndexForPoint(movingPiece.position)
         : piecePanelIndex(item)
     }];
   });

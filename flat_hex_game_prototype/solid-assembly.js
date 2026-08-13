@@ -1,14 +1,6 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=panel-piece-ownership-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint, solidPointKey } from './game.js?v=solid-shared-points-1';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
-const SLOT_VERTICES = [
-  ['top', 'a', 'b'],
-  ['top', 'b', 'c'],
-  ['top', 'c', 'a'],
-  ['bottom', 'b', 'a'],
-  ['bottom', 'c', 'b'],
-  ['bottom', 'a', 'c']
-];
 
 function clonePiece(piece) {
   return {
@@ -135,15 +127,6 @@ function layoutPiece(piece) {
   return saved;
 }
 
-function solidPointKey(local, slotIndex) {
-  const weights = { top: 0, bottom: 0, a: 0, b: 0, c: 0 };
-  const vertices = SLOT_VERTICES[slotIndex];
-  [local.center, local.u, local.v].forEach((weight, index) => {
-    weights[vertices[index]] = Math.round(weight * BOARD_RADIUS);
-  });
-  return `${weights.top},${weights.bottom},${weights.a},${weights.b},${weights.c}`;
-}
-
 function collisionError(assembly) {
   for (const hidden of [false, true]) {
     const occupied = new Map();
@@ -155,7 +138,7 @@ function collisionError(assembly) {
       const targetSlot = hidden ? 5 - slotIndex : slotIndex;
       const pieces = facePiecesAtSlot(panel, face, slot.rotation, slotIndex, hidden);
       for (const piece of pieces) {
-        const key = solidPointKey(piece.local, targetSlot);
+        const key = solidPointKey(piece.position, targetSlot);
         const previous = occupied.get(key);
         if (previous) {
           return `棋子位置重合：${previous.panelId}${previous.face} 与 ` +

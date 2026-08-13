@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=panel-piece-ownership-1';
+} from './game.js?v=solid-shared-points-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=filesystem-fallback-1';
+} from './layout-storage.js?v=solid-shared-points-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=solid-assembly-workbench-1';
+} from './solid-board.js?v=solid-shared-points-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-panel-preview-1';
+} from './solid-assembly.js?v=solid-shared-points-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -204,7 +204,8 @@ function applyLayoutLibrary(library, selectedName = '') {
     const result = createCustomState(
       activeLayout.boardStates,
       activeLayout.faceLabels,
-      activeLayout.panelRotations
+      activeLayout.panelRotations,
+      activeBoardShape
     );
     activeInitialState = result.error ? createInitialState() : result.state;
   } else {
@@ -403,7 +404,7 @@ function solidBoardModel() {
   const side = displayedBoardSide();
   const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
     const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
-    const mapped = mapSolidPoint(move.target, captured?.panelIndex);
+    const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
     return { ...mapped, targetKey: keyOf(move.target), captureId: move.captureId };
   });
   return {
@@ -1239,7 +1240,8 @@ async function saveCustomBoard() {
   const result = createCustomState(
     assembled.boardStates,
     assembled.faceLabels,
-    assembled.panelRotations
+    assembled.panelRotations,
+    customEditor.boardShape
   );
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
@@ -1310,7 +1312,12 @@ async function saveLayoutToLibrary() {
     boardHelp.textContent = `布局不能保存：${assembled.error}`;
     return;
   }
-  const validation = createCustomLayout(assembled.boardStates, assembled.faceLabels, assembled.panelRotations);
+  const validation = createCustomLayout(
+    assembled.boardStates,
+    assembled.faceLabels,
+    assembled.panelRotations,
+    customEditor.boardShape
+  );
   if (validation.error) {
     boardHelp.textContent = `布局不能保存：${validation.error}`;
     return;
@@ -1338,7 +1345,12 @@ function loadLayoutFromLibrary() {
     boardHelp.textContent = '选择的布局存档不存在。';
     return;
   }
-  const validation = createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
+  const validation = createCustomLayout(
+    layout.boardStates,
+    layout.faceLabels,
+    layout.panelRotations,
+    layout.boardShape
+  );
   if (validation.error) {
     boardHelp.textContent = `布局存档无效：${validation.error}`;
     return;

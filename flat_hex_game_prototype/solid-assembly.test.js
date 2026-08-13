@@ -163,7 +163,8 @@ test('完整无冲突装配生成的双面布局可以直接进入现有开局�
   const playable = createCustomState(
     completed.boardStates,
     completed.faceLabels,
-    completed.panelRotations
+    completed.panelRotations,
+    'solid'
   );
 
   assert.equal(completed.error, undefined);

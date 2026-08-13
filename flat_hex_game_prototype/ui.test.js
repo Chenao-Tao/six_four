@@ -114,12 +114,14 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
 });
 
 test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
+  assert.match(app, /createCustomState\([\s\S]*?activeBoardShape\s*\)/);
   assert.match(app, /onPieceSelect: selectSolidPiece/);
   assert.match(app, /onMoveSelect: selectSolidMove/);
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
   assert.match(app, /if \(move\) chooseMove\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, move\.target, promote\)/);
+  assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
 });
 
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {

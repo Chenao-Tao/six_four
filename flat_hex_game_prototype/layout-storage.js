@@ -2,7 +2,7 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState
-} from './game.js?v=panel-piece-ownership-1';
+} from './game.js?v=solid-shared-points-1';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';
@@ -57,8 +57,8 @@ function normalizedLayout(layout, requirePlayable) {
     throw new Error('棋盘形态必须是平面或立体');
   }
   const validation = requirePlayable
-    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations)
-    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
+    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape)
+    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape);
   if (validation.error) throw new Error(validation.error);
   const source = requirePlayable
     ? {
@@ -117,7 +117,12 @@ export function createBrowserLayoutStore(storage) {
     if (path === '/api/layouts' && method === 'POST') {
       const layout = normalizedLayout(body.layout, Boolean(body.activate));
       if (!body.activate && library.activeLayoutName === layout.name) {
-        const playable = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+        const playable = createCustomState(
+          layout.boardStates,
+          layout.faceLabels,
+          layout.panelRotations,
+          layout.boardShape
+        );
         if (playable.error) throw new Error(`当前启用布局必须保持可开局：${playable.error}`);
       }
       const index = library.layouts.findIndex(item => item.name === layout.name);
@@ -132,7 +137,12 @@ export function createBrowserLayoutStore(storage) {
       const layout = library.layouts.find(item => item.name === body.name);
       if (!layout) throw new Error('布局不存在');
       if (!layout.builtIn) {
-        const validation = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+        const validation = createCustomState(
+          layout.boardStates,
+          layout.faceLabels,
+          layout.panelRotations,
+          layout.boardShape
+        );
         if (validation.error) throw new Error(validation.error);
       }
       library.activeLayoutName = layout.name;

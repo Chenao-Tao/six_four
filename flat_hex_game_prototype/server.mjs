@@ -83,8 +83,8 @@ function normalizedLayout(layout, requirePlayable) {
     return { error: '棋盘形态必须是平面或立体' };
   }
   const validation = requirePlayable
-    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations)
-    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations);
+    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape)
+    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape);
   if (validation.error) return validation;
   const source = requirePlayable
     ? {
@@ -177,7 +177,8 @@ export function createAppServer({
             const playable = createCustomState(
               normalized.layout.boardStates,
               normalized.layout.faceLabels,
-              normalized.layout.panelRotations
+              normalized.layout.panelRotations,
+              normalized.layout.boardShape
             );
             if (playable.error) {
               return { error: `当前启用布局必须保持可开局：${playable.error}`, status: 400 };
@@ -202,7 +203,12 @@ export function createAppServer({
           const layout = next.layouts.find(item => item.name === body.name);
           if (!layout) return { error: '布局不存在', status: 404 };
           if (!layout.builtIn) {
-            const validation = createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations);
+            const validation = createCustomState(
+              layout.boardStates,
+              layout.faceLabels,
+              layout.panelRotations,
+              layout.boardShape
+            );
             if (validation.error) return { error: validation.error, status: 400 };
           }
           next.activeLayoutName = layout.name;

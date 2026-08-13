@@ -30,6 +30,10 @@ function stateOf(pieces, turn = 'white') {
   };
 }
 
+function solidStateOf(pieces, turn = 'white') {
+  return { ...stateOf(pieces, turn), boardShape: 'solid' };
+}
+
 function piece(id, side, type, q, r) {
   return { id, side, type, position: { q, r } };
 }
@@ -153,6 +157,72 @@ test('已选择攻击者时点击可吃的敌棋会解析为吃子动作', () =>
   assert.equal(move.captureId, 'bP');
   assert.deepEqual(move.target, { q: 1, r: 1 });
   assert.equal(captureMoveForClickedPiece(state, 'wB', 'missing'), null);
+});
+
+test('立体棋盘公共棱只占一个位置并触发吃子', () => {
+  const state = solidStateOf([
+    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+    { ...piece('bP', 'black', 'pawn', -1, 0), panelIndex: 2 }
+  ]);
+
+  const move = legalMoves(state, 'wP').get('1,0');
+
+  assert.equal(move.captureId, 'bP');
+  assert.deepEqual(captureMoveForClickedPiece(state, 'wP', 'bP'), move);
+  const result = applyMove(state, 'wP', move.target);
+  assert.equal(findPiece(result.state, 'bP'), undefined);
+  assert.deepEqual(findPiece(result.state, 'wP').position, { q: 1, r: 0 });
+  assert.equal(findPiece(result.state, 'wP').panelIndex, 0);
+
+  const blocked = solidStateOf([
+    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+    { ...piece('wB', 'white', 'bishop', -1, 0), panelIndex: 2 }
+  ]);
+  assert.equal(legalMoves(blocked, 'wP').has('1,0'), false);
+});
+
+test('立体棋盘公共顶点只占一个位置并触发吃子', () => {
+  const state = solidStateOf([
+    { ...piece('wP', 'white', 'pawn', 3, 0), panelIndex: 0 },
+    { ...piece('bK', 'black', 'king', -4, 0), panelIndex: 2 }
+  ]);
+
+  const move = legalMoves(state, 'wP').get('4,0');
+
+  assert.equal(move.captureId, 'bK');
+  assert.equal(move.capturesKing, true);
+  assert.equal(applyMove(state, 'wP', move.target).state.winner, 'white');
+});
+
+test('平面棋盘不合并立体棋盘上的等价棱点', () => {
+  const state = stateOf([
+    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
+    { ...piece('bP', 'black', 'pawn', -1, 0), panelIndex: 2 }
+  ]);
+
+  assert.equal(legalMoves(state, 'wP').get('1,0').captureId, null);
+  assert.equal(captureMoveForClickedPiece(state, 'wP', 'bP'), null);
+});
+
+test('立体布局按物理交点校验公共位置占用', () => {
+  const sharedEdge = createCustomLayout({
+    front: [
+      { ...piece('first', 'white', 'pawn', 1, 0), panelIndex: 0 },
+      { ...piece('second', 'black', 'pawn', -1, 0), panelIndex: 2 }
+    ],
+    back: []
+  }, undefined, undefined, 'solid');
+  assert.match(sharedEdge.error, /同一交点只能放一枚棋子/);
+
+  const separateApexes = createCustomLayout({
+    front: [
+      { ...piece('top', 'white', 'pawn', 0, 0), panelIndex: 0 },
+      { ...piece('bottom', 'black', 'pawn', 0, 0), panelIndex: 3 }
+    ],
+    back: []
+  }, undefined, undefined, 'solid');
+  assert.equal(separateApexes.error, undefined);
+  assert.equal(separateApexes.boardStates.front.length, 2);
 });
 
 test('皇后的每个合法动作都必须完整走三步', () => {
