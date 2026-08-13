@@ -124,6 +124,17 @@ test('立体棋盘保留算法模拟和重开回到平面主界面的入口', ()
   assert.match(app, /activeBoardShape === 'solid' && !solidBoardViewer && !customEditor/);
 });
 
+test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角', () => {
+  assert.match(app, /let autoPaused = false/);
+  assert.match(app, /let simulationPauseRequested = false/);
+  assert.match(app, /function toggleAutoSimulation\(\)/);
+  assert.match(app, /setAutoSimulationButtonState\('继续模拟', true\)/);
+  assert.match(app, /setAutoSimulationButtonState\('暂停模拟', true\)/);
+  assert.match(app, /solidBoardViewer\?\.followPiece\(step\.pieceId\)/);
+  assert.match(app, /solidBoardViewer\?\.followPoint\(/);
+  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion\)/);
+});
+
 test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
   assert.match(app, /createCustomState\([\s\S]*?activeBoardShape\s*\)/);
   assert.match(app, /onPieceSelect: selectSolidPiece/);

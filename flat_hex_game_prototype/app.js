@@ -23,16 +23,16 @@ import {
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels
-} from './game.js?v=solid-king-simulation-1';
+} from './game.js?v=simulation-pause-follow-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=solid-king-simulation-1';
+} from './layout-storage.js?v=simulation-pause-follow-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=solid-king-simulation-1';
+} from './solid-board.js?v=simulation-pause-follow-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,7 +42,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=solid-king-simulation-1';
+} from './solid-assembly.js?v=simulation-pause-follow-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -115,6 +115,9 @@ let selectedPieceId = null;
 let selectedMoves = new Map();
 let pendingPromotion = null;
 let autoTimer = null;
+let autoPaused = false;
+let simulationPauseRequested = false;
+let simulationRunId = 0;
 let animationLock = false;
 let simulationLock = false;
 let previewSide = null;
@@ -593,7 +596,7 @@ function refreshSolidBoard(message = '') {
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
   solidStepButton.disabled = editingSolid || simulationLock || animationLock || Boolean(pendingPromotion);
-  solidAutoButton.disabled = editingSolid || simulationLock || animationLock || Boolean(pendingPromotion);
+  solidAutoButton.disabled = editingSolid || animationLock || Boolean(pendingPromotion);
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -1141,8 +1144,45 @@ promotionModal.querySelectorAll('[data-promote]').forEach(button => {
 function stopAutoSimulation() {
   clearInterval(autoTimer);
   autoTimer = null;
+  autoPaused = false;
+  simulationPauseRequested = false;
+  simulationRunId += 1;
   autoButton.classList.remove('active');
   autoButton.textContent = '连续模拟';
+  solidAutoButton.classList.remove('active');
+  solidAutoButton.textContent = '连续模拟';
+}
+
+function setAutoSimulationButtonState(text, active) {
+  [autoButton, solidAutoButton].forEach(button => {
+    button.classList.toggle('active', active);
+    button.textContent = text;
+  });
+}
+
+function toggleAutoSimulation() {
+  if (autoTimer && !autoPaused) {
+    autoPaused = true;
+    simulationPauseRequested = true;
+    simulationRunId += 1;
+    setAutoSimulationButtonState('继续模拟', true);
+    return;
+  }
+  if (customEditor || isPreviewing() || animationLock || pendingPromotion || state.winner) return;
+  if (autoTimer && autoPaused) {
+    autoPaused = false;
+    simulationPauseRequested = false;
+    setAutoSimulationButtonState('暂停模拟', true);
+    return;
+  }
+  autoPaused = false;
+  simulationPauseRequested = false;
+  setAutoSimulationButtonState('暂停模拟', true);
+  simulateStep();
+  autoTimer = setInterval(() => {
+    if (autoPaused || simulationLock || state.winner) return;
+    simulateStep();
+  }, 900);
 }
 
 function closePieceEditor() {
@@ -1609,15 +1649,18 @@ async function toggleFacePreview() {
 
 async function simulateStep() {
   if (customEditor) return;
+  if (simulationPauseRequested) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面预览期间不能运行算法；请先返回当前朝上面。';
     return;
   }
   if (simulationLock || animationLock || pendingPromotion || state.winner) return;
+  const runId = simulationRunId;
   simulationLock = true;
   try {
     let action = null;
     for (const step of stepwiseGameSearch(state, 3)) {
+      if (simulationPauseRequested || runId !== simulationRunId) return;
       action = step;
       const stepMover = state.pieces.find(item => item.id === step.pieceId);
       selectedPieceId = step.pieceId;
@@ -1631,9 +1674,11 @@ async function simulateStep() {
           ? '第2步：加入对手的最优回应。'
           : '第3步：加入己方反制并确定最终动作。';
       if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
+      solidBoardViewer?.followPiece(step.pieceId);
       render();
       await new Promise(resolve => setTimeout(resolve, 360));
     }
+    if (simulationPauseRequested || runId !== simulationRunId) return;
     if (!action) {
       boardHelp.textContent = '当前一方没有合法移动。';
       return;
@@ -1653,11 +1698,17 @@ async function simulateStep() {
     selectedInfo.textContent = `分步博弈最终选择（${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     if (solidBoardViewer) solidViewerStatus.textContent = selectedInfo.textContent;
+    solidBoardViewer?.followPoint(
+      action.move.target,
+      action.move.panelIndex ?? mover.panelIndex
+    );
     render();
     await new Promise(resolve => setTimeout(resolve, 240));
+    if (simulationPauseRequested || runId !== simulationRunId) return;
     const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
       `剪枝 ${action.prunedBranches} 次，执行评估值 ${action.score} 的动作。`;
     await commitMove(action.pieceId, action.move, action.promote, decisionNote);
+    if (state.winner && autoTimer) stopAutoSimulation();
   } finally {
     simulationLock = false;
   }
@@ -1676,27 +1727,7 @@ flipSolidPanelButton.addEventListener('click', flipSolidPanel);
 removeSolidPanelButton.addEventListener('click', removeSolidPanel);
 resetSolidViewButton.addEventListener('click', () => solidBoardViewer?.resetView());
 solidStepButton.addEventListener('click', simulateStep);
-solidAutoButton.addEventListener('click', event => {
-  if (customEditor || isPreviewing() || simulationLock || animationLock || pendingPromotion) return;
-  if (autoTimer) {
-    stopAutoSimulation();
-    event.currentTarget.classList.remove('active');
-    event.currentTarget.textContent = '连续模拟';
-    return;
-  }
-  event.currentTarget.classList.add('active');
-  event.currentTarget.textContent = '停止模拟';
-  simulateStep();
-  autoTimer = setInterval(() => {
-    if (state.winner) {
-      stopAutoSimulation();
-      event.currentTarget.classList.remove('active');
-      event.currentTarget.textContent = '连续模拟';
-      return;
-    }
-    simulateStep();
-  }, 900);
-});
+solidAutoButton.addEventListener('click', toggleAutoSimulation);
 resetSolidGameButton.addEventListener('click', resetGame);
 saveSolidCustomButton.addEventListener('click', saveCustomBoard);
 closeSolidViewButton.addEventListener('click', closeSolidBoard);
@@ -1723,29 +1754,7 @@ pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
 });
 pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
 pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
-autoButton.addEventListener('click', event => {
-  if (customEditor || isPreviewing()) return;
-  if (autoTimer) {
-    clearInterval(autoTimer);
-    autoTimer = null;
-    event.currentTarget.classList.remove('active');
-    event.currentTarget.textContent = '连续模拟';
-    return;
-  }
-  event.currentTarget.classList.add('active');
-  event.currentTarget.textContent = '停止模拟';
-  simulateStep();
-  autoTimer = setInterval(() => {
-    if (state.winner) {
-      clearInterval(autoTimer);
-      autoTimer = null;
-      event.currentTarget.classList.remove('active');
-      event.currentTarget.textContent = '连续模拟';
-      return;
-    }
-    simulateStep();
-  }, 900);
-});
+autoButton.addEventListener('click', toggleAutoSimulation);
 
 svg.addEventListener('click', () => {
   if (customEditor) return;

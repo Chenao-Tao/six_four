@@ -124,7 +124,7 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .solid-panel-preview-piece.black text { fill: #f3f9fd; }
 #solidPanelPreviewMeta { margin: 0; color: #91a4b5; font-size: 12px; text-align: center; }
 .solid-panel-actions { margin-bottom: 10px; }
-.solid-panel-selection.hidden, .solid-panel-actions.hidden, #solidCustomizeButton.hidden, #resetSolidGameButton.hidden, #saveSolidCustomButton.hidden, #closeSolidViewButton.hidden { display: none; }
+.solid-panel-selection.hidden, .solid-panel-actions.hidden, #solidCustomizeButton.hidden, #solidStepButton.hidden, #solidAutoButton.hidden, #resetSolidGameButton.hidden, #saveSolidCustomButton.hidden, #closeSolidViewButton.hidden { display: none; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }

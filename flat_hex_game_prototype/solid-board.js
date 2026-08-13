@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=solid-king-simulation-1';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=simulation-pause-follow-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -183,6 +183,20 @@ export function solidEffectFrame(effect, now) {
   };
 }
 
+export function solidCameraAngles(point) {
+  const distance = Math.hypot(point.x, point.y, point.z);
+  if (!Number.isFinite(distance) || distance < EPSILON) {
+    return { rotationX: 0, rotationY: 0 };
+  }
+  const rotationY = Math.atan2(-point.x, point.z);
+  const zAfterY = -point.x * Math.sin(rotationY) + point.z * Math.cos(rotationY);
+  const rotationX = Math.atan2(point.y, zAfterY);
+  return {
+    rotationX: Object.is(rotationX, -0) ? 0 : rotationX,
+    rotationY: Object.is(rotationY, -0) ? 0 : rotationY
+  };
+}
+
 export function createSolidBoardViewer(canvas, initialModel, {
   onPanelSelect = () => {},
   onPieceSelect = () => {},
@@ -201,6 +215,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let lastRenderFaces = [];
   let lastInteractionTargets = [];
   let operationEffect = null;
+  let cameraMotion = null;
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -370,6 +385,15 @@ export function createSolidBoardViewer(canvas, initialModel, {
   }
 
   function render(now = performance.now()) {
+    if (cameraMotion) {
+      const progress = Math.max(0, Math.min(1, (now - cameraMotion.startedAt) / cameraMotion.duration));
+      const eased = 1 - (1 - progress) ** 3;
+      rotationX = cameraMotion.from.rotationX +
+        (cameraMotion.to.rotationX - cameraMotion.from.rotationX) * eased;
+      rotationY = cameraMotion.from.rotationY +
+        (cameraMotion.to.rotationY - cameraMotion.from.rotationY) * eased;
+      if (progress >= 1) cameraMotion = null;
+    }
     const bounds = canvas.getBoundingClientRect();
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(bounds.width));
@@ -493,6 +517,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
 
   function pointerMove(event) {
     if (!dragging || !previousPointer) return;
+    cameraMotion = null;
     const deltaX = event.clientX - previousPointer.x;
     const deltaY = event.clientY - previousPointer.y;
     dragDistance += Math.hypot(deltaX, deltaY);
@@ -559,9 +584,33 @@ export function createSolidBoardViewer(canvas, initialModel, {
       return true;
     },
     resetView() {
+      cameraMotion = null;
       rotationX = -0.35;
       rotationY = 0.65;
       zoom = 1;
+    },
+    followPoint(position, panelIndex, animate = true) {
+      const mapped = mapPiecesToPanels([{ id: 'camera-focus', position, panelIndex }])[0];
+      const world = barycentricPoint(faces[mapped.panelIndex], mapped.local);
+      const target = solidCameraAngles(world);
+      if (!animate) {
+        cameraMotion = null;
+        rotationX = target.rotationX;
+        rotationY = target.rotationY;
+        return;
+      }
+      cameraMotion = {
+        from: { rotationX, rotationY },
+        to: target,
+        startedAt: performance.now(),
+        duration: 320
+      };
+    },
+    followPiece(pieceId, animate = true) {
+      const piece = model.pieces.find(item => item.id === pieceId);
+      if (!piece) return false;
+      this.followPoint(piece.position, piece.panelIndex, animate);
+      return true;
     },
     destroy() {
       cancelAnimationFrame(animationFrame);

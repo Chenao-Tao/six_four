@@ -6,6 +6,7 @@ import {
   findPanelAtPoint,
   findSolidTargetAtPoint,
   mapPiecesToPanels,
+  solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
 
@@ -85,4 +86,14 @@ test('立体操作特效提供稳定进度并在时长结束后清除', () => {
   assert.equal(solidEffectFrame(effect, 1400).progress, 0.5);
   assert.equal(solidEffectFrame(effect, 1400).pulse, 1);
   assert.equal(solidEffectFrame(effect, 1800), null);
+});
+
+test('立体相机跟随目标点会生成有限且可复现的旋转角', () => {
+  const top = solidCameraAngles({ x: 0, y: 0, z: 2 });
+  assert.deepEqual(top, { rotationX: 0, rotationY: 0 });
+
+  const side = solidCameraAngles({ x: 2, y: 0, z: 0 });
+  assert.equal(Number.isFinite(side.rotationX), true);
+  assert.equal(Number.isFinite(side.rotationY), true);
+  assert.equal(side.rotationY, -Math.PI / 2);
 });
