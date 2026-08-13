@@ -303,6 +303,33 @@ function physicalBackPieces(pieces) {
   });
 }
 
+function physicalBackPanelValues(values, transform = value => value) {
+  return VERTICAL_MIRROR_PANEL_INDICES.map(sourceIndex => transform(values[sourceIndex]));
+}
+
+function exchangeFlatBoardLayers(state, nextCurrentPieces) {
+  const currentSide = state.boardSide;
+  const oppositeSide = currentSide === 'back' ? 'front' : 'back';
+  const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
+  const panelRotations = state.boardPanelRotations ?? BOARD_PANEL_ROTATIONS;
+
+  return {
+    boardStates: {
+      ...state.boardStates,
+      [currentSide]: physicalBackPieces(state.boardStates[oppositeSide]),
+      [oppositeSide]: physicalBackPieces(nextCurrentPieces)
+    },
+    boardFaceLabels: {
+      front: physicalBackPanelValues(faceLabels.back),
+      back: physicalBackPanelValues(faceLabels.front)
+    },
+    boardPanelRotations: {
+      front: physicalBackPanelValues(panelRotations.back, rotation => (360 - rotation) % 360),
+      back: physicalBackPanelValues(panelRotations.front, rotation => (360 - rotation) % 360)
+    }
+  };
+}
+
 function pointFromPanelCoordinates(coordinates, panelIndex, mirrored = false) {
   const firstCorner = CORNERS[panelIndex];
   const secondCorner = CORNERS[(panelIndex + 1) % 6];
@@ -1168,15 +1195,15 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const shouldExchangeSolidLayers = Boolean(
     captured && state.boardShape === 'solid' && state.solidLayers
   );
-  const oppositeSide = state.boardSide === 'back' ? 'front' : 'back';
-  const nextBoardSide = shouldExchangeLayers && !shouldExchangeSolidLayers
-    ? oppositeSide
-    : state.boardSide;
+  const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
       ? exchangeSolidLayers(state, nextPieces)
       : { ...state.solidLayers, outer: nextPieces }
     : undefined;
+  const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers
+    ? exchangeFlatBoardLayers(state, nextPieces)
+    : null;
   const boardStates = state.boardStates
     ? shouldExchangeLayers
       ? shouldExchangeSolidLayers
@@ -1184,7 +1211,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             front: solidLayers.outer,
             back: physicalBackPieces(solidLayers.inner)
           }
-        : { ...state.boardStates, [state.boardSide]: nextPieces }
+        : flatLayerExchange.boardStates
       : { ...state.boardStates, [state.boardSide]: nextPieces }
     : undefined;
   const layerExchangeResult = shouldExchangeLayers
@@ -1204,6 +1231,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     layerExchangeCount: (state.layerExchangeCount ?? state.flipCount ?? 0) +
       (shouldExchangeLayers ? 1 : 0),
     boardStates,
+    boardFaceLabels: flatLayerExchange?.boardFaceLabels ?? state.boardFaceLabels,
+    boardPanelRotations: flatLayerExchange?.boardPanelRotations ?? state.boardPanelRotations,
     ...(solidFaceSides ? { solidFaceSides } : {}),
     ...(solidLayers ? { solidLayers } : {}),
     pieces: solidLayers

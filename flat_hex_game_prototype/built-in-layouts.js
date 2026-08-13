@@ -1,4 +1,4 @@
-import { createInitialState } from './game.js?v=board-layer-exchange-2';
+import { createInitialState } from './game.js?v=board-layer-exchange-3';
 
 export const DEFAULT_LAYOUT_NAME = '默认布局';
 export const BUILT_IN_LAYOUT_NAMES = new Set([

@@ -1,12 +1,12 @@
 import {
   createCustomLayout,
   createCustomState
-} from './game.js?v=board-layer-exchange-2';
+} from './game.js?v=board-layer-exchange-3';
 import {
   DEFAULT_LAYOUT_NAME,
   isBuiltInLayoutName,
   mergeBuiltInLayouts
-} from './built-in-layouts.js?v=board-layer-exchange-2';
+} from './built-in-layouts.js?v=board-layer-exchange-3';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';

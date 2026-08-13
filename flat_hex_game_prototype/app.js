@@ -24,16 +24,16 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=board-layer-exchange-2';
+} from './game.js?v=board-layer-exchange-3';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=board-layer-exchange-2';
+} from './layout-storage.js?v=board-layer-exchange-3';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=board-layer-exchange-2';
+} from './solid-board.js?v=board-layer-exchange-3';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -43,7 +43,7 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel
-} from './solid-assembly.js?v=board-layer-exchange-2';
+} from './solid-assembly.js?v=board-layer-exchange-3';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -954,7 +954,7 @@ function render() {
     : state.winner
       ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
       : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
-  const sideName = boardSide === 'front' ? 'A 面 · 布局三' : 'B 面 · 互补拼图';
+  const sideName = previewing ? '下层 · 对应拼图' : '上层 · 当前拼图';
   faceBadge.textContent = editing
     ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · ` +
       (customEditor.mode === 'pieces' ? '点击交点设子' : '选择三角板拆装')

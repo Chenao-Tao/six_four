@@ -539,12 +539,33 @@ test('双面棋盘仅在吃子后整体交换棋盘与棋子层级且不旋转',
 
   const demo = createCaptureDemoState();
   const captured = applyMove(demo, 'wP1', { q: 0, r: -4 }).state;
-  assert.equal(captured.boardSide, 'back');
-  assert.strictEqual(captured.pieces, captured.boardStates.back);
-  assert.ok(captured.boardStates.back.some(item => item.id === 'back-wQ'));
-  assert.ok(captured.boardStates.front.some(item => item.id === 'wP1'));
-  assert.equal(captured.boardStates.front.some(item => item.id === 'bK'), false);
+  assert.equal(captured.boardSide, 'front');
+  assert.strictEqual(captured.pieces, captured.boardStates.front);
+  assert.ok(captured.boardStates.front.some(item => item.id === 'back-wQ'));
+  assert.ok(captured.boardStates.back.some(item => item.id === 'wP1'));
+  assert.equal(captured.boardStates.back.some(item => item.id === 'bK'), false);
   assert.equal(captured.history.at(-1).includes('棋盘与棋子整体交换上下层'), true);
+});
+
+test('吃子换层让4A在同一槽位下沉并由4B原位上浮', () => {
+  const state = createCaptureDemoState();
+  state.boardFaceLabels.front[3] = '4A';
+  state.boardFaceLabels.back[5] = '4B';
+  const rotated = rotateBoardPanel(
+    state.boardFaceLabels,
+    state.boardPanelRotations,
+    'front',
+    0
+  );
+  state.boardPanelRotations = rotated.panelRotations;
+
+  const result = applyMove(state, 'wP1', { q: 0, r: -4 }).state;
+
+  assert.equal(result.boardSide, 'front');
+  assert.equal(result.boardFaceLabels.front[3], '4B');
+  assert.deepEqual(result.boardFaceLabels.front, ['5B', '6B', '3B', '4B', '1B', '2B']);
+  assert.equal(result.boardPanelRotations.front[0], 120);
+  assert.ok(result.boardStates.front.some(item => item.id === 'back-wQ'));
 });
 
 test('平面棋盘同一物理交点上下都有棋子时直接交换层级', () => {
@@ -563,7 +584,7 @@ test('平面棋盘同一物理交点上下都有棋子时直接交换层级', ()
   assert.equal(result.pieces.length, 1);
   assert.equal(result.pieces[0].type, 'bishop');
   assert.deepEqual(result.pieces[0].position, { q: 0, r: 0 });
-  assert.ok(result.boardStates.front.some(item => item.side === 'white' && item.type === 'pawn'));
+  assert.ok(result.boardStates.back.some(item => item.side === 'white' && item.type === 'pawn'));
 });
 
 test('连续两次吃子会在固定棋盘上往返交换两层结算结果', () => {
@@ -573,8 +594,9 @@ test('连续两次吃子会在固定棋盘上往返交换两层结算结果', ()
     piece('wQ', 'white', 'queen', 0, 4)
   ];
   const afterFrontCapture = applyMove(initial, 'wB1', { q: 1, r: 1 }).state;
-  assert.equal(afterFrontCapture.boardSide, 'back');
-  assert.equal(afterFrontCapture.boardStates.front.some(item => item.id === 'bP1'), false);
+  assert.equal(afterFrontCapture.boardSide, 'front');
+  assert.equal(afterFrontCapture.boardStates.back.some(item => item.id === 'bP1'), false);
+  assert.deepEqual(afterFrontCapture.boardFaceLabels.front, ['5B', '6B', '3B', '4A', '1B', '2B']);
 
   const risenKing = afterFrontCapture.pieces.find(item => item.id === 'bK');
   const capture = [...legalMoves(afterFrontCapture, risenKing.id).values()].find(move => move.captureId);
@@ -584,6 +606,8 @@ test('连续两次吃子会在固定棋盘上往返交换两层结算结果', ()
   assert.equal(afterBackCapture.flipCount, 2);
   assert.equal(afterBackCapture.boardStates.front.some(item => item.id === 'bP1'), false);
   assert.ok(afterBackCapture.boardStates.front.some(item => item.id === 'wB1'));
+  assert.deepEqual(afterBackCapture.boardFaceLabels, initial.boardFaceLabels);
+  assert.deepEqual(afterBackCapture.boardPanelRotations, initial.boardPanelRotations);
   assert.strictEqual(afterBackCapture.pieces, afterBackCapture.boardStates.front);
 });
 

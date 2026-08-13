@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=board-layer-exchange-2';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=board-layer-exchange-3';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
