@@ -9,6 +9,7 @@ import {
   shouldFallbackToBrowserStorage
 } from './layout-storage.js';
 import { builtInLayouts } from './built-in-layouts.js';
+import { flatLayouts, resolvePlayableLayout } from './layout-library.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -38,7 +39,7 @@ function customLayout(name) {
   const initial = createInitialState();
   return {
     name,
-    boardShape: 'solid',
+    boardShape: 'flat',
     boardStates: {
       front: [
         { id: 'white-king', side: 'white', type: 'king', position: { q: 0, r: -4 } },
@@ -51,15 +52,165 @@ function customLayout(name) {
   };
 }
 
+function flatLayout(name, frontExtras = []) {
+  const initial = createInitialState();
+  return {
+    name,
+    boardShape: 'flat',
+    boardStates: {
+      front: [
+        { id: `${name}-white-king`, side: 'white', type: 'king', position: { q: 0, r: -4 } },
+        { id: `${name}-black-king`, side: 'black', type: 'king', position: { q: 0, r: 4 } },
+        ...frontExtras
+      ],
+      back: []
+    },
+    faceLabels: initial.boardFaceLabels,
+    panelRotations: initial.boardPanelRotations
+  };
+}
+
+function solidLayout(name, sourceFlatLayoutName) {
+  const initial = createInitialState();
+  return {
+    name,
+    boardShape: 'solid',
+    sourceFlatLayoutName,
+    faceLabels: initial.boardFaceLabels,
+    panelRotations: initial.boardPanelRotations
+  };
+}
+
+test('同名方案的平面与立体结构独立保存且立体实时使用平面棋子', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  let library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('同步方案'), activate: false })
+  });
+  library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('同步方案', '同步方案'), activate: false })
+  });
+
+  const flat = library.layouts.find(layout =>
+    layout.name === '同步方案' && layout.boardShape === 'flat');
+  const solid = library.layouts.find(layout =>
+    layout.name === '同步方案' && layout.boardShape === 'solid');
+  assert.ok(flat.boardStates);
+  assert.equal(solid.sourceFlatLayoutName, '同步方案');
+  assert.equal('boardStates' in solid, false);
+  const solidStructure = structuredClone({
+    faceLabels: solid.faceLabels,
+    panelRotations: solid.panelRotations
+  });
+
+  library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: flatLayout('同步方案', [
+        { id: 'late-pawn', side: 'white', type: 'pawn', position: { q: 1, r: -1 } }
+      ]),
+      activate: false
+    })
+  });
+  const playable = resolvePlayableLayout(
+    library.layouts.find(layout =>
+      layout.name === '同步方案' && layout.boardShape === 'solid'),
+    library.layouts
+  );
+  const unchangedSolid = library.layouts.find(layout =>
+    layout.name === '同步方案' && layout.boardShape === 'solid');
+
+  assert.equal(playable.error, undefined);
+  assert.equal(playable.state.boardShape, 'solid');
+  assert.equal(playable.state.pieces.filter(piece => piece.type === 'pawn').length, 1);
+  assert.deepEqual({
+    faceLabels: unchangedSolid.faceLabels,
+    panelRotations: unchangedSolid.panelRotations
+  }, solidStructure);
+});
+
+test('平面与立体布局可以同名保存并分别启用删除', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('同名布局'), activate: false })
+  });
+  let library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('同名布局', '同名布局'), activate: false })
+  });
+
+  assert.equal(library.layouts.filter(layout => layout.name === '同名布局').length, 2);
+
+  library = store.request('/api/layouts/active', {
+    method: 'PUT',
+    body: JSON.stringify({ name: '同名布局', boardShape: 'solid' })
+  });
+  assert.equal(library.activeLayoutName, '同名布局');
+  assert.equal(library.activeBoardShape, 'solid');
+
+  library = store.request(`/api/layouts/${encodeURIComponent('同名布局')}?boardShape=solid`, {
+    method: 'DELETE'
+  });
+  assert.equal(library.layouts.some(layout =>
+    layout.name === '同名布局' && layout.boardShape === 'flat'), true);
+  assert.equal(library.layouts.some(layout =>
+    layout.name === '同名布局' && layout.boardShape === 'solid'), false);
+});
+
+test('不能删除仍被立体存档引用的平面布局', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('配对布局'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('配对布局', '配对布局'), activate: false })
+  });
+
+  assert.throws(() => store.request(`/api/layouts/${encodeURIComponent('配对布局')}`, {
+    method: 'DELETE'
+  }), /立体布局“配对布局”正在使用/);
+});
+
+test('当前立体布局启用时不能把棋子来源覆盖成不可开局草稿', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('配对布局'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('配对布局', '配对布局'), activate: true })
+  });
+  const initial = createInitialState();
+
+  assert.throws(() => store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: {
+        name: '配对布局',
+        boardShape: 'flat',
+        boardStates: { front: [], back: [] },
+        faceLabels: initial.boardFaceLabels,
+        panelRotations: initial.boardPanelRotations
+      },
+      activate: false
+    })
+  }), /当前启用布局必须保持可开局/);
+});
+
 test('浏览器布局存储提供默认布局并持久化保存与启用状态', () => {
   const storage = memoryStorage();
   const store = createBrowserLayoutStore(storage);
   const initial = store.request();
   assert.equal(initial.activeLayoutName, DEFAULT_LAYOUT_NAME);
   assert.equal(initial.layouts[0].builtIn, true);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn).length, 4);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'solid').length, 1);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'flat').length, 3);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn).length, 7);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'solid').length, 3);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'flat').length, 4);
 
   const saved = store.request('/api/layouts', {
     method: 'POST',
@@ -67,7 +218,7 @@ test('浏览器布局存储提供默认布局并持久化保存与启用状态',
   });
   assert.equal(saved.activeLayoutName, '线上布局');
   assert.ok(saved.layouts.some(layout => layout.name === '线上布局'));
-  assert.equal(saved.layouts.find(layout => layout.name === '线上布局').boardShape, 'solid');
+  assert.equal(saved.layouts.find(layout => layout.name === '线上布局').boardShape, 'flat');
   assert.ok(storage.getItem(LAYOUT_LIBRARY_STORAGE_KEY));
 
   const restartedStore = createBrowserLayoutStore(storage);
@@ -86,26 +237,41 @@ test('已有浏览器布局库会自动补齐内置可玩布局且保留用户�
 
   assert.equal(library.activeLayoutName, '用户布局');
   assert.ok(library.layouts.some(layout => layout.name === '用户布局'));
-  assert.equal(library.layouts.filter(layout => layout.builtIn).length, 4);
+  assert.equal(library.layouts.filter(layout => layout.builtIn).length, 7);
+  const solidBuiltInNames = new Set(library.layouts
+    .filter(layout => layout.builtIn && layout.boardShape === 'solid')
+    .map(layout => layout.name));
+  assert.equal(solidBuiltInNames.size, 3);
+  for (const name of solidBuiltInNames) {
+    assert.ok(library.layouts.some(layout => layout.name === name && layout.boardShape === 'flat'));
+    assert.ok(library.layouts.some(layout => layout.name === name && layout.boardShape === 'solid'));
+  }
 });
 
-test('全部内置布局都可直接开局且不能被覆盖', () => {
+test('全部内置布局都可直接开局且可被同名用户版本覆盖', () => {
   const store = createBrowserLayoutStore(memoryStorage());
   for (const layout of builtInLayouts()) {
-    const playable = layout.isDefault
-      ? { state: createInitialState() }
-      : createCustomState(
-          layout.boardStates,
-          layout.faceLabels,
-          layout.panelRotations,
-          layout.boardShape
-        );
+    const playable = resolvePlayableLayout(layout, builtInLayouts());
     assert.ok(playable.state, layout.name);
-    assert.throws(() => store.request('/api/layouts', {
-      method: 'POST',
-      body: JSON.stringify({ layout, activate: false })
-    }), /内置布局不能被覆盖/);
   }
+
+  const preset = builtInLayouts().find(layout => layout.boardShape === 'solid');
+  const { builtIn, ...override } = preset;
+  const saved = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: override, activate: true })
+  });
+  const overridden = saved.layouts.find(layout =>
+    layout.name === preset.name && layout.boardShape === 'solid');
+  assert.equal(saved.activeLayoutName, preset.name);
+  assert.equal(overridden.builtIn, undefined);
+
+  const deleted = store.request(`/api/layouts/${encodeURIComponent(preset.name)}?boardShape=solid`, {
+    method: 'DELETE'
+  });
+  const restored = deleted.layouts.find(layout =>
+    layout.name === preset.name && layout.boardShape === 'solid');
+  assert.equal(restored.builtIn, true);
 });
 
 test('旧布局缺少棋盘形态时按平面布局兼容读取', () => {
@@ -125,6 +291,59 @@ test('旧布局缺少棋盘形态时按平面布局兼容读取', () => {
   });
 
   assert.equal(saved.layouts.find(layout => layout.name === '旧布局').boardShape, 'flat');
+});
+
+test('旧立体布局迁移后保持启用状态并生成同名平面棋子结构', () => {
+  const storage = memoryStorage();
+  const legacySolid = { ...customLayout('旧立体'), boardShape: 'solid' };
+  storage.setItem(LAYOUT_LIBRARY_STORAGE_KEY, JSON.stringify({
+    version: 1,
+    activeLayoutName: '旧立体',
+    layouts: [legacySolid]
+  }));
+
+  const library = createBrowserLayoutStore(storage).request();
+  const solid = library.layouts.find(layout =>
+    layout.name === '旧立体' && layout.boardShape === 'solid');
+
+  assert.equal(library.activeBoardShape, 'solid');
+  assert.equal(solid.sourceFlatLayoutName, '旧立体');
+  assert.equal('boardStates' in solid, false);
+  assert.ok(library.layouts.some(layout =>
+    layout.name === '旧立体' && layout.boardShape === 'flat'));
+});
+
+test('旧版不同名棋子来源迁移后保留数据但不再作为独立方案显示', () => {
+  const storage = memoryStorage();
+  storage.setItem(LAYOUT_LIBRARY_STORAGE_KEY, JSON.stringify({
+    version: 2,
+    activeLayoutName: DEFAULT_LAYOUT_NAME,
+    activeBoardShape: 'flat',
+    layouts: [
+      flatLayout('旧方案 · 棋子来源'),
+      solidLayout('旧方案', '旧方案 · 棋子来源')
+    ]
+  }));
+
+  const library = createBrowserLayoutStore(storage).request();
+  assert.ok(library.layouts.some(layout =>
+    layout.name === '旧方案 · 棋子来源' && layout.boardShape === 'flat'));
+  assert.ok(library.layouts.some(layout =>
+    layout.name === '旧方案' && layout.boardShape === 'flat'));
+  assert.equal(flatLayouts(library.layouts).some(layout =>
+    layout.name === '旧方案 · 棋子来源'), false);
+});
+
+test('新立体结构拒绝引用不同名的平面方案', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('平面甲'), activate: false })
+  });
+  assert.throws(() => store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('立体乙', '平面甲'), activate: false })
+  }), /平面与立体结构必须使用同一方案名/);
 });
 
 test('浏览器布局存储允许草稿落盘但拒绝启用缺少王的布局', () => {

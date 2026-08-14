@@ -11,7 +11,8 @@ import {
   flipAssemblyPanel,
   placeAssemblyPanel,
   removeAssemblyPanel,
-  rotateAssemblyPanel
+  rotateAssemblyPanel,
+  syncAssemblyPieces
 } from './solid-assembly.js';
 
 function initialLayout() {
@@ -203,6 +204,61 @@ test('已有无冲突立体布局载入为完整装配后可无损生成棋子�
   assert.deepEqual(restored.boardStates, layout.boardStates);
 });
 
+test('立体装配姿态与平面棋子来源可以独立组合', () => {
+  const flatLayout = initialLayout();
+  flatLayout.boardStates = { front: [{
+    id: 'source-piece',
+    side: 'white',
+    type: 'pawn',
+    position: { q: 1, r: 1 },
+    panelIndex: 0
+  }], back: [] };
+  const arrangement = {
+    faceLabels: {
+      front: ['2A', '1A', '3A', '4B', '5A', '6A'],
+      back: ['3B', '1B', '2B', '6B', '5B', '4A']
+    },
+    panelRotations: {
+      front: [0, 0, 0, 0, 0, 0],
+      back: [0, 0, 0, 0, 0, 0]
+    }
+  };
+
+  const assembly = createSolidAssembly(flatLayout, { installed: true, arrangement });
+  const completed = assemblyToLayout(assembly);
+
+  assert.deepEqual(completed.faceLabels, arrangement.faceLabels);
+  assert.equal(completed.boardStates.front.some(piece => piece.id === 'source-piece'), true);
+  assert.equal(completed.boardStates.front.find(piece => piece.id === 'source-piece').panelIndex, 4);
+});
+
+test('同步同名平面棋子时保留立体装配结构', () => {
+  const source = initialLayout();
+  source.boardStates = { front: [], back: [] };
+  let assembly = createSolidAssembly(source);
+  assembly = placeAssemblyPanel(assembly, '3', 4).assembly;
+  assembly = rotateAssemblyPanel(assembly, '3').assembly;
+  const slotsBefore = structuredClone(assembly.slots);
+
+  const updatedSource = initialLayout();
+  updatedSource.boardStates = {
+    front: [{
+      id: 'synced-piece',
+      side: 'white',
+      type: 'pawn',
+      position: { q: 1, r: 1 },
+      panelIndex: 0
+    }],
+    back: []
+  };
+  const synchronized = syncAssemblyPieces(assembly, updatedSource);
+
+  assert.equal(synchronized.error, undefined);
+  assert.deepEqual(synchronized.assembly.slots, slotsBefore);
+  assert.equal(synchronized.assembly.panels.some(panel =>
+    panel.faces.A.some(piece => piece.id === 'synced-piece')), true);
+});
+
 test('历史立体布局本身存在三维棋子重合时拒绝再次保存', () => {
   const layout = initialLayout();
   const assembly = createSolidAssembly(layout, { installed: true });
@@ -227,15 +283,32 @@ test('完整无冲突装配可以通过真实布局存储保存并启用开局',
   }
   const completed = assemblyToLayout(assembly);
   const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: { name: '立体开局', boardShape: 'flat', ...layout },
+      activate: false
+    })
+  });
 
   const saved = store.request('/api/layouts', {
     method: 'POST',
     body: JSON.stringify({
-      layout: { name: '立体开局', boardShape: 'solid', ...completed },
+      layout: {
+        name: '立体开局',
+        boardShape: 'solid',
+        sourceFlatLayoutName: '立体开局',
+        faceLabels: completed.faceLabels,
+        panelRotations: completed.panelRotations
+      },
       activate: true
     })
   });
 
   assert.equal(saved.activeLayoutName, '立体开局');
-  assert.equal(saved.layouts.find(item => item.name === '立体开局').boardShape, 'solid');
+  const solid = saved.layouts.find(item =>
+    item.name === '立体开局' && item.boardShape === 'solid');
+  assert.equal(solid.boardShape, 'solid');
+  assert.equal(solid.sourceFlatLayoutName, '立体开局');
+  assert.equal('boardStates' in solid, false);
 });

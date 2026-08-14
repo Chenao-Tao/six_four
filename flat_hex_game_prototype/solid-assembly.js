@@ -4,7 +4,7 @@ import {
   panelIndexForPoint,
   solidPointKey,
   verticalMirrorPanelIndex
-} from './game.js?v=board-layer-exchange-3';
+} from './game.js?v=separate-layout-storage-1';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 
@@ -171,15 +171,15 @@ function validated(next) {
   return error ? { error } : { assembly: next };
 }
 
-export function createSolidAssembly(layout, { installed = false } = {}) {
+export function createSolidAssembly(layout, { installed = false, arrangement = layout } = {}) {
   const panels = PANEL_IDS.map(id => {
-    const pose = currentPanelFace(layout, id);
+    const pose = currentPanelFace(arrangement, id);
     return {
       id,
       face: pose.face,
       rotation: pose.rotation,
       installedSlot: installed
-        ? layout.faceLabels.front.findIndex(label => label.startsWith(id))
+        ? arrangement.faceLabels.front.findIndex(label => label.startsWith(id))
         : null,
       faces: {
         A: piecesForPhysicalFace(layout, id, 'A'),
@@ -198,6 +198,20 @@ export function createSolidAssembly(layout, { installed = false } = {}) {
     });
   }
   return { panels, slots };
+}
+
+export function syncAssemblyPieces(assembly, layout) {
+  const next = cloneAssembly(assembly);
+  const source = createSolidAssembly(layout);
+  next.panels.forEach(panel => {
+    const sourcePanel = panelById(source, panel.id);
+    panel.faces = {
+      A: sourcePanel.faces.A.map(clonePiece),
+      B: sourcePanel.faces.B.map(clonePiece)
+    };
+  });
+  const error = collisionError(next);
+  return error ? { assembly: next, error } : { assembly: next };
 }
 
 export function assemblyViewModel(assembly) {

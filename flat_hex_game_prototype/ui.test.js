@@ -90,12 +90,30 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(app, /createBrowserLayoutStore/);
   assert.match(app, /async function saveLayoutToLibrary\(\)/);
   assert.match(app, /function loadLayoutFromLibrary\(\)/);
-  assert.match(app, /async function activateLayoutFromLibrary\(\)/);
-  assert.match(app, /async function deleteLayoutFromLibrary\(\)/);
+  assert.match(app, /async function activateLayoutFromLibrary\(/);
+  assert.match(app, /async function deleteLayoutFromLibrary\(/);
   assert.match(app, /const validation = createCustomLayout\(/);
   assert.match(app, /requestLayoutLibrary\('\/api\/layouts'/);
   assert.match(app, /state = cloneGameState\(activeInitialState\)/);
   assert.match(html, /静态部署时自动保存在当前浏览器/);
+});
+
+test('启用使用当前编辑覆盖所选存档且不会立即开局或退出编辑', () => {
+  const activation = app.match(
+    /async function activateLayoutFromLibrary[\s\S]*?\n}\n\nfunction activateSolidLayoutFromLibrary/
+  );
+  assert.ok(activation);
+  assert.match(html, /id="activateLayoutButton" disabled>启用<\/button>/);
+  assert.match(html, /id="activateSolidLayoutButton" disabled>启用<\/button>/);
+  assert.doesNotMatch(html, /启用并开局/);
+  assert.match(activation[0], /body: JSON\.stringify\(\{ layout: snapshot, activate: true \}\)/);
+  assert.match(activation[0], /已覆盖并启用布局/);
+  assert.doesNotMatch(activation[0], /\/api\/layouts\/active/);
+  assert.doesNotMatch(activation[0], /state = cloneGameState\(activeInitialState\)/);
+  assert.doesNotMatch(activation[0], /customEditor = null/);
+  assert.doesNotMatch(activation[0], /openActiveBoardShape\(\)/);
+  assert.match(app, /activateLayoutButton\.disabled = !selectedLayout/);
+  assert.match(app, /activateSolidLayoutButton\.disabled = !selectedLayout/);
 });
 
 test('布局接口不存在或文件不可写时自动使用浏览器存储且保留其他错误', () => {
@@ -122,9 +140,27 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /function closeSolidBoard\(\)/);
   assert.match(app, /function setBoardShape\(boardShape\)/);
   assert.match(app, /saveSolidCustomButton\.addEventListener\('click', saveCustomBoard\)/);
-  assert.match(app, /boardShape: layout\.boardShape === 'solid' \? 'solid' : 'flat'/);
-  assert.match(app, /if \(customEditor\.boardShape === 'solid'\) openSolidBoard\(\)/);
+  assert.match(app, /solidLayoutSnapshot/);
+  assert.match(app, /customEditor\.solidAssembly = createSolidAssembly\(/);
+  assert.match(app, /syncAssemblyPieces\(customEditor\.solidAssembly, sourceLayout\)/);
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
+});
+
+test('平面与立体结构按同名方案配对且只显示当前形态的存档区', () => {
+  assert.match(html, /id="flatLayoutLibrary"/);
+  assert.match(html, /id="solidLayoutLibrary"/);
+  assert.doesNotMatch(html, /id="solidSourceLayoutSelect"/);
+  assert.match(html, /id="solidLayoutNameInput"/);
+  assert.match(html, /id="solidLayoutNameInput"[^>]*readonly/);
+  assert.match(html, /id="savedSolidLayoutSelect"/);
+  assert.match(app, /flatLayouts\(savedLayouts\)/);
+  assert.match(app, /solidLayouts\(savedLayouts\)/);
+  assert.match(app, /sourceFlatLayoutName: name/);
+  assert.match(app, /flatLayoutLibrary\.classList\.toggle\('hidden', !editingFlat\)/);
+  assert.match(app, /solidLayoutLibrary\.classList\.toggle\('hidden', !editingSolid\)/);
+  assert.match(styles, /\.layout-library\.hidden\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(app, /loadLayoutButton\.disabled = !selectedLayout/);
+  assert.match(app, /loadSolidLayoutButton\.disabled = !selectedLayout/);
 });
 
 test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
@@ -171,7 +207,7 @@ test('算法模拟会预告唯一的即将执行动作', () => {
 });
 
 test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋规则', () => {
-  assert.match(app, /createCustomState\([\s\S]*?activeBoardShape\s*\)/);
+  assert.match(app, /resolvePlayableLayout\(activeLayout, savedLayouts\)/);
   assert.match(app, /onPieceSelect: selectSolidPiece/);
   assert.match(app, /onMoveSelect: selectSolidMove/);
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);

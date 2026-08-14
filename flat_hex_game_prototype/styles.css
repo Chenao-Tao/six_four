@@ -147,6 +147,7 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .panel-editor-actions.hidden { display: none; }
 .panel-selection { margin-bottom: 8px; color: var(--gold); font-size: 12px; }
 .layout-library { display: grid; gap: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; background: rgba(5,12,18,.48); }
+.layout-library.hidden { display: none; }
 .layout-library label { color: #9fb4c5; font-size: 12px; font-weight: 700; }
 .layout-save-row { display: flex; flex-wrap: wrap; gap: 7px; }
 .layout-save-row input, .layout-save-row select { flex: 1 1 140px; }
