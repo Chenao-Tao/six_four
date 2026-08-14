@@ -7,6 +7,7 @@ import {
   createCaptureDemoState,
   createCustomState,
   createInitialState,
+  iterativeGameSearch,
   keyOf,
   positionSignature,
   promotionTypeForMove
@@ -160,6 +161,32 @@ export function runLegacyBenchmark(searchDepth = 3) {
       score: action?.score ?? null,
       searchedNodes: action?.searchedNodes ?? 0,
       prunedBranches: action?.prunedBranches ?? 0,
+      elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10
+    };
+  });
+}
+
+export function runOptimizedBenchmark(options = {}) {
+  return aiBenchmarkCases().map(({ name, state }) => {
+    const startedAt = performance.now();
+    const steps = [...iterativeGameSearch(state, {
+      timeLimitMs: options.timeLimitMs ?? 3000,
+      maxDepth: options.maxDepth ?? 8,
+      maxNodes: options.maxNodes,
+      quiescenceDepth: options.quiescenceDepth ?? 4
+    })];
+    const action = steps.at(-1) ?? null;
+    return {
+      name,
+      action: action
+        ? `${action.pieceId}:${keyOf(action.move.target)}:${action.promote}`
+        : null,
+      score: action?.score ?? null,
+      searchDepth: action?.searchDepth ?? null,
+      completed: action?.completed ?? false,
+      searchedNodes: action?.searchedNodes ?? 0,
+      quiescenceNodes: action?.quiescenceNodes ?? 0,
+      cacheHits: action?.cacheHits ?? 0,
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10
     };
   });

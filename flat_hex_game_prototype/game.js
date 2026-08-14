@@ -1349,6 +1349,11 @@ function actionTarget(action) {
   };
 }
 
+function actionKey(action) {
+  const panel = validatePanelIndex(action.move.panelIndex) ? action.move.panelIndex : '-';
+  return `${action.pieceId}:${keyOf(action.move.target)}:${panel}:${action.promote}`;
+}
+
 function orderedActions(state) {
   return actionVariants(state).sort((left, right) => {
     const priority = actionOrder(right) - actionOrder(left);
@@ -1378,15 +1383,112 @@ function repetitionAwareActions(state) {
   }).sort((left, right) => left.repetitionCount - right.repetitionCount);
 }
 
-function minimax(state, depth, alpha, beta, perspective, metrics, ply = 0) {
-  metrics.searchedNodes += 1;
-  if (depth === 0 || state.winner) return evaluateGameState(state, perspective, ply);
-  const candidates = repetitionAwareActions(state);
-  if (!candidates.length) return evaluateGameState(state, perspective, ply);
+class SearchLimitReached extends Error {}
+
+function monotonicNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function createSearchContext(options = {}) {
+  const now = options.now ?? monotonicNow;
+  const startedAt = now();
+  const timeLimitMs = Number.isFinite(options.timeLimitMs)
+    ? Math.max(0, options.timeLimitMs)
+    : Infinity;
+  return {
+    now,
+    startedAt,
+    deadline: startedAt + timeLimitMs,
+    maxNodes: Number.isFinite(options.maxNodes) ? Math.max(1, options.maxNodes) : Infinity,
+    quiescenceDepth: Math.max(0, Math.floor(options.quiescenceDepth ?? 0)),
+    tableLimit: Math.max(0, Math.floor(options.transpositionTableSize ?? 50000)),
+    transpositionTable: new Map(),
+    evaluationCache: new Map(),
+    totalNodes: 0,
+    metrics: null
+  };
+}
+
+function checkSearchLimit(context) {
+  context.totalNodes += 1;
+  if (context.totalNodes > context.maxNodes) throw new SearchLimitReached();
+  if (context.totalNodes % 128 === 0 && context.now() >= context.deadline) {
+    throw new SearchLimitReached();
+  }
+}
+
+function cachedEvaluation(state, perspective, ply, context) {
+  const cacheKey = `${positionSignature(state)}:${perspective}:${ply}`;
+  const cached = context.evaluationCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const score = evaluateGameState(state, perspective, ply);
+  if (context.evaluationCache.size < context.tableLimit) {
+    context.evaluationCache.set(cacheKey, score);
+  }
+  return score;
+}
+
+function quickEvaluation(state, perspective) {
+  if (state.winner) return state.winner === perspective ? MATE_SCORE : -MATE_SCORE;
+  const { active, dormant } = stateLayers(state);
+  return Math.round(
+    materialScore(active, perspective) +
+    materialScore(dormant, perspective) * DORMANT_LAYER_WEIGHT
+  );
+}
+
+function orderedCandidates(state, perspective, maximizing, preferredActionKey = null) {
+  return repetitionAwareActions(state).sort((left, right) => {
+    const leftKey = actionKey(left.action);
+    const rightKey = actionKey(right.action);
+    if (leftKey === preferredActionKey) return -1;
+    if (rightKey === preferredActionKey) return 1;
+    const tacticalPriority = actionOrder(right.action) - actionOrder(left.action);
+    if (tacticalPriority) return tacticalPriority;
+    const leftScore = quickEvaluation(left.result.state, perspective);
+    const rightScore = quickEvaluation(right.result.state, perspective);
+    const evaluationOrder = maximizing ? rightScore - leftScore : leftScore - rightScore;
+    if (evaluationOrder) return evaluationOrder;
+    if (left.repetitionCount !== right.repetitionCount) {
+      return left.repetitionCount - right.repetitionCount;
+    }
+    return leftKey.localeCompare(rightKey);
+  });
+}
+
+function tableKey(state, ply) {
+  return `${positionSignature(state)}:${ply}`;
+}
+
+function storeTableEntry(context, key, entry) {
+  if (!context.tableLimit) return;
+  if (!context.transpositionTable.has(key) &&
+      context.transpositionTable.size >= context.tableLimit) {
+    const oldestKey = context.transpositionTable.keys().next().value;
+    context.transpositionTable.delete(oldestKey);
+  }
+  context.transpositionTable.set(key, entry);
+}
+
+function quiescence(state, depth, alpha, beta, perspective, context, ply) {
+  checkSearchLimit(context);
+  context.metrics.quiescenceNodes += 1;
+  if (state.winner) return cachedEvaluation(state, perspective, ply, context);
   const maximizing = state.turn === perspective;
-  let bestScore = maximizing ? -Infinity : Infinity;
-  for (const { result } of candidates) {
-    const score = minimax(result.state, depth - 1, alpha, beta, perspective, metrics, ply + 1);
+  const standPat = cachedEvaluation(state, perspective, ply, context);
+  let bestScore = standPat;
+  if (maximizing) {
+    if (bestScore >= beta) return bestScore;
+    alpha = Math.max(alpha, bestScore);
+  } else {
+    if (bestScore <= alpha) return bestScore;
+    beta = Math.min(beta, bestScore);
+  }
+  if (depth === 0) return bestScore;
+  const tactical = orderedCandidates(state, perspective, maximizing)
+    .filter(({ action }) => action.move.captureId || action.promote);
+  for (const { result } of tactical) {
+    const score = quiescence(result.state, depth - 1, alpha, beta, perspective, context, ply + 1);
     if (maximizing) {
       bestScore = Math.max(bestScore, score);
       alpha = Math.max(alpha, bestScore);
@@ -1395,18 +1497,104 @@ function minimax(state, depth, alpha, beta, perspective, metrics, ply = 0) {
       beta = Math.min(beta, bestScore);
     }
     if (beta <= alpha) {
-      metrics.prunedBranches += 1;
+      context.metrics.prunedBranches += 1;
       break;
     }
   }
   return bestScore;
 }
 
-function searchAtDepth(state, searchDepth) {
-  const candidates = repetitionAwareActions(state);
-  if (!candidates.length) return null;
+function minimax(state, depth, alpha, beta, perspective, context, ply = 0) {
+  checkSearchLimit(context);
+  context.metrics.searchedNodes += 1;
+  if (state.winner) return cachedEvaluation(state, perspective, ply, context);
+  if (depth === 0) {
+    return context.quiescenceDepth
+      ? quiescence(state, context.quiescenceDepth, alpha, beta, perspective, context, ply)
+      : cachedEvaluation(state, perspective, ply, context);
+  }
+  const key = tableKey(state, ply);
+  const originalAlpha = alpha;
+  const originalBeta = beta;
+  const tableEntry = context.transpositionTable.get(key);
+  if (tableEntry) {
+    context.metrics.cacheHits += 1;
+    if (tableEntry.depth >= depth) {
+      if (tableEntry.bound === 'exact') return tableEntry.score;
+      if (tableEntry.bound === 'lower') alpha = Math.max(alpha, tableEntry.score);
+      if (tableEntry.bound === 'upper') beta = Math.min(beta, tableEntry.score);
+      if (alpha >= beta) return tableEntry.score;
+    }
+  }
+  const maximizing = state.turn === perspective;
+  const candidates = orderedCandidates(state, perspective, maximizing, tableEntry?.bestActionKey);
+  if (!candidates.length) return cachedEvaluation(state, perspective, ply, context);
+  let bestScore = maximizing ? -Infinity : Infinity;
+  let bestActionKey = null;
+  for (const { action, result } of candidates) {
+    const score = minimax(result.state, depth - 1, alpha, beta, perspective, context, ply + 1);
+    if (maximizing) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestActionKey = actionKey(action);
+      }
+      alpha = Math.max(alpha, bestScore);
+    } else {
+      if (score < bestScore) {
+        bestScore = score;
+        bestActionKey = actionKey(action);
+      }
+      beta = Math.min(beta, bestScore);
+    }
+    if (beta <= alpha) {
+      context.metrics.prunedBranches += 1;
+      break;
+    }
+  }
+  const bound = bestScore <= originalAlpha
+    ? 'upper'
+    : bestScore >= originalBeta
+      ? 'lower'
+      : 'exact';
+  storeTableEntry(context, key, { depth, score: bestScore, bound, bestActionKey });
+  return bestScore;
+}
+
+function principalVariation(state, rootAction, searchDepth, context) {
+  const variation = [];
+  let currentState = state;
+  let currentAction = rootAction;
+  for (let ply = 0; currentAction && ply < searchDepth; ply += 1) {
+    variation.push({
+      pieceId: currentAction.pieceId,
+      move: currentAction.move,
+      promote: currentAction.promote
+    });
+    const applied = applyMove(
+      currentState,
+      currentAction.pieceId,
+      actionTarget(currentAction),
+      currentAction.promote,
+      false
+    );
+    currentState = applied.state;
+    const entry = context.transpositionTable.get(tableKey(currentState, ply + 1));
+    if (!entry?.bestActionKey) break;
+    currentAction = actionVariants(currentState).find(action => actionKey(action) === entry.bestActionKey);
+  }
+  return variation;
+}
+
+function searchAtDepth(state, searchDepth, context, preferredActionKey = null) {
   const perspective = state.turn;
-  const metrics = { searchedNodes: 0, prunedBranches: 0 };
+  const candidates = orderedCandidates(state, perspective, true, preferredActionKey);
+  if (!candidates.length) return null;
+  context.metrics = {
+    searchedNodes: 0,
+    quiescenceNodes: 0,
+    prunedBranches: 0,
+    cacheHits: 0
+  };
   let bestAction = null;
   let bestScore = -Infinity;
   let bestRepetitionCount = Infinity;
@@ -1418,7 +1606,7 @@ function searchAtDepth(state, searchDepth) {
       alpha,
       Infinity,
       perspective,
-      metrics,
+      context,
       1
     );
     if (score > bestScore || (score === bestScore && repetitionCount < bestRepetitionCount)) {
@@ -1428,22 +1616,68 @@ function searchAtDepth(state, searchDepth) {
     }
     alpha = Math.max(alpha, bestScore);
   }
+  const elapsedMs = Math.max(0, context.now() - context.startedAt);
   return {
     ...bestAction,
     score: bestScore,
     searchDepth,
     repetitionCount: bestRepetitionCount,
-    ...metrics
+    elapsedMs: Math.round(elapsedMs * 10) / 10,
+    principalVariation: principalVariation(state, bestAction, searchDepth, context),
+    ...context.metrics
   };
 }
 
 export function* stepwiseGameSearch(state, maxDepth = 3) {
   const normalizedDepth = Math.max(1, Math.floor(maxDepth));
   for (let searchDepth = 1; searchDepth <= normalizedDepth; searchDepth++) {
-    const result = searchAtDepth(state, searchDepth);
+    const context = createSearchContext({ transpositionTableSize: 50000 });
+    const result = searchAtDepth(state, searchDepth, context);
     if (!result) return;
     yield result;
   }
+}
+
+export function* iterativeGameSearch(state, options = {}) {
+  const maxDepth = Math.max(1, Math.floor(options.maxDepth ?? 8));
+  const context = createSearchContext({
+    timeLimitMs: options.timeLimitMs ?? 3000,
+    maxNodes: options.maxNodes,
+    quiescenceDepth: options.quiescenceDepth ?? 4,
+    transpositionTableSize: options.transpositionTableSize ?? 50000,
+    now: options.now
+  });
+  let preferredActionKey = null;
+  let completedDepth = 0;
+  try {
+    for (let searchDepth = 1; searchDepth <= maxDepth; searchDepth += 1) {
+      const result = searchAtDepth(state, searchDepth, context, preferredActionKey);
+      if (!result) return;
+      completedDepth = searchDepth;
+      preferredActionKey = actionKey(result);
+      yield { ...result, completed: true };
+      if (Math.abs(result.score) >= MATE_SCORE - searchDepth) return;
+      if (context.now() >= context.deadline) return;
+    }
+  } catch (error) {
+    if (!(error instanceof SearchLimitReached)) throw error;
+  }
+  if (completedDepth > 0) return;
+  const fallback = orderedCandidates(state, state.turn, true)[0];
+  if (!fallback) return;
+  yield {
+    ...fallback.action,
+    score: quickEvaluation(fallback.result.state, state.turn),
+    searchDepth: 0,
+    repetitionCount: fallback.repetitionCount,
+    searchedNodes: context.metrics?.searchedNodes ?? 0,
+    quiescenceNodes: context.metrics?.quiescenceNodes ?? 0,
+    prunedBranches: context.metrics?.prunedBranches ?? 0,
+    cacheHits: context.metrics?.cacheHits ?? 0,
+    elapsedMs: Math.round(Math.max(0, context.now() - context.startedAt) * 10) / 10,
+    principalVariation: [fallback.action],
+    completed: false
+  };
 }
 
 export function chooseSimulationAction(state, searchDepth = 3) {

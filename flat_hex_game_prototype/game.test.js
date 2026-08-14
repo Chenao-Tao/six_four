@@ -12,6 +12,7 @@ import {
   createInitialState,
   evaluateGameState,
   flipBoardPanel,
+  iterativeGameSearch,
   keyOf,
   legalMoves,
   positionSignature,
@@ -556,6 +557,73 @@ test('分步博弈依次给出一至三层结论，最终结果等同三层搜�
     assert.ok(item.searchedNodes > 0);
     assert.ok(item.prunedBranches >= 0);
   });
+});
+
+test('限时迭代加深返回完整层、主变例与搜索指标', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, -3),
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bK', 'black', 'king', 0, -4),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+
+  const steps = [...iterativeGameSearch(state, {
+    maxDepth: 4,
+    timeLimitMs: 3000,
+    quiescenceDepth: 2
+  })];
+
+  assert.deepEqual(steps.map(item => item.searchDepth), [1]);
+  assert.equal(steps[0].move.capturesKing, true);
+  assert.equal(steps[0].completed, true);
+  assert.ok(steps[0].principalVariation.length >= 1);
+  assert.ok(steps[0].quiescenceNodes >= 0);
+  assert.ok(steps[0].cacheHits >= 0);
+  assert.ok(steps[0].elapsedMs >= 0);
+});
+
+test('节点预算耗尽时只返回首个安全回退动作', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, 0),
+    piece('bP', 'black', 'pawn', 4, -4)
+  ]);
+
+  const steps = [...iterativeGameSearch(state, { maxDepth: 8, maxNodes: 1 })];
+
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].searchDepth, 0);
+  assert.equal(steps[0].completed, false);
+  assert.ok(steps[0].pieceId);
+});
+
+test('迭代加深复用置换表并在吃子边界执行静态延伸', () => {
+  const current = [
+    piece('wK', 'white', 'king', -4, 0),
+    piece('bK', 'black', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 0, -1),
+    piece('bP', 'black', 'pawn', 0, -2)
+  ];
+  const state = {
+    ...stateOf(current),
+    boardSide: 'front',
+    boardStates: {
+      front: current,
+      back: [
+        piece('wB', 'white', 'bishop', 0, 0),
+        piece('bP2', 'black', 'pawn', 1, 1)
+      ]
+    }
+  };
+
+  const steps = [...iterativeGameSearch(state, {
+    maxDepth: 3,
+    timeLimitMs: 3000,
+    quiescenceDepth: 2
+  })];
+
+  assert.deepEqual(steps.map(item => item.searchDepth), [1, 2, 3]);
+  assert.ok(steps.some(item => item.quiescenceNodes > 0));
+  assert.ok(steps.at(-1).cacheHits > 0);
 });
 
 test('布局三由参考图的互补面拼成正反六边形', () => {

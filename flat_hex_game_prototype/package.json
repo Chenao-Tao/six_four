@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test ai-benchmark.test.js game.test.js layout-storage.test.js server.test.js solid-assembly.test.js solid-board.test.js ui.test.js",
-    "test:ai": "node --test --test-name-pattern=\"AI|算法|搜索|博弈|评估|重复|升沉|局面指纹\" ai-benchmark.test.js game.test.js",
+    "test:ai": "node --test --test-name-pattern=\"AI|算法|搜索|博弈|评估|重复|升沉|迭代|节点预算|置换|静态|局面指纹\" ai-benchmark.test.js game.test.js",
     "benchmark:ai": "node ai-benchmark.mjs"
   }
 }

@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {
   aiBenchmarkCases,
   legacyChooseSimulationAction,
-  runLegacyBenchmark
+  runLegacyBenchmark,
+  runOptimizedBenchmark
 } from './ai-benchmark.js';
 
 test('AI 基准覆盖单层胜负与双层升沉布局', () => {
@@ -34,4 +35,14 @@ test('固定深度旧算法基准的动作与节点数可重复', () => {
 
   assert.deepEqual(second, first);
   assert.ok(first.every(row => row.searchedNodes > 0));
+});
+
+test('优化算法基准在固定节点预算下可重复且只返回完整层', () => {
+  const options = { maxDepth: 5, maxNodes: 500, quiescenceDepth: 2 };
+  const first = runOptimizedBenchmark(options).map(({ elapsedMs, ...row }) => row);
+  const second = runOptimizedBenchmark(options).map(({ elapsedMs, ...row }) => row);
+
+  assert.deepEqual(second, first);
+  assert.ok(first.every(row => row.completed));
+  assert.ok(first.every(row => row.searchDepth >= 1));
 });
