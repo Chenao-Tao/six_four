@@ -15,6 +15,7 @@ import {
   iterativeGameSearch,
   keyOf,
   legalMoves,
+  portalEndpointLocations,
   positionSignature,
   promotionTypeForMove,
   rotateBoardPanel,
@@ -43,6 +44,20 @@ function piece(id, side, type, q, r) {
 
 function findPiece(state, id) {
   return state.pieces.find(item => item.id === id);
+}
+
+function defaultDoubleSidedState(front, back = [], turn = 'white') {
+  const base = createInitialState();
+  return {
+    ...base,
+    turn,
+    winner: null,
+    moveNumber: 1,
+    history: [],
+    boardSide: 'front',
+    boardStates: { front, back },
+    pieces: front
+  };
 }
 
 test('双面棋盘合计每方只允许一枚王', () => {
@@ -84,13 +99,173 @@ test('后吃象后双方换位，象强制降级为兵', () => {
   assert.equal(findPiece(result.state, 'bB').type, 'pawn');
 });
 
-test('象吃兵时兵被消灭但象留在原位', () => {
+test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4 },
+    { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
+  ]);
+
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.portalId === '1A5-4B5' && move.captureId === 'bB');
+
+  assert.ok(portalMove);
+  assert.deepEqual(portalMove.path, [
+    { q: 1, r: -3 },
+    { q: 2, r: -3 },
+    { q: 1, r: -2 },
+    { q: -1, r: -1 }
+  ]);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.move.portalId, '1A5-4B5');
+  assert.equal(result.positionEffect, 'swap');
+  assert.equal(result.state.layerExchangeCount, (state.layerExchangeCount ?? 0) + 1);
+  assert.equal(result.captured.type, 'bishop');
+  assert.equal([
+    ...result.state.boardStates.front,
+    ...result.state.boardStates.back
+  ].find(item => item.id === 'bB').type, 'pawn');
+});
+
+test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外层', () => {
+  const outer = [
+    { ...piece('wQ', 'white', 'queen', -3, 2), panelIndex: 2 }
+  ];
+  const inner = [
+    { ...piece('bB', 'black', 'bishop', -1, 2), panelIndex: 1 }
+  ];
+  const base = defaultDoubleSidedState(outer, []);
+  const state = {
+    ...base,
+    boardShape: 'solid',
+    solidLayers: { outer, inner },
+    solidFaceSides: Array(6).fill('front'),
+    pieces: outer
+  };
+
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.portalId === '3A5-6B5' && move.captureId === 'bB');
+  assert.ok(portalMove);
+  assert.equal(portalMove.targetLayer, 'dormant');
+  assert.deepEqual(portalMove.path, [
+    { q: -3, r: 2 },
+    { q: -2, r: 2 },
+    { q: -2, r: 1 },
+    { q: -1, r: 2 }
+  ]);
+
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), true);
+  assert.equal(result.state.solidLayers.inner.some(item => item.id === 'bB' && item.type === 'pawn'), true);
+  assert.equal(result.state.solidFaceSides.every(side => side === 'back'), true);
+});
+
+test('象吃兵时兵被消灭且象占据目标点', () => {
   const bishopAttack = applyMove(stateOf([
     piece('wB', 'white', 'bishop', 0, 0),
     piece('bP', 'black', 'pawn', 1, 1)
   ]), 'wB', { q: 1, r: 1 });
-  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 1, r: 1 });
   assert.equal(findPiece(bishopAttack.state, 'bP'), undefined);
+});
+
+test('象只有从传送点起步且落点为空时才能传送后再走一步吃兵', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wB', 'white', 'bishop', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', 0, -2), panelIndex: 3 }
+  ]);
+
+  const portalMove = [...legalMoves(state, 'wB').values()].find(move => move.usesPortal);
+  assert.ok(portalMove);
+  assert.equal(portalMove.captureId, 'bP');
+  assert.deepEqual(portalMove.path, [
+    { q: 1, r: -2 },
+    { q: -1, r: -1 },
+    { q: 0, r: -2 }
+  ]);
+
+  const result = applyMove(state, 'wB', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.positionEffect, 'occupy');
+  assert.equal([
+    ...result.state.boardStates.front,
+    ...result.state.boardStates.back
+  ].some(item => item.id === 'bP'), false);
+});
+
+test('象的传送出口被占用时不能穿越且失败不消耗回合', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wB', 'white', 'bishop', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+
+  assert.equal([...legalMoves(state, 'wB').values()].some(move => move.usesPortal), false);
+  const result = applyMove(state, 'wB', {
+    q: -1,
+    r: -1,
+    panelIndex: 3,
+    mapKey: 'portal:blocked'
+  });
+  assert.equal(result.error, '非法移动');
+  assert.strictEqual(result.state, state);
+  assert.equal(result.state.turn, 'white');
+  assert.equal(result.state.moveNumber, 1);
+});
+
+test('兵站在传送点时只有出口可吃子才生成传送动作', () => {
+  const successState = defaultDoubleSidedState([
+    { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+  const portalMove = [...legalMoves(successState, 'wP').values()].find(move => move.usesPortal);
+  assert.ok(portalMove);
+  assert.equal(portalMove.captureId, 'bP');
+  assert.equal(portalMove.path.length, 2);
+
+  const emptyExitState = defaultDoubleSidedState([
+    { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 }
+  ]);
+  assert.equal([...legalMoves(emptyExitState, 'wP').values()].some(move => move.usesPortal), false);
+});
+
+test('传送点绑定实体板编号并随 1A 板旋转', () => {
+  const state = defaultDoubleSidedState([]);
+  const before = portalEndpointLocations(state).find(location =>
+    location.faceLabel === '1A' && location.layer === 'active');
+  const rotated = rotateBoardPanel(
+    state.boardFaceLabels,
+    state.boardPanelRotations,
+    'front',
+    4,
+    state.boardStates
+  );
+  const rotatedState = {
+    ...state,
+    boardStates: rotated.boardStates,
+    boardFaceLabels: rotated.faceLabels,
+    boardPanelRotations: rotated.panelRotations,
+    pieces: rotated.boardStates.front
+  };
+  const after = portalEndpointLocations(rotatedState).find(location =>
+    location.faceLabel === '1A' && location.layer === 'active');
+
+  assert.deepEqual(before.position, { q: 1, r: -2 });
+  assert.notDeepEqual(after.position, before.position);
+  assert.equal(after.panelIndex, 4);
 });
 
 test('兵消灭兵或王后占据目标点，吃王结束对局', () => {

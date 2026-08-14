@@ -1,4 +1,4 @@
-import { iterativeGameSearch } from './game.js?v=ai-search-1';
+import { iterativeGameSearch } from './game.js?v=portal-movement-1';
 
 self.addEventListener('message', event => {
   const request = event.data;

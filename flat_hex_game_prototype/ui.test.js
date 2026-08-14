@@ -246,6 +246,17 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
 });
 
+test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {
+  assert.match(html, /1A-5 ↔ 4B-5/);
+  assert.match(html, /3A-5 ↔ 6B-5/);
+  assert.match(app, /function renderPortals\(\)/);
+  assert.match(app, /portalEndpointLocations\(state\)/);
+  assert.match(app, /class: 'portal-marker'/);
+  assert.match(app, /move\.mapKey \? \{ mapKey: move\.mapKey \} : \{\}/);
+  assert.match(styles, /\.move-path\.portal/);
+  assert.match(styles, /\.portal-marker circle/);
+});
+
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {
   assert.match(html, /id="solidPanelSelection"/);
   assert.match(html, /id="rotateSolidPanelButton"/);

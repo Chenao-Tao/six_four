@@ -26,7 +26,8 @@ function legacyEvaluateState(state, perspective) {
 function actionTarget(action) {
   return {
     ...action.move.target,
-    ...(Number.isInteger(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {})
+    ...(Number.isInteger(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {}),
+    ...(action.move.mapKey ? { mapKey: action.move.mapKey } : {})
   };
 }
 
@@ -179,7 +180,8 @@ export function pairedMatchCases() {
         piece('paired-b-bk', 'black', 'king', 4, 0),
         piece('paired-b-wb', 'white', 'bishop', 1, 3),
         piece('paired-b-bb', 'black', 'bishop', 2, -2),
-        piece('paired-b-wp', 'white', 'pawn', 3, 1),
+        // 避开白兵开局一步吃王，确保交换执棋方后仍能比较两种搜索质量。
+        piece('paired-b-wp', 'white', 'pawn', 2, 1),
         piece('paired-b-bp', 'black', 'pawn', 1, -2)
       ], [
         piece('paired-b-wp2', 'white', 'pawn', -3, 3),
@@ -234,7 +236,7 @@ export function runPairedMatches(options = {}) {
     maxDepth: options.maxDepth ?? 3,
     maxNodes: options.maxNodes ?? 10000,
     quiescenceDepth: options.quiescenceDepth ?? 2,
-    maxPlies: options.maxPlies ?? 30
+    maxPlies: options.maxPlies ?? 40
   };
   const rows = pairedMatchCases().flatMap(({ name, state }) => ['white', 'black'].map(optimizedSide => {
     const result = playPairedMatch(state, optimizedSide, normalized);

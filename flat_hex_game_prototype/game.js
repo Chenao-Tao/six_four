@@ -80,6 +80,23 @@ export const BOARD_PANEL_ROTATIONS = {
   back: [0, 0, 0, 0, 0, 0]
 };
 
+export const PORTAL_PAIRS = [
+  {
+    id: '1A5-4B5',
+    endpoints: [
+      { faceLabel: '1A', pointNumber: 5 },
+      { faceLabel: '4B', pointNumber: 5 }
+    ]
+  },
+  {
+    id: '3A5-6B5',
+    endpoints: [
+      { faceLabel: '3A', pointNumber: 5 },
+      { faceLabel: '6B', pointNumber: 5 }
+    ]
+  }
+];
+
 function cloneFaceLabels(faceLabels = BOARD_FACE_LABELS) {
   return {
     front: [...faceLabels.front],
@@ -307,7 +324,11 @@ function physicalBackPanelValues(values, transform = value => value) {
   return VERTICAL_MIRROR_PANEL_INDICES.map(sourceIndex => transform(values[sourceIndex]));
 }
 
-function exchangeFlatBoardLayers(state, nextCurrentPieces) {
+function exchangeFlatBoardLayers(
+  state,
+  nextCurrentPieces,
+  nextOppositePieces = null
+) {
   const currentSide = state.boardSide;
   const oppositeSide = currentSide === 'back' ? 'front' : 'back';
   const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
@@ -316,7 +337,9 @@ function exchangeFlatBoardLayers(state, nextCurrentPieces) {
   return {
     boardStates: {
       ...state.boardStates,
-      [currentSide]: physicalBackPieces(state.boardStates[oppositeSide]),
+      [currentSide]: physicalBackPieces(
+        nextOppositePieces ?? state.boardStates[oppositeSide]
+      ),
       [oppositeSide]: physicalBackPieces(nextCurrentPieces)
     },
     boardFaceLabels: {
@@ -408,6 +431,28 @@ function rotatePointOnPanel(point, panelIndex, clockwise = true) {
     q: Math.round(nextFirst * firstCorner.q + nextSecond * secondCorner.q),
     r: Math.round(nextFirst * firstCorner.r + nextSecond * secondCorner.r)
   };
+}
+
+export function panelPointForNumber(panelIndex, pointNumber, rotation = 0) {
+  if (!validatePanelIndex(panelIndex) || !Number.isInteger(pointNumber) ||
+      pointNumber < 1 || pointNumber > 15 || ![0, 120, 240].includes(rotation)) {
+    return null;
+  }
+  let row = 0;
+  let firstNumberInRow = 1;
+  while (pointNumber >= firstNumberInRow + row + 1) {
+    firstNumberInRow += row + 1;
+    row += 1;
+  }
+  const column = pointNumber - firstNumberInRow;
+  let point = pointFromPanelCoordinates({
+    first: (row - column) / BOARD_RADIUS,
+    second: column / BOARD_RADIUS
+  }, panelIndex);
+  for (let turn = 0; turn < rotation / 120; turn += 1) {
+    point = rotatePointOnPanel(point, panelIndex, true);
+  }
+  return point;
 }
 
 function rotatePiecesOnPanel(pieces, panelIndex, clockwise = true) {
@@ -800,6 +845,125 @@ function boardPointKey(state, position, panelIndex) {
     : keyOf(position);
 }
 
+function layerPieces(state, layer) {
+  if (state.solidLayers) {
+    return layer === 'active' ? state.solidLayers.outer : state.solidLayers.inner;
+  }
+  if (state.boardStates) {
+    const activeSide = state.boardSide ?? 'front';
+    const side = layer === 'active'
+      ? activeSide
+      : activeSide === 'front' ? 'back' : 'front';
+    return state.boardStates[side] ?? [];
+  }
+  return layer === 'active' ? state.pieces : [];
+}
+
+function physicalFaceLocation(state, faceLabel, pointNumber, layer) {
+  const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
+  const rotations = state.boardPanelRotations ?? BOARD_PANEL_ROTATIONS;
+  if (!state.solidLayers) {
+    const activeSide = state.boardSide ?? 'front';
+    const side = layer === 'active'
+      ? activeSide
+      : activeSide === 'front' ? 'back' : 'front';
+    const panelIndex = faceLabels[side].indexOf(faceLabel);
+    if (!validatePanelIndex(panelIndex)) return null;
+    const position = panelPointForNumber(
+      panelIndex,
+      pointNumber,
+      rotations[side][panelIndex]
+    );
+    return position ? {
+      faceLabel,
+      pointNumber,
+      layer,
+      position,
+      panelIndex,
+      pointKey: boardPointKey(state, position, panelIndex)
+    } : null;
+  }
+
+  const faceSides = state.solidFaceSides ?? Array(6).fill('front');
+  for (let slot = 0; slot < 6; slot += 1) {
+    const outerSide = faceSides[slot];
+    const wantedSide = layer === 'active'
+      ? outerSide
+      : outerSide === 'front' ? 'back' : 'front';
+    const sourceIndex = wantedSide === 'front' ? slot : verticalMirrorPanelIndex(slot);
+    if (faceLabels[wantedSide][sourceIndex] !== faceLabel) continue;
+    const sourcePoint = panelPointForNumber(
+      sourceIndex,
+      pointNumber,
+      rotations[wantedSide][sourceIndex]
+    );
+    const position = wantedSide === 'front'
+      ? sourcePoint
+      : pointFromPanelCoordinates(panelCoordinates(sourcePoint, sourceIndex), slot, true);
+    return {
+      faceLabel,
+      pointNumber,
+      layer,
+      position,
+      panelIndex: slot,
+      pointKey: boardPointKey(state, position, slot)
+    };
+  }
+  return null;
+}
+
+export function portalEndpointLocations(state) {
+  if (!state.boardStates && !state.solidLayers) return [];
+  const locations = [];
+  for (const portal of PORTAL_PAIRS) {
+    for (const [endpointIndex, endpoint] of portal.endpoints.entries()) {
+      for (const layer of ['active', 'dormant']) {
+        const location = physicalFaceLocation(
+          state,
+          endpoint.faceLabel,
+          endpoint.pointNumber,
+          layer
+        );
+        if (location) locations.push({ ...location, portalId: portal.id, endpointIndex });
+      }
+    }
+  }
+  return locations;
+}
+
+function portalTransitions(state, layer, pointKey) {
+  const locations = portalEndpointLocations(state);
+  return locations.flatMap(source => {
+    if (source.layer !== layer || source.pointKey !== pointKey) return [];
+    const targetIndex = source.endpointIndex === 0 ? 1 : 0;
+    const target = locations.find(candidate =>
+      candidate.portalId === source.portalId && candidate.endpointIndex === targetIndex);
+    return target ? [{ source, target }] : [];
+  });
+}
+
+function layerOccupants(state, layer) {
+  return new Map(layerPieces(state, layer).map(item => [
+    boardPointKey(state, item.position, piecePanelIndex(item)),
+    item
+  ]));
+}
+
+function stepTransitions(state, position, panelIndex, movement = 'step') {
+  if (state.boardShape === 'solid') {
+    const pointKey = boardPointKey(state, position, panelIndex);
+    return (solidSurfaceGraph().get(pointKey)?.[movement] ?? []).map(item => ({ ...item }));
+  }
+  const directions = movement === 'bishop' ? BISHOP_DIRECTIONS : DIRECTIONS;
+  return directions.map(direction => add(position, direction))
+    .filter(isOnBoard)
+    .map(target => ({
+      position: target,
+      panelIndex: movePanelIndex({ position, panelIndex }, target),
+      pointKey: boardPointKey(state, target, movePanelIndex({ position, panelIndex }, target))
+    }));
+}
+
 function movePanelIndex(pieceToMove, target, preferredPanelIndex = null) {
   if (validatePanelIndex(preferredPanelIndex) && pointIsOnPanel(target, preferredPanelIndex)) {
     return preferredPanelIndex;
@@ -992,6 +1156,170 @@ function solidQueenMoves(state, pieceToMove, occupied) {
   return moves;
 }
 
+function addPortalMove(moves, pieceToMove, target, route, captured) {
+  const routeKey = route.pathSteps.map(step =>
+    `${step.layer}:${step.panelIndex}:${keyOf(step.position)}`).join('>');
+  const mapKey = `portal:${route.portalId}:${routeKey}`;
+  if (moves.has(mapKey)) return;
+  moves.set(mapKey, {
+    target: { ...target.position },
+    panelIndex: target.panelIndex,
+    pointKey: target.pointKey,
+    path: route.pathSteps.map(step => ({ ...step.position })),
+    pathSteps: route.pathSteps,
+    mapKey,
+    portalId: route.portalId,
+    usesPortal: true,
+    targetLayer: target.layer,
+    captureLayer: target.layer,
+    captureId: captured.id,
+    capturedType: captured.type,
+    capturesKing: captured.type === 'king'
+  });
+}
+
+function portalMovesForQueen(state, pieceToMove, moves) {
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const occupantsByLayer = {
+    active: layerOccupants(state, 'active'),
+    dormant: layerOccupants(state, 'dormant')
+  };
+  const queue = [{
+    layer: 'active',
+    position: pieceToMove.position,
+    panelIndex: startPanel,
+    pointKey: startPointKey,
+    usedPortal: false,
+    portalId: null,
+    pathSteps: [{
+      layer: 'active',
+      position: { ...pieceToMove.position },
+      panelIndex: startPanel,
+      pointKey: startPointKey
+    }],
+    visited: new Set([`active:${startPointKey}`])
+  }];
+
+  while (queue.length) {
+    const current = queue.shift();
+    const depth = current.pathSteps.length - 1;
+    if (depth >= 3) continue;
+    const nextDepth = depth + 1;
+    const consider = (target, portalId = current.portalId) => {
+      const visitKey = `${target.layer}:${target.pointKey}`;
+      if (current.visited.has(visitKey)) return;
+      const occupant = occupantsByLayer[target.layer].get(target.pointKey);
+      const usedPortal = current.usedPortal || Boolean(portalId && !current.usedPortal);
+      const pathSteps = [...current.pathSteps, {
+        layer: target.layer,
+        position: { ...target.position },
+        panelIndex: target.panelIndex,
+        pointKey: target.pointKey,
+        ...(portalId && !current.usedPortal ? { portalEntry: true } : {})
+      }];
+      if (occupant) {
+        if (nextDepth === 3 && usedPortal &&
+            occupant.side !== pieceToMove.side &&
+            canCapture(pieceToMove.type, occupant.type)) {
+          addPortalMove(moves, pieceToMove, target, {
+            portalId,
+            pathSteps
+          }, occupant);
+        }
+        return;
+      }
+      if (nextDepth === 3) return;
+      queue.push({
+        ...target,
+        usedPortal,
+        portalId,
+        pathSteps,
+        visited: new Set([...current.visited, visitKey])
+      });
+    };
+
+    for (const transition of stepTransitions(
+      state,
+      current.position,
+      current.panelIndex,
+      'step'
+    )) {
+      consider({ ...transition, layer: current.layer });
+    }
+    if (!current.usedPortal) {
+      for (const transition of portalTransitions(state, current.layer, current.pointKey)) {
+        consider(transition.target, transition.source.portalId);
+      }
+    }
+  }
+}
+
+function portalMovesFromStart(state, pieceToMove, moves) {
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const transitions = portalTransitions(state, 'active', startPointKey);
+  for (const transition of transitions) {
+    const target = transition.target;
+    const targetOccupants = layerOccupants(state, target.layer);
+    const targetOccupant = targetOccupants.get(target.pointKey);
+    const startStep = {
+      layer: 'active',
+      position: { ...pieceToMove.position },
+      panelIndex: startPanel,
+      pointKey: startPointKey
+    };
+    const portalStep = {
+      ...target,
+      position: { ...target.position },
+      portalEntry: true
+    };
+
+    if (pieceToMove.type === 'pawn') {
+      if (targetOccupant?.side !== pieceToMove.side &&
+          canCapture(pieceToMove.type, targetOccupant?.type)) {
+        addPortalMove(moves, pieceToMove, target, {
+          portalId: transition.source.portalId,
+          pathSteps: [startStep, portalStep]
+        }, targetOccupant);
+      }
+      continue;
+    }
+
+    if (pieceToMove.type !== 'bishop' || targetOccupant) continue;
+    for (const destination of stepTransitions(
+      state,
+      target.position,
+      target.panelIndex,
+      'step'
+    )) {
+      const captured = targetOccupants.get(destination.pointKey);
+      if (captured?.side === pieceToMove.side ||
+          !canCapture(pieceToMove.type, captured?.type)) continue;
+      addPortalMove(moves, pieceToMove, {
+        ...destination,
+        layer: target.layer
+      }, {
+        portalId: transition.source.portalId,
+        pathSteps: [startStep, portalStep, {
+          ...destination,
+          layer: target.layer,
+          position: { ...destination.position }
+        }]
+      }, captured);
+    }
+  }
+}
+
+function addPortalMoves(state, pieceToMove, moves) {
+  if (!state.boardStates && !state.solidLayers) return moves;
+  if (pieceToMove.type === 'queen') portalMovesForQueen(state, pieceToMove, moves);
+  if (pieceToMove.type === 'bishop' || pieceToMove.type === 'pawn') {
+    portalMovesFromStart(state, pieceToMove, moves);
+  }
+  return moves;
+}
+
 function pointsEqual(left, right) {
   return left.q === right.q && left.r === right.r;
 }
@@ -1076,14 +1404,21 @@ export function legalMoves(state, pieceId) {
   const pieceToMove = state.pieces.find(item => item.id === pieceId);
   if (!pieceToMove || pieceToMove.side !== state.turn) return new Map();
   const occupied = occupants(state);
-  if (pieceToMove.type === 'pawn') return pawnMoves(state, pieceToMove, occupied);
-  if (pieceToMove.type === 'bishop') return bishopMoves(state, pieceToMove, occupied);
-  if (pieceToMove.type === 'queen') return queenMoves(state, pieceToMove, occupied);
+  if (pieceToMove.type === 'pawn') {
+    return addPortalMoves(state, pieceToMove, pawnMoves(state, pieceToMove, occupied));
+  }
+  if (pieceToMove.type === 'bishop') {
+    return addPortalMoves(state, pieceToMove, bishopMoves(state, pieceToMove, occupied));
+  }
+  if (pieceToMove.type === 'queen') {
+    return addPortalMoves(state, pieceToMove, queenMoves(state, pieceToMove, occupied));
+  }
   return kingMoves(state, pieceToMove, occupied);
 }
 
 export function captureMoveForClickedPiece(state, attackerId, defenderId) {
-  const defender = state.pieces.find(item => item.id === defenderId);
+  const defender = [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+    .find(item => item.id === defenderId);
   if (!defender) return null;
   return [...legalMoves(state, attackerId).values()]
     .find(move => move.captureId === defenderId) ?? null;
@@ -1092,7 +1427,8 @@ export function captureMoveForClickedPiece(state, attackerId, defenderId) {
 export function promotionTypeForMove(state, pieceId, move) {
   if (!move?.captureId) return null;
   const movingPiece = state.pieces.find(item => item.id === pieceId);
-  const captured = state.pieces.find(item => item.id === move.captureId);
+  const captured = [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+    .find(item => item.id === move.captureId);
   if (captured?.type !== 'pawn') return null;
   if (movingPiece?.type === 'pawn') return 'bishop';
   if (movingPiece?.type === 'bishop') return 'queen';
@@ -1102,12 +1438,13 @@ export function promotionTypeForMove(state, pieceId, move) {
 export function capturePositionEffect(attackerType, defenderType) {
   if (attackerType === 'queen' && defenderType === 'bishop') return 'swap';
   if (attackerType === 'pawn' && ['pawn', 'king'].includes(defenderType)) return 'occupy';
+  if (attackerType === 'bishop' && defenderType === 'pawn') return 'occupy';
   return 'hold';
 }
 
-function exchangeSolidLayers(state, nextOuterPieces) {
+function exchangeSolidLayers(nextOuterPieces, nextInnerPieces) {
   return {
-    outer: (state.solidLayers?.inner ?? []).map(item => ({
+    outer: nextInnerPieces.map(item => ({
       ...item,
       position: { ...item.position }
     })),
@@ -1119,6 +1456,7 @@ function exchangeSolidLayers(state, nextOuterPieces) {
 }
 
 function moveForTarget(moves, target) {
+  if (target?.mapKey) return moves.get(target.mapKey) ?? null;
   if (validatePanelIndex(target?.panelIndex)) {
     const exact = [...moves.values()].find(move =>
       move.panelIndex === target.panelIndex && pointsEqual(move.target, target));
@@ -1133,7 +1471,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   if (!move) return { state, error: '非法移动' };
   const movingPiece = state.pieces.find(item => item.id === pieceId);
   const captured = move.captureId
-    ? state.pieces.find(item => item.id === move.captureId)
+    ? [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+        .find(item => item.id === move.captureId)
     : null;
   const promotionType = promotionTypeForMove(state, pieceId, move);
   const promotedType = promote && promotionType ? promotionType : movingPiece.type;
@@ -1146,34 +1485,44 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const positionEffect = captured
     ? capturePositionEffect(movingPiece.type, captured.type)
     : 'move';
-  const nextPieces = state.pieces.flatMap(item => {
-    if (item.id === pieceId) {
-      return [{
-        ...item,
-        type: promotedType,
-        position: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? { ...move.target }
-          : { ...item.position },
-        panelIndex: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? move.panelIndex ?? panelIndexForPoint(target)
-          : piecePanelIndex(item)
-      }];
-    }
-    if (item.id !== move.captureId) return [item];
-    if (!capturedType) return [];
-    return [{
-      ...item,
+  const targetLayer = move.targetLayer ?? 'active';
+  const captureLayer = move.captureLayer ?? 'active';
+  let nextActivePieces = layerPieces(state, 'active').filter(item => item.id !== pieceId);
+  let nextDormantPieces = layerPieces(state, 'dormant').filter(item => item.id !== pieceId);
+  const removeCaptured = pieces => pieces.filter(item => item.id !== move.captureId);
+  if (captured) {
+    if (captureLayer === 'active') nextActivePieces = removeCaptured(nextActivePieces);
+    else nextDormantPieces = removeCaptured(nextDormantPieces);
+  }
+  const attackerMoves = ['move', 'occupy', 'swap'].includes(positionEffect);
+  const nextMovingPiece = {
+    ...movingPiece,
+    type: promotedType,
+    position: attackerMoves ? { ...move.target } : { ...movingPiece.position },
+    panelIndex: attackerMoves
+      ? move.panelIndex ?? panelIndexForPoint(move.target)
+      : piecePanelIndex(movingPiece)
+  };
+  if (attackerMoves && targetLayer === 'dormant') nextDormantPieces.push(nextMovingPiece);
+  else nextActivePieces.push(nextMovingPiece);
+  if (capturedType) {
+    const nextCapturedPiece = {
+      ...captured,
       type: capturedType,
       position: positionEffect === 'swap'
         ? { ...movingPiece.position }
-        : { ...item.position },
+        : { ...captured.position },
       panelIndex: positionEffect === 'swap'
-        ? state.boardShape === 'solid'
-          ? piecePanelIndex(movingPiece)
-          : panelIndexForPoint(movingPiece.position)
-        : piecePanelIndex(item)
-    }];
-  });
+        ? piecePanelIndex(movingPiece)
+        : piecePanelIndex(captured)
+    };
+    if (positionEffect === 'swap' || captureLayer === 'active') {
+      nextActivePieces.push(nextCapturedPiece);
+    } else {
+      nextDormantPieces.push(nextCapturedPiece);
+    }
+  }
+  const nextPieces = nextActivePieces;
   const captureResult = captured
     ? capturedType
       ? positionEffect === 'swap'
@@ -1198,11 +1547,11 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
-      ? exchangeSolidLayers(state, nextPieces)
-      : { ...state.solidLayers, outer: nextPieces }
+      ? exchangeSolidLayers(nextActivePieces, nextDormantPieces)
+      : { ...state.solidLayers, outer: nextActivePieces, inner: nextDormantPieces }
     : undefined;
   const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers
-    ? exchangeFlatBoardLayers(state, nextPieces)
+    ? exchangeFlatBoardLayers(state, nextActivePieces, nextDormantPieces)
     : null;
   const boardStates = state.boardStates
     ? shouldExchangeLayers
@@ -1212,7 +1561,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             back: physicalBackPieces(solidLayers.inner)
           }
         : flatLayerExchange.boardStates
-      : { ...state.boardStates, [state.boardSide]: nextPieces }
+      : { ...state.boardStates, [state.boardSide]: nextActivePieces }
     : undefined;
   const layerExchangeResult = shouldExchangeLayers
     ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
@@ -1345,21 +1694,22 @@ function actionOrder(action) {
 function actionTarget(action) {
   return {
     ...action.move.target,
-    ...(validatePanelIndex(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {})
+    ...(validatePanelIndex(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {}),
+    ...(action.move.mapKey ? { mapKey: action.move.mapKey } : {})
   };
 }
 
 function actionKey(action) {
   const panel = validatePanelIndex(action.move.panelIndex) ? action.move.panelIndex : '-';
-  return `${action.pieceId}:${keyOf(action.move.target)}:${panel}:${action.promote}`;
+  return `${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${action.promote}`;
 }
 
 function orderedActions(state) {
   return actionVariants(state).sort((left, right) => {
     const priority = actionOrder(right) - actionOrder(left);
     if (priority) return priority;
-    const leftKey = `${left.pieceId}:${keyOf(left.move.target)}:${left.promote}`;
-    const rightKey = `${right.pieceId}:${keyOf(right.move.target)}:${right.promote}`;
+    const leftKey = `${left.pieceId}:${left.move.mapKey ?? keyOf(left.move.target)}:${left.promote}`;
+    const rightKey = `${right.pieceId}:${right.move.mapKey ?? keyOf(right.move.target)}:${right.promote}`;
     return leftKey.localeCompare(rightKey);
   });
 }

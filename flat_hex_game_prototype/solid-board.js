@@ -572,6 +572,20 @@ export function createSolidBoardViewer(canvas, initialModel, {
         labelPoint.y
       );
 
+      (displayedModel.portalTargets ?? []).filter(portal => portal.panelIndex === panelIndex)
+        .forEach(portal => {
+          const world = barycentricPoint(vertices, portal.local);
+          const position = project(add(world, scale(normal, 0.045)), width, height);
+          const radius = Math.max(5, 7 * position.perspective * zoom);
+          context.beginPath();
+          context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+          context.fillStyle = 'rgba(123, 74, 174, .48)';
+          context.fill();
+          context.lineWidth = 2;
+          context.strokeStyle = '#d8aaff';
+          context.stroke();
+        });
+
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
         if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
         else drawPiece(face, piece);
@@ -580,22 +594,30 @@ export function createSolidBoardViewer(canvas, initialModel, {
       (displayedModel.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
         const world = barycentricPoint(vertices, move.local);
         const position = project(add(world, scale(normal, 0.05)), width, height);
-        const radius = Math.max(9, 12 * position.perspective * zoom);
+        const radius = move.usesPortal
+          ? Math.max(6, 8 * position.perspective * zoom)
+          : Math.max(9, 12 * position.perspective * zoom);
         context.beginPath();
         context.arc(position.x, position.y, radius, 0, Math.PI * 2);
-        context.fillStyle = move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
+        context.fillStyle = move.usesPortal
+          ? 'rgba(200, 137, 255, .42)'
+          : move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
         context.fill();
         context.lineWidth = 3;
-        context.strokeStyle = move.captureId ? '#ff6678' : '#61e7ff';
+        context.strokeStyle = move.usesPortal
+          ? '#d8aaff'
+          : move.captureId ? '#ff6678' : '#61e7ff';
         context.stroke();
-        interactionTargets.push({
+        const interactionTarget = {
           type: 'move',
           targetKey: move.targetKey,
           x: position.x,
           y: position.y,
           radius: radius + 8,
           depth: position.z
-        });
+        };
+        if (move.usesPortal) interactionTargets.unshift(interactionTarget);
+        else interactionTargets.push(interactionTarget);
       });
     });
     drawPlannedMove(renderFaces);

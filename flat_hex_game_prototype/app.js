@@ -19,12 +19,13 @@ import {
   keyOf,
   legalMoves,
   panelIndexForPoint,
+  portalEndpointLocations,
   promotionTypeForMove,
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=ai-search-1';
+} from './game.js?v=portal-movement-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -410,6 +411,7 @@ function drawStaticBoard() {
   });
   svg.appendChild(nodes);
   svg.appendChild(svgElement('g', { id: 'faceLabelLayer' }));
+  svg.appendChild(svgElement('g', { id: 'portalLayer' }));
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
@@ -482,8 +484,19 @@ function solidBoardModel() {
   const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
     const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
     const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
-    return { ...mapped, targetKey: move.mapKey ?? keyOf(move.target), captureId: move.captureId };
+    return {
+      ...mapped,
+      targetKey: move.mapKey ?? keyOf(move.target),
+      captureId: move.captureId,
+      usesPortal: Boolean(move.usesPortal)
+    };
   });
+  const portalTargets = customEditor ? [] : portalEndpointLocations(state)
+    .filter(location => location.layer === (previewSide === null ? 'active' : 'dormant'))
+    .map(location => ({
+      ...mapSolidPoint(location.position, location.panelIndex),
+      portalId: location.portalId
+    }));
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
     : null;
@@ -510,6 +523,7 @@ function solidBoardModel() {
     selectedPanel: customEditor ? solidSelectedPanel : null,
     selectedPieceId: customEditor ? null : selectedPieceId,
     moveTargets,
+    portalTargets,
     plannedMove
   };
 }
@@ -855,6 +869,31 @@ function renderFaceLabels(side) {
   });
 }
 
+function renderPortals() {
+  const layer = document.getElementById('portalLayer');
+  layer.replaceChildren();
+  if (customEditor) return;
+  const visibleLayer = previewSide === null ? 'active' : 'dormant';
+  portalEndpointLocations(state)
+    .filter(location => location.layer === visibleLayer)
+    .forEach(location => {
+      const pixel = toPixel(location.position);
+      const group = svgElement('g', {
+        class: 'portal-marker',
+        'data-portal-id': location.portalId
+      });
+      group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 10 }));
+      const label = svgElement('text', {
+        x: pixel.x,
+        y: pixel.y + 4,
+        'text-anchor': 'middle'
+      });
+      label.textContent = '传';
+      group.appendChild(label);
+      layer.appendChild(group);
+    });
+}
+
 function renderPanelTargets() {
   const layer = document.getElementById('panelTargetLayer');
   layer.replaceChildren();
@@ -960,14 +999,15 @@ function renderMoves() {
   targetLayer.replaceChildren();
   selectedMoves.forEach(move => {
     pathLayer.appendChild(svgElement('polyline', {
-      class: 'move-path',
+      class: `move-path ${move.usesPortal ? 'portal' : ''}`,
       points: pointList(move.path)
     }));
     const pixel = toPixel(move.target);
     const target = svgElement('circle', {
-      class: `move-target ${move.captureId ? 'capture' : ''}`,
-      cx: pixel.x, cy: pixel.y, r: 16,
-      'data-target': keyOf(move.target)
+      class: `move-target ${move.captureId ? 'capture' : ''} ${move.usesPortal ? 'portal' : ''}`,
+      cx: pixel.x, cy: pixel.y, r: move.usesPortal ? 11 : 16,
+      'data-target': move.mapKey ?? keyOf(move.target),
+      'aria-label': move.usesPortal ? '传送吃子' : move.captureId ? '吃子' : '移动'
     });
     target.addEventListener('click', event => {
       event.stopPropagation();
@@ -988,6 +1028,7 @@ function render() {
   const pieceLayer = document.getElementById('pieceLayer');
   pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
   renderFaceLabels(boardSide);
+  renderPortals();
   renderEditorTargets();
   renderPanelTargets();
   if (previewing || editing) {
@@ -1087,7 +1128,7 @@ function selectPiece(pieceId) {
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
     `${selectedMoves.size} 个合法落点`;
-  boardHelp.textContent = '青色为移动，红色为可以吃子的目标。';
+  boardHelp.textContent = '青色为移动，红色为吃子，紫色小圆为满足本回合吃子条件的传送动作。';
   render();
 }
 
@@ -1152,13 +1193,15 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
   const mover = state.pieces.find(item => item.id === pieceId);
-  const positionEffect = captured
-    ? capturePositionEffect(mover.type, captured.type)
+  const capturedType = captured?.type ?? move.capturedType;
+  const positionEffect = capturedType
+    ? capturePositionEffect(mover.type, capturedType)
     : 'move';
   if (!solidBoardViewer) await animateMove(pieceId, move.path, positionEffect, captured?.id);
   const result = applyMove(state, pieceId, {
     ...move.target,
-    ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {})
+    ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {}),
+    ...(move.mapKey ? { mapKey: move.mapKey } : {})
   }, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
