@@ -1944,7 +1944,6 @@ function beginPanelSwap() {
 
 function resetGame() {
   if (customEditor) return;
-  const wasSolid = Boolean(solidBoardViewer);
   stopAutoSimulation();
   state = cloneGameState(activeInitialState);
   previewSide = null;
@@ -1953,9 +1952,9 @@ function resetGame() {
   simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
-  if (wasSolid) closeSolidBoard();
   boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
+  openActiveBoardShape();
 }
 
 async function toggleFacePreview() {
@@ -2052,6 +2051,7 @@ async function simulateStep() {
   } finally {
     if (runId === simulationRunId) cancelAiSearch();
     simulationLock = false;
+    render();
   }
 }
 

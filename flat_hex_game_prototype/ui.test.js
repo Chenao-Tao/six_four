@@ -176,15 +176,19 @@ test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () =>
   assert.doesNotMatch(styles, /\.solid-viewer\s*\{[^}]*position:\s*fixed;/);
 });
 
-test('立体棋盘保留算法模拟和重开回到平面主界面的入口', () => {
+test('立体棋盘重新开局保持立体视图且单步结束恢复操作按钮', () => {
   assert.match(html, /id="solidStepButton"/);
   assert.match(html, /id="solidAutoButton"/);
   assert.match(html, /id="resetSolidGameButton"/);
   assert.match(app, /solidStepButton\.addEventListener\('click', simulateStep\)/);
   assert.match(app, /solidAutoButton\.addEventListener\('click'/);
-  assert.match(app, /const wasSolid = Boolean\(solidBoardViewer\)/);
-  assert.match(app, /if \(wasSolid\) closeSolidBoard\(\)/);
-  assert.match(app, /activeBoardShape === 'solid' && !solidBoardViewer && !customEditor/);
+  const reset = app.match(/function resetGame\(\)[\s\S]*?\n}\n\nasync function toggleFacePreview/);
+  assert.ok(reset);
+  assert.doesNotMatch(reset[0], /closeSolidBoard\(\)/);
+  assert.match(reset[0], /render\(\);\s*openActiveBoardShape\(\)/);
+  const simulation = app.match(/async function simulateStep\(\)[\s\S]*?\n}\n\nresetButton/);
+  assert.ok(simulation);
+  assert.match(simulation[0], /finally[\s\S]*simulationLock = false;\s*render\(\)/);
 });
 
 test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角', () => {
