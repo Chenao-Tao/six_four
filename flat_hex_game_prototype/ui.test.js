@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+const aiWorker = readFileSync(new URL('./ai-worker.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('模拟控制保留重开、背面预览和算法按钮，并移除吃子演示', () => {
@@ -195,6 +196,19 @@ test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角',
   assert.match(app, /solidBoardViewer\?\.followPiece\(step\.pieceId\)/);
   assert.match(app, /solidBoardViewer\?\.followPoint\(/);
   assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion\)/);
+});
+
+test('AI 搜索在专用 Worker 中迭代加深并可立即取消', () => {
+  assert.match(aiWorker, /iterativeGameSearch/);
+  assert.match(aiWorker, /type: 'progress'/);
+  assert.match(aiWorker, /type: 'complete'/);
+  assert.match(aiWorker, /type: 'error'/);
+  assert.match(app, /new Worker\(/);
+  assert.match(app, /timeLimitMs: 3000, maxDepth: 8, quiescenceDepth: 4/);
+  assert.match(app, /message\?\.searchId !== searchId/);
+  assert.match(app, /function cancelAiSearch\(\)/);
+  assert.match(app, /aiSearchWorker\?\.terminate\(\)/);
+  assert.match(app, /回退同步三层搜索/);
 });
 
 test('算法模拟会预告唯一的即将执行动作', () => {

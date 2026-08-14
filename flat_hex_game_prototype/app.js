@@ -24,7 +24,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=separate-layout-storage-1';
+} from './game.js?v=ai-search-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -135,6 +135,8 @@ let autoPaused = false;
 let simulationPauseRequested = false;
 let simulationRunId = 0;
 let simulationPreview = null;
+let aiSearchWorker = null;
+let settleCancelledSearch = null;
 let animationLock = false;
 let simulationLock = false;
 let previewSide = null;
@@ -1232,10 +1234,56 @@ function stopAutoSimulation() {
   autoPaused = false;
   simulationPauseRequested = false;
   simulationRunId += 1;
+  cancelAiSearch();
   autoButton.classList.remove('active');
   autoButton.textContent = '连续模拟';
   solidAutoButton.classList.remove('active');
   solidAutoButton.textContent = '连续模拟';
+}
+
+function cancelAiSearch() {
+  aiSearchWorker?.terminate();
+  aiSearchWorker = null;
+  settleCancelledSearch?.(null);
+  settleCancelledSearch = null;
+}
+
+function searchWithWorker(searchId, searchState, onProgress) {
+  cancelAiSearch();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(
+      new URL('./ai-worker.js?v=ai-search-1', import.meta.url),
+      { type: 'module' }
+    );
+    aiSearchWorker = worker;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      if (aiSearchWorker === worker) aiSearchWorker = null;
+      if (settleCancelledSearch === cancel) settleCancelledSearch = null;
+      callback(value);
+    };
+    const cancel = value => settle(resolve, value);
+    settleCancelledSearch = cancel;
+    worker.addEventListener('message', event => {
+      const message = event.data;
+      if (message?.searchId !== searchId) return;
+      if (message.type === 'progress') onProgress(message.result);
+      else if (message.type === 'complete') settle(resolve, message.result);
+      else if (message.type === 'error') settle(reject, new Error(message.message));
+    });
+    worker.addEventListener('error', event => {
+      settle(reject, new Error(event.message || 'AI Worker 启动失败'));
+    });
+    worker.postMessage({
+      type: 'search',
+      searchId,
+      state: searchState,
+      options: { timeLimitMs: 3000, maxDepth: 8, quiescenceDepth: 4 }
+    });
+  });
 }
 
 function simulationActionLabel(action, mover, prefix = '即将执行') {
@@ -1274,6 +1322,7 @@ function toggleAutoSimulation() {
     autoPaused = true;
     simulationPauseRequested = true;
     simulationRunId += 1;
+    cancelAiSearch();
     setAutoSimulationButtonState('继续模拟', true);
     return;
   }
@@ -1947,17 +1996,27 @@ async function simulateStep() {
   simulationLock = true;
   try {
     let action = null;
-    for (const step of stepwiseGameSearch(state, 3)) {
+    const showSearchStep = step => {
       if (simulationPauseRequested || runId !== simulationRunId) return;
       action = step;
       const stepMover = state.pieces.find(item => item.id === step.pieceId);
-      const candidateLabel = previewSimulationAction(step, stepMover, `第 ${step.searchDepth} 层候选操作`);
+      const depthLabel = step.completed !== false
+        ? `已完成第 ${step.searchDepth} 层候选操作`
+        : '搜索预算耗尽后的安全候选操作';
+      const candidateLabel = previewSimulationAction(step, stepMover, depthLabel);
       selectedInfo.textContent = `${candidateLabel}；` +
         `${PIECE_NAMES[stepMover.type]}${step.move.captureId ? '攻击' : '移动'}，` +
-        `评估 ${step.score}，搜索 ${step.searchedNodes} 节点，剪枝 ${step.prunedBranches} 次`;
+        `评估 ${step.score}，常规 ${step.searchedNodes} 节点，` +
+        `静态 ${step.quiescenceNodes ?? 0} 节点，缓存命中 ${step.cacheHits ?? 0} 次`;
       solidBoardViewer?.followPiece(step.pieceId);
       render();
-      await new Promise(resolve => setTimeout(resolve, 360));
+    };
+    try {
+      action = await searchWithWorker(runId, state, showSearchStep);
+    } catch (error) {
+      if (simulationPauseRequested || runId !== simulationRunId) return;
+      boardHelp.textContent = `后台搜索不可用，已回退同步三层搜索：${error.message}`;
+      for (const step of stepwiseGameSearch(state, 3)) showSearchStep(step);
     }
     if (simulationPauseRequested || runId !== simulationRunId) return;
     if (!action) {
@@ -1975,7 +2034,7 @@ async function simulateStep() {
     const repetitionNote = action.repetitionCount > 0
       ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
       : '，已避开近期重复局面';
-    selectedInfo.textContent = `${operationLabel}；分步博弈最终选择（${action.searchDepth} 层）：` +
+    selectedInfo.textContent = `${operationLabel}；限时博弈最终选择（完整 ${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     if (solidBoardViewer) solidViewerStatus.textContent = operationLabel;
     solidBoardViewer?.followPoint(
@@ -1985,11 +2044,13 @@ async function simulateStep() {
     render();
     await new Promise(resolve => setTimeout(resolve, 720));
     if (simulationPauseRequested || runId !== simulationRunId) return;
-    const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
-      `剪枝 ${action.prunedBranches} 次，执行评估值 ${action.score} 的动作。`;
+    const decisionNote = `限时博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个常规节点和 ` +
+      `${action.quiescenceNodes ?? 0} 个静态节点，缓存命中 ${action.cacheHits ?? 0} 次，` +
+      `执行评估值 ${action.score} 的动作。`;
     await commitMove(action.pieceId, action.move, action.promote, decisionNote);
     if (state.winner && autoTimer) stopAutoSimulation();
   } finally {
+    if (runId === simulationRunId) cancelAiSearch();
     simulationLock = false;
   }
 }
