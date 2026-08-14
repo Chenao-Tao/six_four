@@ -149,6 +149,107 @@ export function aiBenchmarkCases() {
   ];
 }
 
+function pairedState(front, back) {
+  const result = createCustomState({ front, back });
+  if (result.error) throw new Error(`缩减棋子配对局面不可开局：${result.error}`);
+  return result.state;
+}
+
+export function pairedMatchCases() {
+  const piece = (id, side, type, q, r) => ({ id, side, type, position: { q, r } });
+  return [
+    {
+      name: '缩减双层局面（潜藏白后）',
+      state: pairedState([
+        piece('paired-a-wk', 'white', 'king', -4, 0),
+        piece('paired-a-bk', 'black', 'king', 4, 0),
+        piece('paired-a-wb', 'white', 'bishop', -2, 2),
+        piece('paired-a-bb', 'black', 'bishop', -1, -3),
+        piece('paired-a-wp', 'white', 'pawn', -1, 2),
+        piece('paired-a-bp', 'black', 'pawn', -3, -1)
+      ], [
+        piece('paired-a-wq', 'white', 'queen', 2, -3),
+        piece('paired-a-bp2', 'black', 'pawn', 3, -3)
+      ])
+    },
+    {
+      name: '缩减双层局面（潜藏黑后）',
+      state: pairedState([
+        piece('paired-b-wk', 'white', 'king', -4, 0),
+        piece('paired-b-bk', 'black', 'king', 4, 0),
+        piece('paired-b-wb', 'white', 'bishop', 1, 3),
+        piece('paired-b-bb', 'black', 'bishop', 2, -2),
+        piece('paired-b-wp', 'white', 'pawn', 3, 1),
+        piece('paired-b-bp', 'black', 'pawn', 1, -2)
+      ], [
+        piece('paired-b-wp2', 'white', 'pawn', -3, 3),
+        piece('paired-b-bq', 'black', 'queen', -2, 3)
+      ])
+    }
+  ];
+}
+
+function optimizedMatchAction(state, options) {
+  const steps = [...iterativeGameSearch(state, {
+    timeLimitMs: Infinity,
+    maxDepth: options.maxDepth,
+    maxNodes: options.maxNodes,
+    quiescenceDepth: options.quiescenceDepth
+  })];
+  const action = steps.at(-1) ?? null;
+  const provenMate = action && Math.abs(action.score) >= 1000000 - options.maxDepth;
+  if (action && action.searchDepth < options.maxDepth && !provenMate) {
+    throw new Error(`配对对局未完成约定的 ${options.maxDepth} 层搜索`);
+  }
+  return action;
+}
+
+function playPairedMatch(initialState, optimizedSide, options) {
+  let state = structuredClone(initialState);
+  const visits = new Map();
+  for (let ply = 0; ply < options.maxPlies; ply += 1) {
+    const signature = positionSignature(state);
+    const visitCount = (visits.get(signature) ?? 0) + 1;
+    visits.set(signature, visitCount);
+    if (visitCount >= 3) return { winner: null, reason: 'repetition', plies: ply };
+    const action = state.turn === optimizedSide
+      ? optimizedMatchAction(state, options)
+      : legacyChooseSimulationAction(state, options.legacyDepth);
+    if (!action) return { winner: null, reason: 'no-action', plies: ply };
+    state = applyMove(
+      state,
+      action.pieceId,
+      actionTarget(action),
+      action.promote,
+      false
+    ).state;
+    if (state.winner) return { winner: state.winner, reason: 'king-captured', plies: ply + 1 };
+  }
+  return { winner: null, reason: 'ply-limit', plies: options.maxPlies };
+}
+
+export function runPairedMatches(options = {}) {
+  const normalized = {
+    legacyDepth: options.legacyDepth ?? 3,
+    maxDepth: options.maxDepth ?? 3,
+    maxNodes: options.maxNodes ?? 10000,
+    quiescenceDepth: options.quiescenceDepth ?? 2,
+    maxPlies: options.maxPlies ?? 30
+  };
+  const rows = pairedMatchCases().flatMap(({ name, state }) => ['white', 'black'].map(optimizedSide => {
+    const result = playPairedMatch(state, optimizedSide, normalized);
+    const points = result.winner === optimizedSide ? 1 : result.winner ? 0 : 0.5;
+    return { name, optimizedSide, points, ...result };
+  }));
+  const optimizedPoints = rows.reduce((total, row) => total + row.points, 0);
+  return {
+    optimizedPoints,
+    totalPoints: rows.length,
+    score: optimizedPoints / rows.length,
+    rows
+  };
+}
+
 export function runLegacyBenchmark(searchDepth = 3) {
   return aiBenchmarkCases().map(({ name, state }) => {
     const startedAt = performance.now();

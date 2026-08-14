@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   aiBenchmarkCases,
   legacyChooseSimulationAction,
+  pairedMatchCases,
   runLegacyBenchmark,
-  runOptimizedBenchmark
+  runOptimizedBenchmark,
+  runPairedMatches
 } from './ai-benchmark.js';
 
 test('AI 基准覆盖单层胜负与双层升沉布局', () => {
@@ -45,4 +47,23 @@ test('优化算法基准在固定节点预算下可重复且只返回完整层',
   assert.deepEqual(second, first);
   assert.ok(first.every(row => row.completed));
   assert.ok(first.every(row => row.searchDepth >= 1));
+});
+
+test('缩减棋子配对对局交换先后手且优化算法得分不低于 60%', () => {
+  const cases = pairedMatchCases();
+  assert.ok(cases.every(item =>
+    item.state.boardStates.front.length + item.state.boardStates.back.length <= 8
+  ));
+
+  const first = runPairedMatches();
+  const second = runPairedMatches();
+
+  assert.deepEqual(second, first);
+  cases.forEach(({ name }) => {
+    assert.deepEqual(
+      first.rows.filter(row => row.name === name).map(row => row.optimizedSide).sort(),
+      ['black', 'white']
+    );
+  });
+  assert.ok(first.score >= 0.6, `优化算法配对得分仅为 ${first.score}`);
 });
