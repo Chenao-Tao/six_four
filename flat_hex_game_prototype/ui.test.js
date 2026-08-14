@@ -147,6 +147,15 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /pieces: displayedPieces\(\)\.map/);
 });
 
+test('从立体对局进入自定义时载入当前同名棋子并保持立体形态', () => {
+  assert.match(app, /function loadSolidLayoutFromLibrary\(name = savedSolidLayoutSelect\.value\)/);
+  assert.match(app, /loadSolidLayoutButton\.addEventListener\('click', \(\) => loadSolidLayoutFromLibrary\(\)\)/);
+  const handler = app.match(/solidCustomizeButton\.addEventListener\('click',[\s\S]*?\n}\);/);
+  assert.ok(handler);
+  assert.match(handler[0], /const layoutName = activeLayoutName/);
+  assert.match(handler[0], /closeSolidBoard\(\);[\s\S]*enterCustomEditor\(\);[\s\S]*loadSolidLayoutFromLibrary\(layoutName\)/);
+});
+
 test('平面与立体结构按同名方案配对且只显示当前形态的存档区', () => {
   assert.match(html, /id="flatLayoutLibrary"/);
   assert.match(html, /id="solidLayoutLibrary"/);

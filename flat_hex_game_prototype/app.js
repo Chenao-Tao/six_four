@@ -1660,10 +1660,10 @@ function loadLayoutFromLibrary() {
   render();
 }
 
-function loadSolidLayoutFromLibrary() {
-  if (!customEditor || !savedSolidLayoutSelect.value) return;
+function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
+  if (!customEditor || !name) return;
   const layout = savedLayouts.find(item =>
-    item.name === savedSolidLayoutSelect.value && item.boardShape === 'solid');
+    item.name === name && item.boardShape === 'solid');
   if (!layout) {
     boardHelp.textContent = '选择的立体布局存档不存在。';
     return;
@@ -2060,8 +2060,10 @@ previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
 solidCustomizeButton.addEventListener('click', () => {
+  const layoutName = activeLayoutName;
   closeSolidBoard();
   enterCustomEditor();
+  loadSolidLayoutFromLibrary(layoutName);
 });
 rotateSolidPanelButton.addEventListener('click', rotateSolidPanel);
 flipSolidPanelButton.addEventListener('click', flipSolidPanel);
@@ -2086,7 +2088,7 @@ swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
 saveLayoutButton.addEventListener('click', saveLayoutToLibrary);
 saveSolidLayoutButton.addEventListener('click', saveSolidLayoutToLibrary);
 loadLayoutButton.addEventListener('click', loadLayoutFromLibrary);
-loadSolidLayoutButton.addEventListener('click', loadSolidLayoutFromLibrary);
+loadSolidLayoutButton.addEventListener('click', () => loadSolidLayoutFromLibrary());
 activateLayoutButton.addEventListener('click', () => activateLayoutFromLibrary());
 activateSolidLayoutButton.addEventListener('click', activateSolidLayoutFromLibrary);
 deleteLayoutButton.addEventListener('click', () => deleteLayoutFromLibrary());
