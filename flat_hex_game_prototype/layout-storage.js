@@ -3,7 +3,7 @@ import {
   LEGACY_SOLID_SOURCE_LAYOUT_NAME,
   SOLID_TEST_LAYOUT_NAME,
   mergeBuiltInLayouts
-} from './built-in-layouts.js?v=paired-layouts-5';
+} from './built-in-layouts.js?v=preset-playability-1';
 import {
   migrateLegacySolidLayouts,
   normalizeLayoutForStorage,

@@ -29,7 +29,7 @@ import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=paired-layouts-5';
+} from './layout-storage.js?v=preset-playability-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels

@@ -54,7 +54,9 @@ export function builtInLayouts() {
       ],
       back: [
         piece('preset-flat-capture-up-wq', 'white', 'queen', 1, 1),
-        piece('preset-flat-capture-up-bp', 'black', 'pawn', -1, 1)
+        piece('preset-flat-capture-up-bp', 'black', 'pawn', -1, 1),
+        piece('preset-flat-capture-up-wb', 'white', 'bishop', -1, 0),
+        piece('preset-flat-capture-up-bb', 'black', 'bishop', 0, 4)
       ]
     }, state),
     snapshot('预设·平面双层对局', 'flat', {
@@ -101,22 +103,22 @@ export function builtInLayouts() {
     },
     '预设·平面双层对局': {
       faceLabels: {
-        front: ['3A', '4B', '5B', '1A', '6B', '2A'],
-        back: ['5A', '4A', '3B', '2B', '6A', '1B']
+        front: ['5A', '6A', '1A', '4B', '2B', '3A'],
+        back: ['1B', '6B', '5B', '3B', '2A', '4A']
       },
       panelRotations: {
-        front: [120, 0, 240, 120, 0, 240],
-        back: [120, 0, 240, 120, 0, 240]
+        front: [120, 240, 120, 240, 0, 120],
+        back: [240, 120, 240, 240, 0, 120]
       }
     },
     [SOLID_TEST_LAYOUT_NAME]: {
       faceLabels: {
-        front: ['4A', '1B', '5B', '2B', '6B', '3A'],
-        back: ['5A', '1A', '4B', '3B', '6A', '2A']
+        front: ['4A', '5B', '2B', '6A', '3B', '1A'],
+        back: ['2A', '5A', '4B', '1B', '3A', '6B']
       },
       panelRotations: {
-        front: [120, 240, 120, 240, 240, 240],
-        back: [240, 120, 240, 120, 120, 120]
+        front: [120, 240, 120, 0, 240, 0],
+        back: [240, 120, 240, 0, 120, 0]
       }
     }
   };
