@@ -10,6 +10,7 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState,
+  evaluateGameState,
   flipBoardPanel,
   keyOf,
   legalMoves,
@@ -445,6 +446,61 @@ test('算法演示优先一步吃王，并自主选择有利升级', () => {
   assert.equal(promotionAction.pieceId, 'wB');
   assert.equal(promotionAction.move.captureId, 'bP');
   assert.equal(promotionAction.promote, true);
+});
+
+test('双层评估能识别随棋盘下沉的升级收益', () => {
+  const current = [
+    piece('wK', 'white', 'king', -4, 0),
+    piece('bK', 'black', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 0, -1),
+    piece('bP', 'black', 'pawn', 0, -2)
+  ];
+  const surfaced = [piece('wQ', 'white', 'queen', 1, 1)];
+  const state = {
+    ...stateOf(current),
+    boardSide: 'front',
+    boardStates: { front: current, back: surfaced }
+  };
+  const move = legalMoves(state, 'wP').get('0,-2');
+  const kept = applyMove(state, 'wP', move.target, false, false).state;
+  const promoted = applyMove(state, 'wP', move.target, true, false).state;
+
+  assert.ok(evaluateGameState(promoted, 'white') > evaluateGameState(kept, 'white'));
+  assert.equal(chooseSimulationAction(state, 1).promote, true);
+});
+
+test('王不作为普通物质计分且潜藏层同时参与评估', () => {
+  const kingOnly = stateOf([piece('wK', 'white', 'king', 0, 0)]);
+  assert.ok(Math.abs(evaluateGameState(kingOnly, 'white')) <= 80);
+
+  const outer = [piece('wP', 'white', 'pawn', 0, 0)];
+  const whiteDormant = {
+    ...stateOf(outer),
+    boardShape: 'solid',
+    solidLayers: { outer, inner: [piece('wB', 'white', 'bishop', 1, 1)] }
+  };
+  const blackDormant = {
+    ...stateOf(outer),
+    boardShape: 'solid',
+    solidLayers: { outer, inner: [piece('bB', 'black', 'bishop', 1, 1)] }
+  };
+  assert.ok(evaluateGameState(whiteDormant, 'white') > evaluateGameState(blackDormant, 'white'));
+});
+
+test('近期重复只作同分决胜，不会过滤立即获胜动作', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, -3),
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bK', 'black', 'king', 0, -4),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+  const winning = applyMove(state, 'wP', { q: 0, r: -4 }, false).state;
+  state.positionHistory = [positionSignature(state), positionSignature(winning)];
+
+  const action = chooseSimulationAction(state, 1);
+
+  assert.equal(action.move.capturesKing, true);
+  assert.equal(action.repetitionCount, 1);
 });
 
 test('算法避开会回到近期相同局面的往返动作', () => {

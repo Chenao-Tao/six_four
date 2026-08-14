@@ -1278,13 +1278,62 @@ function actionVariants(state) {
   });
 }
 
-const PIECE_VALUES = { king: 10000, queen: 12, bishop: 4, pawn: 1 };
-function evaluateState(state, perspective) {
-  if (state.winner) return state.winner === perspective ? 1000000 : -1000000;
-  return state.pieces.reduce((score, item) => {
-    const value = PIECE_VALUES[item.type];
+const MATE_SCORE = 1000000;
+const PIECE_VALUES = { queen: 1200, bishop: 400, pawn: 100 };
+const DORMANT_LAYER_WEIGHT = 0.6;
+const MOBILITY_WEIGHT = 2;
+const MAX_MOBILITY_SCORE = 80;
+
+function materialScore(pieces, perspective) {
+  return pieces.reduce((score, item) => {
+    const value = PIECE_VALUES[item.type] ?? 0;
     return score + (item.side === perspective ? value : -value);
-  }, 0) * 100;
+  }, 0);
+}
+
+function stateLayers(state) {
+  if (state.solidLayers) {
+    return { active: state.solidLayers.outer, dormant: state.solidLayers.inner };
+  }
+  if (state.boardStates) {
+    const activeSide = state.boardSide ?? 'front';
+    const dormantSide = activeSide === 'front' ? 'back' : 'front';
+    return {
+      active: state.boardStates[activeSide] ?? state.pieces,
+      dormant: state.boardStates[dormantSide] ?? []
+    };
+  }
+  return { active: state.pieces, dormant: [] };
+}
+
+function mobilityForSide(state, side) {
+  if (state.winner) return 0;
+  const sideState = state.turn === side ? state : { ...state, turn: side };
+  let mobility = 0;
+  for (const item of state.pieces) {
+    if (item.side !== side) continue;
+    mobility += legalMoves(sideState, item.id).size;
+    if (mobility >= MAX_MOBILITY_SCORE / MOBILITY_WEIGHT) {
+      return MAX_MOBILITY_SCORE / MOBILITY_WEIGHT;
+    }
+  }
+  return mobility;
+}
+
+export function evaluateGameState(state, perspective, ply = 0) {
+  if (state.winner) {
+    return state.winner === perspective ? MATE_SCORE - ply : -MATE_SCORE + ply;
+  }
+  const { active, dormant } = stateLayers(state);
+  const activeMaterial = materialScore(active, perspective);
+  const dormantMaterial = materialScore(dormant, perspective) * DORMANT_LAYER_WEIGHT;
+  const opponent = perspective === 'white' ? 'black' : 'white';
+  const mobilityDifference = mobilityForSide(state, perspective) - mobilityForSide(state, opponent);
+  const mobilityScore = Math.max(
+    -MAX_MOBILITY_SCORE,
+    Math.min(MAX_MOBILITY_SCORE, mobilityDifference * MOBILITY_WEIGHT)
+  );
+  return Math.round(activeMaterial + dormantMaterial + mobilityScore);
 }
 
 function actionOrder(action) {
@@ -1317,7 +1366,7 @@ function priorRepetitionCount(state) {
 }
 
 function repetitionAwareActions(state) {
-  const candidates = orderedActions(state).map(action => {
+  return orderedActions(state).map(action => {
     const result = applyMove(
       state,
       action.pieceId,
@@ -1326,21 +1375,18 @@ function repetitionAwareActions(state) {
       false
     );
     return { action, result, repetitionCount: priorRepetitionCount(result.state) };
-  });
-  if (!candidates.length) return candidates;
-  const lowestRepetition = Math.min(...candidates.map(item => item.repetitionCount));
-  return candidates.filter(item => item.repetitionCount === lowestRepetition);
+  }).sort((left, right) => left.repetitionCount - right.repetitionCount);
 }
 
-function minimax(state, depth, alpha, beta, perspective, metrics) {
+function minimax(state, depth, alpha, beta, perspective, metrics, ply = 0) {
   metrics.searchedNodes += 1;
-  if (depth === 0 || state.winner) return evaluateState(state, perspective);
+  if (depth === 0 || state.winner) return evaluateGameState(state, perspective, ply);
   const candidates = repetitionAwareActions(state);
-  if (!candidates.length) return evaluateState(state, perspective);
+  if (!candidates.length) return evaluateGameState(state, perspective, ply);
   const maximizing = state.turn === perspective;
   let bestScore = maximizing ? -Infinity : Infinity;
   for (const { result } of candidates) {
-    const score = minimax(result.state, depth - 1, alpha, beta, perspective, metrics);
+    const score = minimax(result.state, depth - 1, alpha, beta, perspective, metrics, ply + 1);
     if (maximizing) {
       bestScore = Math.max(bestScore, score);
       alpha = Math.max(alpha, bestScore);
@@ -1364,20 +1410,23 @@ function searchAtDepth(state, searchDepth) {
   let bestAction = null;
   let bestScore = -Infinity;
   let bestRepetitionCount = Infinity;
+  let alpha = -Infinity;
   for (const { action, result, repetitionCount } of candidates) {
     const score = minimax(
       result.state,
       Math.max(0, searchDepth - 1),
-      -Infinity,
+      alpha,
       Infinity,
       perspective,
-      metrics
+      metrics,
+      1
     );
-    if (score > bestScore) {
+    if (score > bestScore || (score === bestScore && repetitionCount < bestRepetitionCount)) {
       bestScore = score;
       bestAction = action;
       bestRepetitionCount = repetitionCount;
     }
+    alpha = Math.max(alpha, bestScore);
   }
   return {
     ...bestAction,
