@@ -1388,7 +1388,14 @@ function chargedQueenMoves(state, pieceToMove) {
         return;
       }
       if (nextDepth === 3) {
-        if (!usedPortal && !portalTransitions(state, target.layer, target.pointKey).length) {
+        if (usedPortal) {
+          addPortalMove(moves, target, {
+            portalId,
+            portalColor,
+            portalTransition,
+            pathSteps
+          });
+        } else if (!portalTransitions(state, target.layer, target.pointKey).length) {
           addMove(
             state,
             moves,
@@ -1611,7 +1618,8 @@ export function queenStepMoves(state, pieceId, context = {}) {
       portalId: portal?.source.portalId ?? context.portalId ?? null,
       portalColor: portal?.source.portalColor ?? context.portalColor ?? null,
       portalTransition,
-      requiresPortalCapture: Boolean(nextUsedPortal && nextDepth === 3 && !effectiveOccupant),
+      portalObservation: Boolean(nextUsedPortal && nextDepth === 3 && !effectiveOccupant),
+      requiresPortalCapture: false,
       queenStep: true,
       nextQueenContext: nextContext
     };

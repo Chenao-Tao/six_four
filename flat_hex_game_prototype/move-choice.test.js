@@ -76,7 +76,7 @@ test('真实双层棋局改为到门后分别提供普通下一步与同点传�
   assert.ok(choices.some(move =>
     move.portalSelf && move.portalId === '1A5-4B5' && keyOf(move.displayTarget) === '1,-2'
   ));
-  assert.equal([...legalMoves(state, queen.id).values()].some(move => move.usesPortal), false);
+  assert.equal([...legalMoves(state, queen.id).values()].some(move => move.usesPortal), true);
 });
 
 test('空动作集合或空目标不会产生移动方式选择', () => {

@@ -1404,14 +1404,32 @@ function showPortalDetection(autoFinish = false) {
   const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
   portalDetectionText.textContent = remaining > 0
     ? `观察传送后的后：还可走 ${remaining} 步，第3步吃象才正式升沉`
-    : '观察传送结果：未吃到象将返回传送前状态';
+    : '观察传送结果：未吃子也保留出口位置，但不会触发棋盘升沉';
   portalDetection.classList.remove('hidden');
   boardShell.classList.add('portal-detecting');
   if (autoFinish) {
     portalDetectionTimer = setTimeout(() => {
-      cancelQueenTurn('传送检测结束：最后一步未吃到象，后已回到传送前状态，本回合未消耗。');
+      finishPortalDetection();
     }, 5000);
   }
+}
+
+async function finishPortalDetection() {
+  if (!queenTurn?.detecting || queenTurn.stepsUsed < 3) return;
+  const completeMove = completeQueenMove(queenTurn, queenTurn.finalStep);
+  if (!completeMove) {
+    cancelQueenTurn('传送检测无法完成结算，已取消这条分步路线。');
+    return;
+  }
+  const pieceId = queenTurn.pieceId;
+  clearPortalDetection();
+  await commitMove(
+    pieceId,
+    completeMove,
+    false,
+    '传送完成：后留在出口位置，未吃子所以不触发棋盘升沉。',
+    { skipMoveAnimation: true }
+  );
 }
 
 function queenRouteMatches(move, context) {
@@ -1557,8 +1575,9 @@ async function chooseQueenStep(move) {
 
   selectedMoves = new Map();
   if (queenTurn.usedPortal && !move.captureId) {
+    queenTurn.finalStep = move;
     showPortalDetection(true);
-    updateQueenStepSelection('传送后的三步已用完，正在检测是否成功吃子；可等待5秒或手动结束。');
+    updateQueenStepSelection('传送后的三步已用完，检测结束后保留出口位置；可等待5秒或手动结束。');
     return;
   }
 
@@ -2873,10 +2892,7 @@ pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
 pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
 pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
 moveChoiceModal.querySelector('[data-move-choice-action="cancel"]').addEventListener('click', closeMoveChoice);
-finishPortalDetectionButton.addEventListener('click', () => {
-  if (!queenTurn?.detecting) return;
-  cancelQueenTurn('已手动结束传送检测，后回到传送前状态，本回合未消耗。');
-});
+finishPortalDetectionButton.addEventListener('click', finishPortalDetection);
 autoButton.addEventListener('click', toggleAutoSimulation);
 
 svg.addEventListener('click', () => {

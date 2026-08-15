@@ -390,7 +390,11 @@ test('人工后回合拆成三次单步并持续显示剩余步数', () => {
   assert.match(app, /当前后没有合法的单步起点/);
 });
 
-test('传送后进入眼睛检测态并支持五秒或手动结束', () => {
+test('传送后进入眼睛检测态并在五秒或手动结束时提交空门落点', () => {
+  const finishDetection = app.match(
+    /async function finishPortalDetection\([\s\S]*?\n}\n\nfunction queenRouteMatches/,
+  );
+
   assert.match(html, /id="portalDetection"/);
   assert.match(html, /id="finishPortalDetectionButton"/);
   assert.match(html, /class="portal-detection-iris"/);
@@ -398,6 +402,12 @@ test('传送后进入眼睛检测态并支持五秒或手动结束', () => {
   assert.match(app, /function showPortalDetection\(autoFinish = false\)/);
   assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?\}, 5000\)/);
   assert.match(app, /finishPortalDetectionButton\.addEventListener\('click'/);
+  assert.ok(finishDetection);
+  assert.match(finishDetection[0], /completeQueenMove\(queenTurn/);
+  assert.match(finishDetection[0], /await commitMove\(/);
+  assert.match(finishDetection[0], /if \(!completeMove\)/);
+  assert.match(app, /setTimeout\(\(\) => \{\s*finishPortalDetection\(/);
+  assert.match(app, /finishPortalDetectionButton\.addEventListener\('click', finishPortalDetection\)/);
   assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
   assert.match(styles, /\.portal-detection-eye\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*34px/);
   assert.match(styles, /\.portal-detection\s*\{[\s\S]*?top:\s*72px/);

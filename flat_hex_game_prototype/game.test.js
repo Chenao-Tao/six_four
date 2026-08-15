@@ -264,14 +264,14 @@ test('象吃兵升级为后时立即获得三回合传送能力', () => {
   assert.equal(unpromoted.portalTurns, undefined);
 });
 
-test('空门传送只进入人工检测，不作为可提交或供AI搜索的完整动作', () => {
+test('空门传送是可提交并可供AI搜索的完整动作', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
   ]);
-  assert.equal(
-    [...legalMoves(state, 'wQ').values()].some(move => move.usesPortal),
-    false
-  );
+  const portalMoves = [...legalMoves(state, 'wQ').values()].filter(move => move.usesPortal);
+
+  assert.ok(portalMoves.length > 0);
+  assert.ok(portalMoves.every(move => move.captureId === null));
 });
 
 test('有传送能力的后可以选择普通路线停在传送入口', () => {
@@ -336,7 +336,8 @@ test('后从传送点起步可分步离开一格再返回，并用第三步进�
   assert.ok(second);
   assert.ok(third);
   assert.equal(third.portalTransition.entryPathIndex, 2);
-  assert.equal(third.requiresPortalCapture, true);
+  assert.equal(third.portalObservation, true);
+  assert.equal(third.requiresPortalCapture, false);
   assert.equal(third.nextQueenContext.stepsUsed, 3);
 });
 
@@ -378,7 +379,8 @@ test('立体后也可在外层传送点分步绕行一格后返回并进入内�
   assert.ok(second);
   assert.ok(third);
   assert.equal(third.portalTransition.entryPathIndex, 2);
-  assert.equal(third.requiresPortalCapture, true);
+  assert.equal(third.portalObservation, true);
+  assert.equal(third.requiresPortalCapture, false);
 });
 
 test('出口己方棋子阻挡传送，敌象仅允许第三步穿越吃子', () => {
@@ -428,15 +430,26 @@ test('两组传送门都支持双向单步穿越选择', () => {
   assert.deepEqual(backMove.portalTransition.exit.position, { q: -2, r: 1 });
 });
 
-test('跨层空门未吃子时不产生可提交动作且不会提前换层', () => {
+test('跨层空门未吃子时保留传送落点且不触发棋盘升沉', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
   ]);
-  const portalMove = [...legalMoves(state, 'wQ').values()].find(move => move.usesPortal);
-  assert.equal(portalMove, undefined);
-  assert.equal(state.layerExchangeCount ?? 0, 0);
-  assert.equal(state.boardStates.front.some(item => item.id === 'wQ'), true);
-  assert.equal(state.boardStates.back.some(item => item.id === 'wQ'), false);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.usesPortal && move.targetLayer === 'dormant' && !move.captureId);
+
+  assert.ok(portalMove);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.layerExchangeCount ?? 0, 0);
+  assert.equal(result.state.boardStates.front.some(item => item.id === 'wQ'), false);
+  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ'), true);
+  assert.equal(result.state.turn, 'black');
+  assert.equal(result.state.moveNumber, 2);
 });
 
 test('后单步回合从传送点起步时显示同点传送动作和普通相邻动作', () => {
