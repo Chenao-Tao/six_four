@@ -304,6 +304,14 @@ test('传送阵使用略大于棋子的同色虚线圈且始终渲染双层端�
   assert.match(solidBoard, /Math\.max\(14, 20 \* position\.perspective \* zoom\)/);
 });
 
+test('平面编辑按实际板面显示默认 4B5 传送阵而不是按 A/B 后缀过滤', () => {
+  const renderer = app.match(/function renderPortals\(\)[\s\S]*?\n}\n\nfunction appendPortalMarker/);
+
+  assert.ok(renderer);
+  assert.match(renderer[0], /customEditor\.faceLabels\[customEditor\.side\]\.indexOf\(endpoint\.faceLabel\)/);
+  assert.doesNotMatch(renderer[0], /endpoint\.faceLabel\.endsWith/);
+});
+
 test('手动与算法走棋共用平面和立体传送特效并在换层前完成', () => {
   assert.match(app, /function playFlatPortalTransition\(transition, portalColor\)/);
   assert.match(app, /await solidBoardViewer\.playPortalTransition\(move\.portalTransition/);

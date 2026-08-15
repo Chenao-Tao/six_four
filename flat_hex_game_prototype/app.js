@@ -888,7 +888,6 @@ function renderPortals() {
   if (customEditor) {
     customEditor.portalPairs.forEach(portal => {
       portal.endpoints
-        .filter(endpoint => endpoint.faceLabel.endsWith(customEditor.side === 'front' ? 'A' : 'B'))
         .forEach(endpoint => {
           const panelIndex = customEditor.faceLabels[customEditor.side].indexOf(endpoint.faceLabel);
           if (panelIndex < 0) return;
