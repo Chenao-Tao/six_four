@@ -265,6 +265,96 @@ test('后在能力有效期内可穿过空门，传送不再强制吃子', () =>
   assert.equal(result.state.boardStates.front.find(item => item.id === 'wQ').portalTurns, 2);
 });
 
+test('有传送能力的后不能在第三步停在传送入口', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalPointKeys = new Set(
+    portalEndpointLocations(state)
+      .filter(location => location.layer === 'active')
+      .map(location => location.pointKey)
+  );
+
+  const stoppedAtPortal = [...legalMoves(state, 'wQ').values()].filter(move =>
+    !move.usesPortal && portalPointKeys.has(move.pointKey));
+
+  assert.deepEqual(stoppedAtPortal, []);
+});
+
+test('有传送能力的后经过传送入口时必须生成自动穿越路线', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalPointKeys = new Set(
+    portalEndpointLocations(state)
+      .filter(location => location.layer === 'active')
+      .map(location => location.pointKey)
+  );
+  const moves = [...legalMoves(state, 'wQ').values()];
+  const ordinaryThroughPortal = moves.filter(move =>
+    !move.usesPortal && move.path.slice(1).some(point => portalPointKeys.has(keyOf(point)))
+  );
+
+  assert.deepEqual(ordinaryThroughPortal, []);
+  assert.ok(moves.some(move =>
+    move.usesPortal && move.pathSteps.some(step => step.portalEntry)
+  ));
+});
+
+test('有传送能力的后从传送点起步时第一步强制穿越并记录入口出口', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
+  ]);
+
+  const moves = [...legalMoves(state, 'wQ').values()];
+
+  assert.ok(moves.length > 0);
+  assert.ok(moves.every(move => move.usesPortal));
+  assert.ok(moves.every(move => move.portalTransition));
+  assert.deepEqual(moves[0].portalTransition.entry.position, { q: 1, r: -2 });
+  assert.deepEqual(moves[0].portalTransition.exit.position, { q: -1, r: -1 });
+  assert.equal(moves[0].portalTransition.entry.layer, 'active');
+  assert.equal(moves[0].portalTransition.exit.layer, 'active');
+});
+
+test('自动传送出口被占用时保持最终一步吃子约束', () => {
+  const friendlyBlocked = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
+    { ...piece('wP', 'white', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+  const earlyEnemyBlocked = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
+    { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
+  ]);
+
+  assert.equal(legalMoves(friendlyBlocked, 'wQ').size, 0);
+  assert.equal(legalMoves(earlyEnemyBlocked, 'wQ').size, 0);
+});
+
+test('两组传送门都支持双向自动穿越', () => {
+  const frontState = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', -1, -1), panelIndex: 3, portalTurns: 3 }
+  ]);
+  const frontMove = [...legalMoves(frontState, 'wQ').values()][0];
+  assert.deepEqual(frontMove.portalTransition.entry.position, { q: -1, r: -1 });
+  assert.deepEqual(frontMove.portalTransition.exit.position, { q: 1, r: -2 });
+
+  const base = defaultDoubleSidedState([], []);
+  const backQueen = { ...piece('wQ', 'white', 'queen', -1, 2), panelIndex: 1, portalTurns: 3 };
+  const backState = {
+    ...base,
+    boardSide: 'back',
+    boardStates: { front: [], back: [backQueen] },
+    pieces: [backQueen]
+  };
+  const backMove = [...legalMoves(backState, 'wQ').values()][0];
+  assert.equal(backMove.portalId, '3A5-6B5');
+  assert.equal(backMove.portalTransition.entry.layer, 'active');
+  assert.equal(backMove.portalTransition.exit.layer, 'dormant');
+  assert.deepEqual(backMove.portalTransition.entry.position, { q: -1, r: 2 });
+  assert.deepEqual(backMove.portalTransition.exit.position, { q: -2, r: 1 });
+});
+
 test('后穿过跨层空门但未吃子时只移动到潜藏层，不触发上浮下沉', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }

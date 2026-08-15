@@ -1177,6 +1177,18 @@ function addPortalMove(moves, target, route, captured = null) {
     mapKey,
     portalId: route.portalId,
     portalColor: route.portalColor,
+    portalTransition: route.portalTransition
+      ? {
+          entry: {
+            ...route.portalTransition.entry,
+            position: { ...route.portalTransition.entry.position }
+          },
+          exit: {
+            ...route.portalTransition.exit,
+            position: { ...route.portalTransition.exit.position }
+          }
+        }
+      : null,
     usesPortal: true,
     targetLayer: target.layer,
     captureLayer: target.layer,
@@ -1186,8 +1198,8 @@ function addPortalMove(moves, target, route, captured = null) {
   });
 }
 
-function portalMovesForQueen(state, pieceToMove, moves) {
-  if (!(pieceToMove.portalTurns > 0)) return;
+function chargedQueenMoves(state, pieceToMove) {
+  const moves = new Map();
   const startPanel = piecePanelIndex(pieceToMove);
   const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
   const occupantsByLayer = {
@@ -1202,6 +1214,7 @@ function portalMovesForQueen(state, pieceToMove, moves) {
     usedPortal: false,
     portalId: null,
     portalColor: null,
+    portalTransition: null,
     pathSteps: [{
       layer: 'active',
       position: { ...pieceToMove.position },
@@ -1223,6 +1236,22 @@ function portalMovesForQueen(state, pieceToMove, moves) {
       const usedPortal = current.usedPortal || Boolean(portal);
       const portalId = portal?.portalId ?? current.portalId;
       const portalColor = portal?.portalColor ?? current.portalColor;
+      const portalTransition = portal
+        ? {
+            entry: {
+              layer: current.layer,
+              position: { ...current.position },
+              panelIndex: current.panelIndex,
+              pointKey: current.pointKey
+            },
+            exit: {
+              layer: target.layer,
+              position: { ...target.position },
+              panelIndex: target.panelIndex,
+              pointKey: target.pointKey
+            }
+          }
+        : current.portalTransition;
       const pathSteps = [...current.pathSteps, {
         layer: target.layer,
         position: { ...target.position },
@@ -1237,8 +1266,22 @@ function portalMovesForQueen(state, pieceToMove, moves) {
           addPortalMove(moves, target, {
             portalId,
             portalColor,
+            portalTransition,
             pathSteps
           }, occupant);
+        } else if (nextDepth === 3 && !usedPortal &&
+            occupant.side !== pieceToMove.side &&
+            canCapture(pieceToMove.type, occupant.type)) {
+          addMove(
+            state,
+            moves,
+            pieceToMove,
+            target.position,
+            pathSteps.map(step => ({ ...step.position })),
+            occupantsByLayer.active,
+            target.panelIndex,
+            target.pointKey
+          );
         }
         return;
       }
@@ -1247,8 +1290,20 @@ function portalMovesForQueen(state, pieceToMove, moves) {
           addPortalMove(moves, target, {
             portalId,
             portalColor,
+            portalTransition,
             pathSteps
           });
+        } else if (!portalTransitions(state, target.layer, target.pointKey).length) {
+          addMove(
+            state,
+            moves,
+            pieceToMove,
+            target.position,
+            pathSteps.map(step => ({ ...step.position })),
+            occupantsByLayer.active,
+            target.panelIndex,
+            target.pointKey
+          );
         }
         return;
       }
@@ -1257,11 +1312,24 @@ function portalMovesForQueen(state, pieceToMove, moves) {
         usedPortal,
         portalId,
         portalColor,
+        portalTransition,
         pathSteps,
         visited: new Set([...current.visited, visitKey])
       });
     };
 
+    const portals = current.usedPortal
+      ? []
+      : portalTransitions(state, current.layer, current.pointKey);
+    if (portals.length) {
+      for (const transition of portals) {
+        consider(transition.target, {
+          portalId: transition.source.portalId,
+          portalColor: transition.source.portalColor
+        });
+      }
+      continue;
+    }
     for (const transition of stepTransitions(
       state,
       current.position,
@@ -1270,20 +1338,15 @@ function portalMovesForQueen(state, pieceToMove, moves) {
     )) {
       consider({ ...transition, layer: current.layer });
     }
-    if (!current.usedPortal) {
-      for (const transition of portalTransitions(state, current.layer, current.pointKey)) {
-        consider(transition.target, {
-          portalId: transition.source.portalId,
-          portalColor: transition.source.portalColor
-        });
-      }
-    }
   }
+  return moves;
 }
 
 function addPortalMoves(state, pieceToMove, moves) {
   if (!state.boardStates && !state.solidLayers) return moves;
-  if (pieceToMove.type === 'queen') portalMovesForQueen(state, pieceToMove, moves);
+  if (pieceToMove.type === 'queen' && pieceToMove.portalTurns > 0) {
+    return chargedQueenMoves(state, pieceToMove);
+  }
   return moves;
 }
 
