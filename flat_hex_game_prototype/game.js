@@ -1784,6 +1784,14 @@ function materialScore(pieces, perspective) {
   }, 0);
 }
 
+function portalAbilityScore(pieces, perspective) {
+  return pieces.reduce((score, item) => {
+    if (item.type !== 'queen' || !Number.isFinite(item.portalTurns)) return score;
+    const value = Math.min(3, Math.max(0, item.portalTurns)) * 6;
+    return score + (item.side === perspective ? value : -value);
+  }, 0);
+}
+
 function stateLayers(state) {
   if (state.solidLayers) {
     return { active: state.solidLayers.outer, dormant: state.solidLayers.inner };
@@ -1820,19 +1828,24 @@ export function evaluateGameState(state, perspective, ply = 0) {
   const { active, dormant } = stateLayers(state);
   const activeMaterial = materialScore(active, perspective);
   const dormantMaterial = materialScore(dormant, perspective) * DORMANT_LAYER_WEIGHT;
+  const abilityValue = portalAbilityScore([...active, ...dormant], perspective);
   const opponent = perspective === 'white' ? 'black' : 'white';
   const mobilityDifference = mobilityForSide(state, perspective) - mobilityForSide(state, opponent);
   const mobilityScore = Math.max(
     -MAX_MOBILITY_SCORE,
     Math.min(MAX_MOBILITY_SCORE, mobilityDifference * MOBILITY_WEIGHT)
   );
-  return Math.round(activeMaterial + dormantMaterial + mobilityScore);
+  return Math.round(activeMaterial + dormantMaterial + abilityValue + mobilityScore);
 }
 
 function actionOrder(action) {
+  const crossLayerPortal = action.move.usesPortal &&
+    action.move.portalTransition?.entry.layer !== action.move.portalTransition?.exit.layer;
   return (action.move.capturesKing ? 100000 : 0) +
-    (action.move.captureId ? 1000 : 0) +
-    (action.promote ? 100 : 0);
+    (action.move.captureId ? 10000 : 0) +
+    (action.promote ? 1000 : 0) +
+    (crossLayerPortal ? 200 : 0) +
+    (action.move.usesPortal ? 100 : 0);
 }
 
 function actionTarget(action) {
@@ -1845,7 +1858,14 @@ function actionTarget(action) {
 
 function actionKey(action) {
   const panel = validatePanelIndex(action.move.panelIndex) ? action.move.panelIndex : '-';
-  return `${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${action.promote}`;
+  const route = action.move.pathSteps?.map(step =>
+    `${step.layer}:${step.panelIndex}:${step.pointKey ?? keyOf(step.position)}`).join('>') ??
+    action.move.path?.map(keyOf).join('>') ?? '';
+  const transition = action.move.portalTransition
+    ? `${action.move.portalTransition.entry.layer}:${action.move.portalTransition.entry.pointKey}>` +
+      `${action.move.portalTransition.exit.layer}:${action.move.portalTransition.exit.pointKey}`
+    : '-';
+  return `${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${transition}:${route}:${action.promote}`;
 }
 
 function orderedActions(state) {
@@ -1980,7 +2000,17 @@ function quiescence(state, depth, alpha, beta, perspective, context, ply) {
   }
   if (depth === 0) return bestScore;
   const tactical = orderedCandidates(state, perspective, maximizing)
-    .filter(({ action }) => action.move.captureId || action.promote);
+    .filter(({ action }) => action.move.captureId || action.promote ||
+      (action.move.usesPortal && action.move.targetLayer === 'dormant'))
+    .filter((candidate, index, candidates) => {
+      if (!candidate.action.move.usesPortal || candidate.action.move.captureId || candidate.action.promote) {
+        return true;
+      }
+      return candidates
+        .slice(0, index + 1)
+        .filter(item => item.action.move.usesPortal && !item.action.move.captureId && !item.action.promote)
+        .length <= 6;
+    });
   for (const { result } of tactical) {
     const score = quiescence(result.state, depth - 1, alpha, beta, perspective, context, ply + 1);
     if (maximizing) {
