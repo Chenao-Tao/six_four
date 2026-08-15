@@ -14,6 +14,60 @@ test('模拟控制保留重开、背面预览和算法按钮，并移除吃子�
   assert.match(html, />预览背面</);
 });
 
+test('平面与立体棋盘共用回退一步功能并按交互状态禁用', () => {
+  assert.match(html, /id="undoButton"[^>]*>回退一步</);
+  assert.match(html, /id="solidUndoButton"[^>]*>回退一步</);
+  assert.match(app, /createUndoHistory\(\{ cloneState: cloneGameState/);
+  assert.match(app, /function undoLastMove\(\)/);
+  assert.match(app, /undoButton\.addEventListener\('click', undoLastMove\)/);
+  assert.match(app, /solidUndoButton\.addEventListener\('click', undoLastMove\)/);
+  assert.match(app, /undoButton\.disabled = [\s\S]*?!undoHistory\.canUndo/);
+  assert.match(app, /solidUndoButton\.disabled = [\s\S]*?!undoHistory\.canUndo/);
+});
+
+test('成功落子保存走前状态，非法动作和重新开局不保留撤销记录', () => {
+  const commit = app.match(/async function commitMove\([\s\S]*?\n}\n\nfunction chooseMove/);
+  const reset = app.match(/function resetGame\(\)[\s\S]*?\n}\n\nasync function toggleFacePreview/);
+  const saveAndStart = app.match(/async function saveCustomBoard\(\)[\s\S]*?\n}\n\nfunction layoutSnapshotFromEditor/);
+
+  assert.ok(commit);
+  assert.match(commit[0], /const previousState = cloneGameState\(state\)/);
+  assert.match(commit[0], /if \(result\.error\)[\s\S]*?return;[\s\S]*?undoHistory\.push\(previousState\)/);
+  assert.ok(reset);
+  assert.match(reset[0], /undoHistory\.clear\(\)/);
+  assert.ok(saveAndStart);
+  assert.match(saveAndStart[0], /state = cloneGameState\(activeInitialState\);\s*undoHistory\.clear\(\)/);
+});
+
+test('回退恢复完整状态并清除算法、选子、升级和路线选择状态', () => {
+  const undo = app.match(/function undoLastMove\(\)[\s\S]*?\n}\n\nfunction resetGame/);
+
+  assert.ok(undo);
+  assert.match(undo[0], /stopAutoSimulation\(\)/);
+  assert.match(undo[0], /const previousState = undoHistory\.undo\(\)/);
+  assert.match(undo[0], /state = previousState/);
+  assert.match(undo[0], /selectedPieceId = null/);
+  assert.match(undo[0], /selectedMoves = new Map\(\)/);
+  assert.match(undo[0], /simulationPreview = null/);
+  assert.match(undo[0], /pendingPromotion = null/);
+  assert.match(undo[0], /promotionModal\.classList\.add\('hidden'\)/);
+  assert.match(undo[0], /closeMoveChoice\(\)/);
+});
+
+test('动画和算法搜索一开始就锁定回退按钮，并在交互结束后刷新状态', () => {
+  const commit = app.match(/async function commitMove\([\s\S]*?\n}\n\nfunction chooseMove/);
+  const preview = app.match(/async function toggleFacePreview\(\)[\s\S]*?\n}\n\nasync function simulateStep/);
+  const simulation = app.match(/async function simulateStep\(\)[\s\S]*?\n}\n\nresetButton/);
+
+  assert.ok(commit);
+  assert.match(commit[0], /lockUndoControls\(\)/);
+  assert.ok(preview);
+  assert.match(preview[0], /animationLock = true;\s*lockUndoControls\(\)/);
+  assert.match(preview[0], /animationLock = false;\s*render\(\)/);
+  assert.ok(simulation);
+  assert.match(simulation[0], /simulationLock = true;\s*lockUndoControls\(\)/);
+});
+
 test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /let previewSide = null/);
   assert.match(app, /return state\.boardStates\?\.\[side\] \?\? state\.pieces/);

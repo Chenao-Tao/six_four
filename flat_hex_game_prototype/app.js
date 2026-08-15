@@ -58,6 +58,7 @@ import {
   solidLayouts
 } from './layout-library.js?v=pending-solid-1';
 import { moveChoicesAtTarget } from './move-choice.js?v=portal-choice-1';
+import { createUndoHistory } from './undo-history.js?v=undo-move-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -77,6 +78,7 @@ const previewButton = document.getElementById('previewButton');
 const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
+const undoButton = document.getElementById('undoButton');
 const customizeButton = document.getElementById('customizeButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
@@ -123,6 +125,7 @@ const resetSolidViewButton = document.getElementById('resetSolidViewButton');
 const solidStepButton = document.getElementById('solidStepButton');
 const solidAutoButton = document.getElementById('solidAutoButton');
 const resetSolidGameButton = document.getElementById('resetSolidGameButton');
+const solidUndoButton = document.getElementById('solidUndoButton');
 const saveSolidCustomButton = document.getElementById('saveSolidCustomButton');
 const closeSolidViewButton = document.getElementById('closeSolidViewButton');
 const solidCustomizeButton = document.getElementById('solidCustomizeButton');
@@ -205,6 +208,13 @@ function cloneGameState(source) {
     },
     portalPairs: clonePortalPairs(source.portalPairs)
   };
+}
+
+const undoHistory = createUndoHistory({ cloneState: cloneGameState, limit: 100 });
+
+function lockUndoControls() {
+  undoButton.disabled = true;
+  solidUndoButton.disabled = true;
 }
 
 function legacySavedLayouts() {
@@ -697,6 +707,7 @@ function refreshSolidBoard(message = '') {
   solidSlotPicker.classList.toggle('hidden', !editingSolid);
   solidCustomizeButton.classList.toggle('hidden', editingSolid);
   resetSolidGameButton.classList.toggle('hidden', editingSolid);
+  solidUndoButton.classList.toggle('hidden', editingSolid);
   solidStepButton.classList.toggle('hidden', editingSolid);
   solidAutoButton.classList.toggle('hidden', editingSolid);
   saveSolidCustomButton.classList.toggle('hidden', !editingSolid);
@@ -708,6 +719,7 @@ function refreshSolidBoard(message = '') {
   solidStepButton.disabled = editingSolid || simulationLock || animationLock ||
     Boolean(pendingPromotion || pendingMoveChoice);
   solidAutoButton.disabled = editingSolid || animationLock || Boolean(pendingPromotion || pendingMoveChoice);
+  solidUndoButton.disabled = editingSolid || animationLock || simulationLock || !undoHistory.canUndo;
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -1233,6 +1245,7 @@ function render() {
   stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
   autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
   resetButton.disabled = editing;
+  undoButton.disabled = previewing || editing || animationLock || simulationLock || !undoHistory.canUndo;
   previewButton.disabled = editing;
   customizeButton.disabled = editing;
   customEditorControls.classList.toggle('hidden', !editing);
@@ -1423,6 +1436,8 @@ async function animateBoardLayerExchange(nextState) {
 
 async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   if (customEditor || isPreviewing()) return;
+  lockUndoControls();
+  const previousState = cloneGameState(state);
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
@@ -1455,8 +1470,10 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   }, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
+    render();
     return;
   }
+  undoHistory.push(previousState);
   selectedPieceId = null;
   selectedMoves = new Map();
   simulationPreview = null;
@@ -1878,6 +1895,7 @@ async function saveCustomBoard() {
   }
   if (solidBoardViewer) closeSolidBoard();
   state = cloneGameState(activeInitialState);
+  undoHistory.clear();
   customEditor = null;
   previewSide = null;
   selectedPieceId = null;
@@ -2336,10 +2354,29 @@ function beginPanelSwap() {
   render();
 }
 
+function undoLastMove() {
+  if (customEditor || isPreviewing() || animationLock || simulationLock) return;
+  stopAutoSimulation();
+  const previousState = undoHistory.undo();
+  if (!previousState) return;
+  state = previousState;
+  previewSide = null;
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  simulationPreview = null;
+  pendingPromotion = null;
+  promotionModal.classList.add('hidden');
+  closeMoveChoice();
+  boardHelp.textContent = `已回退一步；第 ${state.moveNumber} 手，${state.turn === 'white' ? '白方' : '黑方'}行动。`;
+  if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
+  render();
+}
+
 function resetGame() {
   if (customEditor) return;
   stopAutoSimulation();
   closeMoveChoice();
+  undoHistory.clear();
   state = cloneGameState(activeInitialState);
   previewSide = null;
   selectedPieceId = null;
@@ -2361,6 +2398,7 @@ async function toggleFacePreview() {
     autoButton.textContent = '连续模拟';
   }
   animationLock = true;
+  lockUndoControls();
   selectedPieceId = null;
   selectedMoves = new Map();
   boardShell.classList.add('flipping');
@@ -2373,6 +2411,7 @@ async function toggleFacePreview() {
   await new Promise(resolve => setTimeout(resolve, 470));
   boardShell.classList.remove('flipping');
   animationLock = false;
+  render();
   boardHelp.textContent = isPreviewing()
     ? '背面仅供预览，棋子不可选择；点击“返回当前朝上面”继续下棋。'
     : '已返回当前朝上面，可以继续移动棋子。';
@@ -2388,6 +2427,7 @@ async function simulateStep() {
   if (simulationLock || animationLock || pendingPromotion || pendingMoveChoice || state.winner) return;
   const runId = simulationRunId;
   simulationLock = true;
+  lockUndoControls();
   try {
     let action = null;
     const showSearchStep = step => {
@@ -2451,6 +2491,7 @@ async function simulateStep() {
 }
 
 resetButton.addEventListener('click', resetGame);
+undoButton.addEventListener('click', undoLastMove);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
@@ -2467,6 +2508,7 @@ resetSolidViewButton.addEventListener('click', () => solidBoardViewer?.resetView
 solidStepButton.addEventListener('click', simulateStep);
 solidAutoButton.addEventListener('click', toggleAutoSimulation);
 resetSolidGameButton.addEventListener('click', resetGame);
+solidUndoButton.addEventListener('click', undoLastMove);
 saveSolidCustomButton.addEventListener('click', saveCustomBoard);
 closeSolidViewButton.addEventListener('click', closeSolidBoard);
 switchEditorFaceButton.addEventListener('click', switchEditorFace);
