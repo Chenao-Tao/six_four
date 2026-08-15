@@ -319,6 +319,15 @@ test('传送阵使用略大于棋子的同色虚线圈且始终渲染双层端�
   assert.match(solidBoard, /Math\.max\(14, 20 \* position\.perspective \* zoom\)/);
 });
 
+test('平面和立体传送端点显示具体板面点号与潜藏层标识', () => {
+  assert.match(app, /portalEndpointDisplayLabel/);
+  assert.match(app, /faceLabel: location\.faceLabel/);
+  assert.match(app, /pointNumber: location\.pointNumber/);
+  assert.match(solidBoard, /portal\.displayLabel/);
+  assert.match(styles, /\.portal-marker\.active text/);
+  assert.match(styles, /\.portal-marker\.dormant text/);
+});
+
 test('平面编辑按实际板面显示默认 4B5 传送阵而不是按 A/B 后缀过滤', () => {
   const renderer = app.match(/function renderPortals\(\)[\s\S]*?\n}\n\nfunction appendPortalMarker/);
 

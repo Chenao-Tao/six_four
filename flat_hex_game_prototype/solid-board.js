@@ -4,6 +4,14 @@ const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
 const EFFECT_DURATIONS = { rotate: 720, flip: 780, swap: 900 };
 
+export function portalEndpointDisplayLabel(portal, dormantLayerName = '内') {
+  const endpoint = typeof portal?.faceLabel === 'string' && Number.isInteger(portal?.pointNumber)
+    ? `${portal.faceLabel}${portal.pointNumber}`
+    : '';
+  if (!endpoint) return portal?.dormant ? dormantLayerName : '';
+  return portal.dormant ? `${dormantLayerName}·${endpoint}` : endpoint;
+}
+
 function panelCoordinates(point, panelIndex) {
   const first = CORNERS[panelIndex];
   const second = CORNERS[(panelIndex + 1) % 6];
@@ -647,6 +655,18 @@ export function createSolidBoardViewer(canvas, initialModel, {
           context.setLineDash(portal.dormant ? [3, 7] : [7, 5]);
           context.stroke();
           context.setLineDash([]);
+          if (portal.displayLabel) {
+            context.globalAlpha = portal.dormant ? 0.62 : 0.92;
+            context.font = `750 ${Math.max(10, 11 * position.perspective * zoom)}px "Microsoft YaHei", sans-serif`;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.lineWidth = 3;
+            context.strokeStyle = 'rgba(8, 17, 25, .88)';
+            context.fillStyle = portal.portalColor ?? '#d8aaff';
+            const labelY = position.y + (portal.dormant ? radius + 12 : -radius - 10);
+            context.strokeText(portal.displayLabel, position.x, labelY);
+            context.fillText(portal.displayLabel, position.x, labelY);
+          }
           context.restore();
         });
 

@@ -28,7 +28,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=portal-editor-1';
+} from './game.js?v=optional-portal-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -36,8 +36,9 @@ import {
 } from './layout-storage.js?v=preset-playability-1';
 import {
   createSolidBoardViewer,
-  mapPiecesToPanels
-} from './solid-board.js?v=portal-editor-1';
+  mapPiecesToPanels,
+  portalEndpointDisplayLabel
+} from './solid-board.js?v=optional-portal-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -504,12 +505,18 @@ function solidBoardModel() {
     };
   });
   const portalTargets = customEditor ? [] : portalEndpointLocations(state)
-    .map(location => ({
-      ...mapSolidPoint(location.position, location.panelIndex),
-      portalId: location.portalId,
-      portalColor: location.portalColor,
-      dormant: location.layer !== (previewSide === null ? 'active' : 'dormant')
-    }));
+    .map(location => {
+      const dormant = location.layer !== (previewSide === null ? 'active' : 'dormant');
+      return {
+        ...mapSolidPoint(location.position, location.panelIndex),
+        portalId: location.portalId,
+        portalColor: location.portalColor,
+        faceLabel: location.faceLabel,
+        pointNumber: location.pointNumber,
+        dormant,
+        displayLabel: portalEndpointDisplayLabel({ ...location, dormant }, '内')
+      };
+    });
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
     : null;
@@ -898,7 +905,7 @@ function renderPortals() {
             customEditor.panelRotations[customEditor.side][panelIndex]
           );
           if (!position) return;
-          appendPortalMarker(layer, position, portal, false, true);
+          appendPortalMarker(layer, position, portal, false, true, endpoint);
         });
     });
     return;
@@ -911,12 +918,13 @@ function renderPortals() {
         location.position,
         { id: location.portalId, color: location.portalColor },
         location.layer !== visibleLayer,
-        false
+        false,
+        location
       );
     });
 }
 
-function appendPortalMarker(layer, position, portal, dormant = false, editing = false) {
+function appendPortalMarker(layer, position, portal, dormant = false, editing = false, endpoint = null) {
   const pixel = toPixel(position);
   const group = svgElement('g', {
     class: `portal-marker ${dormant ? 'dormant' : 'active'} ${editing ? 'editing' : ''}`,
@@ -924,13 +932,16 @@ function appendPortalMarker(layer, position, portal, dormant = false, editing = 
     style: `--portal-color: ${portal.color}`
   });
   group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 28 }));
-  if (dormant) {
+  if (endpoint) {
     const label = svgElement('text', {
       x: pixel.x,
-      y: pixel.y + 4,
+      y: dormant ? pixel.y + 42 : pixel.y - 34,
       'text-anchor': 'middle'
     });
-    label.textContent = previewSide === null ? '背' : '内';
+    label.textContent = portalEndpointDisplayLabel(
+      { ...endpoint, dormant },
+      previewSide === null ? '背' : '内'
+    );
     group.appendChild(label);
   }
   layer.appendChild(group);
@@ -1293,7 +1304,7 @@ function selectPiece(pieceId) {
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
     `${selectedMoves.size} 个合法落点`;
-  boardHelp.textContent = '青色为移动，红色为吃子；有传送能力的后会显示3/2/1计数，彩色小圆为可穿越的传送路线。';
+  boardHelp.textContent = '青色为移动，红色为吃子；传送阵上方标当前层、下方标背面或内层。有3/2/1能力的后可选择普通三步路线或彩色传送路线。';
   render();
 }
 
