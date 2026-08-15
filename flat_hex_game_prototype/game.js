@@ -1388,14 +1388,7 @@ function chargedQueenMoves(state, pieceToMove) {
         return;
       }
       if (nextDepth === 3) {
-        if (usedPortal) {
-          addPortalMove(moves, target, {
-            portalId,
-            portalColor,
-            portalTransition,
-            pathSteps
-          });
-        } else if (!portalTransitions(state, target.layer, target.pointKey).length) {
+        if (!usedPortal && !portalTransitions(state, target.layer, target.pointKey).length) {
           addMove(
             state,
             moves,
@@ -1484,6 +1477,172 @@ function addPortalMoves(state, pieceToMove, moves) {
       combinedMoves.set(moveKey, move);
     });
     return combinedMoves;
+  }
+  return moves;
+}
+
+function cloneQueenStepLocation(location) {
+  return {
+    layer: location.layer,
+    position: { ...location.position },
+    panelIndex: location.panelIndex,
+    pointKey: location.pointKey
+  };
+}
+
+function queenStepOccupants(state, pieceId, current) {
+  const occupantsByLayer = {
+    active: layerOccupants(state, 'active'),
+    dormant: layerOccupants(state, 'dormant')
+  };
+  for (const occupants of Object.values(occupantsByLayer)) {
+    for (const [pointKey, occupant] of occupants) {
+      if (occupant.id === pieceId) occupants.delete(pointKey);
+    }
+  }
+  const virtualPiece = state.pieces.find(piece => piece.id === pieceId);
+  if (virtualPiece && current?.layer && current.pointKey) {
+    occupantsByLayer[current.layer].set(current.pointKey, {
+      ...virtualPiece,
+      position: { ...current.position },
+      panelIndex: current.panelIndex
+    });
+  }
+  return occupantsByLayer;
+}
+
+function queenStepMapKey(candidate, pathSteps) {
+  const route = pathSteps.map(step =>
+    `${step.layer}:${step.panelIndex}:${step.pointKey ?? keyOf(step.position)}`
+  ).join('>');
+  return `step:${candidate.usesPortal ? 'portal' : 'move'}:${route}`;
+}
+
+/**
+ * Returns one-step choices for a manually operated queen turn.
+ * The search-facing legalMoves API remains a complete three-step action API;
+ * this helper only exposes the same rule graph one step at a time.
+ */
+export function queenStepMoves(state, pieceId, context = {}) {
+  const pieceToMove = state.pieces.find(item => item.id === pieceId);
+  if (!pieceToMove || pieceToMove.type !== 'queen' || pieceToMove.side !== state.turn) {
+    return new Map();
+  }
+  const stepsUsed = Number.isInteger(context.stepsUsed) ? context.stepsUsed : 0;
+  if (stepsUsed >= 3) return new Map();
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const current = context.current ?? {
+    layer: 'active',
+    position: { ...pieceToMove.position },
+    panelIndex: startPanel,
+    pointKey: startPointKey
+  };
+  const pathSteps = (context.pathSteps?.length
+    ? context.pathSteps
+    : [current]
+  ).map(cloneQueenStepLocation);
+  const visited = new Set(context.visited ?? [
+    `${current.layer}:${current.pointKey}`
+  ]);
+  const usedPortal = Boolean(context.usedPortal);
+  const occupantsByLayer = queenStepOccupants(state, pieceId, current);
+  const moves = new Map();
+
+  const addStep = (target, {
+    portal = null,
+    displayTarget = target,
+    portalSelf = false,
+    deferredPortal = context.deferredPortal ?? null
+  } = {}) => {
+    const nextDepth = stepsUsed + 1;
+    const visitKey = `${target.layer}:${target.pointKey}`;
+    const repeatsDeferredEntry = Boolean(
+      !portal && deferredPortal && nextDepth === 2 &&
+      visitKey === `${deferredPortal.layer}:${deferredPortal.pointKey}`
+    );
+    if (visited.has(visitKey) && !repeatsDeferredEntry) return;
+
+    const occupant = occupantsByLayer[target.layer].get(target.pointKey);
+    const occupantIsSelf = occupant?.id === pieceId;
+    const effectiveOccupant = occupantIsSelf ? null : occupant;
+    if (effectiveOccupant && nextDepth < 3) return;
+    if (effectiveOccupant && (
+      effectiveOccupant.side === pieceToMove.side ||
+      !canCapture(pieceToMove.type, effectiveOccupant.type)
+    )) return;
+    const portalTransition = portal
+      ? {
+          entry: cloneQueenStepLocation(portal.source),
+          exit: cloneQueenStepLocation(portal.target),
+          entryPathIndex: pathSteps.length - 1
+        }
+      : context.portalTransition ?? null;
+    const nextPathSteps = [...pathSteps, {
+      ...cloneQueenStepLocation(target),
+      ...(portal ? { portalEntry: true } : {})
+    }];
+    const nextUsedPortal = usedPortal || Boolean(portal);
+    const nextContext = {
+      pieceId,
+      stepsUsed: nextDepth,
+      current: cloneQueenStepLocation(target),
+      pathSteps: nextPathSteps,
+      visited: [...visited, visitKey],
+      usedPortal: nextUsedPortal,
+      portalId: portal?.source.portalId ?? context.portalId ?? null,
+      portalColor: portal?.source.portalColor ?? context.portalColor ?? null,
+      portalTransition,
+      deferredPortal: portal ? null : deferredPortal
+    };
+    const move = {
+      target: { ...target.position },
+      displayTarget: { ...displayTarget.position },
+      panelIndex: target.panelIndex,
+      pointKey: target.pointKey,
+      mapKey: queenStepMapKey({ usesPortal: nextUsedPortal }, nextPathSteps),
+      path: nextPathSteps.map(step => ({ ...step.position })),
+      pathSteps: nextPathSteps,
+      targetLayer: target.layer,
+      captureId: effectiveOccupant?.id ?? null,
+      capturesKing: effectiveOccupant?.type === 'king',
+      usesPortal: nextUsedPortal,
+      portalSelf,
+      portalId: portal?.source.portalId ?? context.portalId ?? null,
+      portalColor: portal?.source.portalColor ?? context.portalColor ?? null,
+      portalTransition,
+      requiresPortalCapture: Boolean(nextUsedPortal && nextDepth === 3 && !effectiveOccupant),
+      queenStep: true,
+      nextQueenContext: nextContext
+    };
+    moves.set(move.mapKey, move);
+  };
+
+  if (pieceToMove.portalTurns > 0 && !usedPortal && context.portalDecision !== 'normal') {
+    for (const transition of portalTransitions(state, current.layer, current.pointKey)) {
+      addStep(transition.target, {
+        portal: transition,
+        displayTarget: transition.source,
+        portalSelf: true,
+        deferredPortal: null
+      });
+    }
+  }
+
+  if (context.portalDecision !== 'transfer') {
+    const deferredPortal = !usedPortal && stepsUsed === 0 &&
+      pieceToMove.portalTurns > 0 &&
+      portalTransitions(state, current.layer, current.pointKey).length
+      ? current
+      : context.deferredPortal ?? null;
+    for (const transition of stepTransitions(
+      state,
+      current.position,
+      current.panelIndex,
+      'step'
+    )) {
+      addStep({ ...transition, layer: current.layer }, { deferredPortal });
+    }
   }
   return moves;
 }

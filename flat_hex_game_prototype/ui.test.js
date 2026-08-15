@@ -312,7 +312,7 @@ test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角',
   assert.match(app, /setAutoSimulationButtonState\('暂停模拟', true\)/);
   assert.match(app, /solidBoardViewer\?\.followPiece\(step\.pieceId\)/);
   assert.match(app, /solidBoardViewer\?\.followPoint\(/);
-  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion \|\| pendingMoveChoice\)/);
+  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\|[\s\S]*?Boolean\(pendingPromotion \|\| pendingMoveChoice \|\| queenTurn\)/);
 });
 
 test('AI 搜索在专用 Worker 中迭代加深并可立即取消', () => {
@@ -343,11 +343,35 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /onMoveSelect: selectSolidMove/);
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
-  assert.match(app, /if \(move\) requestMoveChoice\(move\)/);
+  assert.match(app, /if \(move\) handleSelectedMove\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
-  assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
+  assert.match(app, /const renderedTarget = move\.displayTarget \?\? move\.target/);
+  assert.match(app, /mapSolidPoint\(renderedTarget, renderedPanelIndex\)/);
   assert.match(app, /visibleFaceSides\.forEach/);
   assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
+});
+
+test('人工后回合拆成三次单步并持续显示剩余步数', () => {
+  assert.match(app, /queenStepMoves/);
+  assert.match(app, /let queenTurn = null/);
+  assert.match(app, /async function chooseQueenStep\(move\)/);
+  assert.match(app, /后正在分步移动：已走 \$\{queenTurn\.stepsUsed\}\/3 步/);
+  assert.match(app, /还可走 \$\{Math\.max\(0, 3 - queenTurn\.stepsUsed\)\} 步/);
+  assert.match(app, /只有第3步可以吃子/);
+  assert.match(app, /skipMoveAnimation: true/);
+  assert.match(app, /remaining > 0 && selectedMoves\.size === 0/);
+  assert.match(app, /当前后没有合法的单步起点/);
+});
+
+test('传送后进入眼睛检测态并支持五秒或手动结束', () => {
+  assert.match(html, /id="portalDetection"/);
+  assert.match(html, /id="finishPortalDetectionButton"/);
+  assert.match(app, /function showPortalDetection\(autoFinish = false\)/);
+  assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?\}, 5000\)/);
+  assert.match(app, /finishPortalDetectionButton\.addEventListener\('click'/);
+  assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+  assert.match(styles, /\.portal-detection-eye/);
+  assert.match(styles, /@keyframes portal-eye-watch/);
 });
 
 test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {

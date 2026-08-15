@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=portal-choice-1">
+  <link rel="stylesheet" href="styles.css?v=queen-step-1">
 </head>
 <body>
   <main class="app-shell">
@@ -21,6 +21,11 @@
           </div>
         </div>
         <div class="board-help" id="boardHelp">点击己方棋子，查看合法移动位置。</div>
+        <div class="portal-detection hidden" id="portalDetection" aria-live="polite">
+          <span class="portal-detection-eye" aria-hidden="true">◉</span>
+          <span id="portalDetectionText">正在观察传送后的棋子状态</span>
+          <button id="finishPortalDetectionButton">结束检测</button>
+        </div>
         <div class="solid-viewer hidden" id="solidViewer" role="region" aria-labelledby="solidViewerTitle">
           <canvas id="solidBoardCanvas" aria-label="由六块三角板组成的双锥六面体"></canvas>
           <section class="solid-viewer-panel">
@@ -140,13 +145,13 @@
           <h2>本版可执行定义</h2>
           <ul>
             <li><b>王</b>：只在中心与六个外角之间，沿大三角边移动。</li>
-            <li><b>皇后</b>：每回合必须完整走3步，每步1格，可转向、不能穿子，通常不能重复经过同一点；拥有传送能力且从门上起步时，可离门一格后返回原门并用第3步穿越。只有第3步终点可以吃子。</li>
+            <li><b>皇后</b>：每回合分3次单步操作，每次移动1格，系统持续提示剩余步数；可转向、不能穿子，通常不能重复经过同一点。只有第3步可以吃子。</li>
             <li><b>象</b>：每回合只移动一个菱形长对角线的长度。</li>
             <li><b>兵</b>：沿任意相邻线路移动1格。</li>
             <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
             <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象占据目标；兵吃兵/王后占据目标；王吃后双方原位不变。降级也属于成功吃子。</li>
             <li><b>传送阵</b>：彩色“传”标记为实体板上的固定端点：1A-5 ↔ 4B-5、3A-5 ↔ 6B-5；同一对传送门颜色相同，不同对颜色不同。</li>
-            <li><b>传送能力</b>：后吃象成功后获得3回合传送能力，后身上显示3、2、1；之后每当该后完成一次走棋消耗1回合，吃象会重新刷新为3。能力有效时后可选择普通三步路线，或在三步中穿过一组传送门；到门和穿越分别计步。若后从门上起步，可立即穿越，也可先走相邻一格、返回原门，再用第3步穿越。同一落点同时存在普通和传送路线时会先询问移动方式。象和兵不能使用传送阵。</li>
+            <li><b>传送能力</b>：后吃象成功后获得3回合传送能力，后身上显示3、2、1；之后每当该后完成一次完整回合消耗1回合，吃象会刷新为3。后在门上时点击自身位置可用1步穿越；走到门后会询问下一步是否传送。穿越后进入带眼睛标记的临时检测状态，剩余步数继续在出口面操作；第3步吃到象才正式结算升沉，否则检测结束后回到传送前状态。象和兵不能使用传送阵。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
             <li><b>限时博弈</b>：后台搜索在3秒内迭代加深，执行最后一个完整深度的结论；同时使用 Alpha-Beta 剪枝、置换表、吃子静态延伸并优先避开近期重复局面。</li>
             <li><b>双层棋盘</b>：当前上层才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后棋盘不旋转，当前棋盘与棋子整体下沉，正下方对应的棋盘与棋子整体上浮，两层交换位置。</li>
@@ -207,6 +212,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=delayed-portal-1"></script>
+  <script type="module" src="app.js?v=queen-step-1"></script>
 </body>
 </html>

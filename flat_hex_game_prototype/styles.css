@@ -68,6 +68,12 @@ h2 { margin-bottom: 12px; font-size: 16px; }
 #board { display: block; width: 100%; height: auto; overflow: visible; }
 .face-badge { position: absolute; top: 16px; left: 18px; z-index: 3; padding: 8px 12px; border: 1px solid rgba(97,231,255,.28); border-radius: 999px; color: #bcefff; background: rgba(7,16,24,.78); font-size: 12px; }
 .board-help { position: absolute; left: 20px; bottom: 16px; color: #91a4b5; font-size: 12px; }
+.portal-detection { position: absolute; left: 50%; top: 18px; z-index: 6; display: flex; align-items: center; gap: 9px; transform: translateX(-50%); padding: 8px 10px; border: 1px solid rgba(97,231,255,.52); border-radius: 999px; color: #dff9ff; background: rgba(8,22,31,.9); box-shadow: 0 0 20px rgba(97,231,255,.24); font-size: 12px; }
+.portal-detection.hidden { display: none; }
+.portal-detection-eye { width: 24px; height: 16px; border: 2px solid #61e7ff; border-radius: 50% / 60%; display: grid; place-items: center; color: #ffc96a; line-height: 1; animation: portal-eye-watch 1s ease-in-out infinite alternate; }
+.portal-detection button { padding: 5px 9px; font-size: 11px; }
+.board-shell.portal-detecting { filter: drop-shadow(0 0 14px rgba(97,231,255,.42)); }
+@keyframes portal-eye-watch { from { transform: scaleX(.86); opacity: .7; } to { transform: scaleX(1.08); opacity: 1; } }
 aside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }

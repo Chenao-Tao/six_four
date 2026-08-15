@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createInitialState, keyOf, legalMoves } from './game.js';
+import { createInitialState, keyOf, legalMoves, queenStepMoves } from './game.js';
 import { moveChoicesAtTarget } from './move-choice.js';
 
 const ordinaryMove = {
@@ -46,7 +46,7 @@ test('没有重叠路线时只返回被点击的单个动作', () => {
   assert.deepEqual(moveChoicesAtTarget(moves, ordinaryMove, 'flat'), [ordinaryMove]);
 });
 
-test('真实双层棋局的重叠落点保留普通动作与具体传送路线', () => {
+test('真实双层棋局改为到门后分别提供普通下一步与同点传送选择', () => {
   const base = createInitialState();
   const queen = {
     id: 'wQ',
@@ -66,14 +66,17 @@ test('真实双层棋局的重叠落点保留普通动作与具体传送路线',
     boardStates: { front: [queen], back: [] },
     pieces: [queen]
   };
-  const moves = legalMoves(state, queen.id);
-  const ordinary = [...moves.values()].find(move =>
+  const firstMoves = queenStepMoves(state, queen.id);
+  const entry = [...firstMoves.values()].find(move =>
     !move.usesPortal && keyOf(move.target) === '1,-2');
+  assert.ok(entry);
 
-  assert.ok(ordinary);
-  const choices = moveChoicesAtTarget(moves, ordinary, 'flat');
+  const choices = [...queenStepMoves(state, queen.id, entry.nextQueenContext).values()];
   assert.ok(choices.some(move => !move.usesPortal));
-  assert.ok(choices.some(move => move.usesPortal && move.portalId === '1A5-4B5'));
+  assert.ok(choices.some(move =>
+    move.portalSelf && move.portalId === '1A5-4B5' && keyOf(move.displayTarget) === '1,-2'
+  ));
+  assert.equal([...legalMoves(state, queen.id).values()].some(move => move.usesPortal), false);
 });
 
 test('空动作集合或空目标不会产生移动方式选择', () => {

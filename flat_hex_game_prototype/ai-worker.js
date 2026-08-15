@@ -1,4 +1,4 @@
-import { iterativeGameSearch } from './game.js?v=delayed-portal-1';
+import { iterativeGameSearch } from './game.js?v=queen-step-1';
 
 self.addEventListener('message', event => {
   const request = event.data;

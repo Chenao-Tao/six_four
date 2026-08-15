@@ -17,6 +17,7 @@ import {
   legalMoves,
   PORTAL_PAIRS,
   portalEndpointLocations,
+  queenStepMoves,
   positionSignature,
   promotionTypeForMove,
   rotateBoardPanel,
@@ -247,22 +248,14 @@ test('后吃象获得三回合传送能力，普通走棋也会消耗一次能�
   assert.equal(findPiece(moved.state, 'wQ').portalTurns, 2);
 });
 
-test('后在能力有效期内可穿过空门，传送不再强制吃子', () => {
+test('空门传送只进入人工检测，不作为可提交或供AI搜索的完整动作', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
   ]);
-  const portalMove = [...legalMoves(state, 'wQ').values()].find(move => move.usesPortal);
-  assert.ok(portalMove);
-  assert.equal(portalMove.captureId, null);
-  assert.equal(portalMove.path.length, 4);
-  const result = applyMove(state, 'wQ', {
-    ...portalMove.target,
-    panelIndex: portalMove.panelIndex,
-    mapKey: portalMove.mapKey
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.state.turn, 'black');
-  assert.equal(result.state.boardStates.front.find(item => item.id === 'wQ').portalTurns, 2);
+  assert.equal(
+    [...legalMoves(state, 'wQ').values()].some(move => move.usesPortal),
+    false
+  );
 });
 
 test('有传送能力的后可以选择普通路线停在传送入口', () => {
@@ -282,34 +275,26 @@ test('有传送能力的后可以选择普通路线停在传送入口', () => {
   assert.ok(stoppedAtPortal.every(move => move.path.length === 4));
 });
 
-test('有传送能力的后经过传送入口时可以选择普通路线或传送路线', () => {
+test('有传送能力的后单步走到入口后可以选择留在当前面或下一步传送', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
   ]);
-  const portalPointKeys = new Set(
-    portalEndpointLocations(state)
-      .filter(location => location.layer === 'active')
-      .map(location => location.pointKey)
-  );
-  const moves = [...legalMoves(state, 'wQ').values()];
-  const ordinaryThroughPortal = moves.filter(move =>
-    !move.usesPortal && move.path.slice(1).some(point => portalPointKeys.has(keyOf(point)))
-  );
-
-  assert.ok(ordinaryThroughPortal.length > 0);
-  assert.ok(moves.some(move =>
-    move.usesPortal && move.pathSteps.some(step => step.portalEntry)
-  ));
+  const entry = [...queenStepMoves(state, 'wQ').values()].find(move =>
+    !move.usesPortal && keyOf(move.target) === '1,-2');
+  assert.ok(entry);
+  const choices = [...queenStepMoves(state, 'wQ', entry.nextQueenContext).values()];
+  assert.ok(choices.some(move => !move.usesPortal));
+  assert.ok(choices.some(move => move.usesPortal && move.portalSelf));
 });
 
-test('有传送能力的后从传送点起步时可以选择普通移动或穿越并记录入口出口', () => {
+test('有传送能力的后从传送点起步时可以选择普通单步或同点穿越并记录入口出口', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
   ]);
 
-  const moves = [...legalMoves(state, 'wQ').values()];
+  const moves = [...queenStepMoves(state, 'wQ').values()];
   const ordinaryMoves = moves.filter(move => !move.usesPortal);
-  const portalMoves = moves.filter(move => move.usesPortal);
+  const portalMoves = moves.filter(move => move.usesPortal && move.portalSelf);
 
   assert.ok(moves.length > 0);
   assert.ok(ordinaryMoves.length > 0);
@@ -321,31 +306,22 @@ test('有传送能力的后从传送点起步时可以选择普通移动或穿�
   assert.equal(portalMoves[0].portalTransition.exit.layer, 'active');
 });
 
-test('后从传送点起步可离开一格再返回，并用第三步穿越', () => {
+test('后从传送点起步可分步离开一格再返回，并用第三步进入传送检测', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
   ]);
+  const first = [...queenStepMoves(state, 'wQ').values()].find(move => !move.usesPortal);
+  const second = [...queenStepMoves(state, 'wQ', first.nextQueenContext).values()].find(move =>
+    !move.usesPortal && move.pointKey === first.pathSteps[0].pointKey);
+  const third = [...queenStepMoves(state, 'wQ', second.nextQueenContext).values()].find(move =>
+    move.portalSelf);
 
-  const delayedPortalMove = [...legalMoves(state, 'wQ').values()].find(move =>
-    move.usesPortal &&
-    move.pathSteps.length === 4 &&
-    move.pathSteps[0].layer === move.pathSteps[2].layer &&
-    move.pathSteps[0].pointKey === move.pathSteps[2].pointKey &&
-    move.pathSteps[1].pointKey !== move.pathSteps[0].pointKey &&
-    move.portalTransition.entry.pointKey === move.pathSteps[2].pointKey &&
-    move.portalTransition.exit.pointKey === move.pathSteps[3].pointKey
-  );
-
-  assert.ok(delayedPortalMove);
-  assert.equal(delayedPortalMove.portalTransition.entryPathIndex, 2);
-  const result = applyMove(state, 'wQ', {
-    ...delayedPortalMove.target,
-    panelIndex: delayedPortalMove.panelIndex,
-    mapKey: delayedPortalMove.mapKey
-  });
-  assert.equal(result.error, undefined);
-  assert.deepEqual(findPiece(result.state, 'wQ').position, delayedPortalMove.target);
-  assert.equal(findPiece(result.state, 'wQ').portalTurns, 2);
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(third);
+  assert.equal(third.portalTransition.entryPathIndex, 2);
+  assert.equal(third.requiresPortalCapture, true);
+  assert.equal(third.nextQueenContext.stepsUsed, 3);
 });
 
 test('传送出口有象时后可延迟到第三步穿越并完成吃子', () => {
@@ -363,7 +339,7 @@ test('传送出口有象时后可延迟到第三步穿越并完成吃子', () =>
   assert.ok(portalCaptures.every(move => move.pathSteps[0].pointKey === move.pathSteps[2].pointKey));
 });
 
-test('立体后也可在外层传送点绕行一格后返回并穿入内层', () => {
+test('立体后也可在外层传送点分步绕行一格后返回并进入内层检测', () => {
   const outer = [
     { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
   ];
@@ -376,22 +352,17 @@ test('立体后也可在外层传送点绕行一格后返回并穿入内层', ()
     pieces: outer
   };
 
-  const delayedPortalMove = [...legalMoves(state, 'wQ').values()].find(move =>
-    move.usesPortal &&
-    move.targetLayer === 'dormant' &&
-    move.pathSteps[0].pointKey === move.pathSteps[2].pointKey &&
-    move.portalTransition.entryPathIndex === 2
-  );
+  const first = [...queenStepMoves(state, 'wQ').values()].find(move => !move.usesPortal);
+  const second = [...queenStepMoves(state, 'wQ', first.nextQueenContext).values()].find(move =>
+    !move.usesPortal && move.pointKey === first.pathSteps[0].pointKey);
+  const third = [...queenStepMoves(state, 'wQ', second.nextQueenContext).values()].find(move =>
+    move.portalSelf && move.targetLayer === 'dormant');
 
-  assert.ok(delayedPortalMove);
-  const result = applyMove(state, 'wQ', {
-    ...delayedPortalMove.target,
-    panelIndex: delayedPortalMove.panelIndex,
-    mapKey: delayedPortalMove.mapKey
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), false);
-  assert.equal(result.state.solidLayers.inner.some(item => item.id === 'wQ'), true);
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(third);
+  assert.equal(third.portalTransition.entryPathIndex, 2);
+  assert.equal(third.requiresPortalCapture, true);
 });
 
 test('出口己方棋子阻挡传送，敌象仅允许第三步穿越吃子', () => {
@@ -415,11 +386,11 @@ test('出口己方棋子阻挡传送，敌象仅允许第三步穿越吃子', ()
   assert.ok(enemyPortalMoves.every(move => move.portalTransition.entryPathIndex === 2));
 });
 
-test('两组传送门都支持双向自动穿越', () => {
+test('两组传送门都支持双向单步穿越选择', () => {
   const frontState = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', -1, -1), panelIndex: 3, portalTurns: 3 }
   ]);
-  const frontMove = [...legalMoves(frontState, 'wQ').values()].find(move => move.usesPortal);
+  const frontMove = [...queenStepMoves(frontState, 'wQ').values()].find(move => move.portalSelf);
   assert.ok(frontMove);
   assert.deepEqual(frontMove.portalTransition.entry.position, { q: -1, r: -1 });
   assert.deepEqual(frontMove.portalTransition.exit.position, { q: 1, r: -2 });
@@ -432,7 +403,7 @@ test('两组传送门都支持双向自动穿越', () => {
     boardStates: { front: [], back: [backQueen] },
     pieces: [backQueen]
   };
-  const backMove = [...legalMoves(backState, 'wQ').values()].find(move => move.usesPortal);
+  const backMove = [...queenStepMoves(backState, 'wQ').values()].find(move => move.portalSelf);
   assert.ok(backMove);
   assert.equal(backMove.portalId, '3A5-6B5');
   assert.equal(backMove.portalTransition.entry.layer, 'active');
@@ -441,22 +412,81 @@ test('两组传送门都支持双向自动穿越', () => {
   assert.deepEqual(backMove.portalTransition.exit.position, { q: -2, r: 1 });
 });
 
-test('后穿过跨层空门但未吃子时只移动到潜藏层，不触发上浮下沉', () => {
+test('跨层空门未吃子时不产生可提交动作且不会提前换层', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
   ]);
-  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
-    move.usesPortal && move.targetLayer === 'dormant');
-  assert.ok(portalMove);
-  const result = applyMove(state, 'wQ', {
-    ...portalMove.target,
-    panelIndex: portalMove.panelIndex,
-    mapKey: portalMove.mapKey
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.state.layerExchangeCount ?? 0, 0);
-  assert.equal(result.state.boardStates.front.some(item => item.id === 'wQ'), false);
-  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ' && item.portalTurns === 2), true);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move => move.usesPortal);
+  assert.equal(portalMove, undefined);
+  assert.equal(state.layerExchangeCount ?? 0, 0);
+  assert.equal(state.boardStates.front.some(item => item.id === 'wQ'), true);
+  assert.equal(state.boardStates.back.some(item => item.id === 'wQ'), false);
+});
+
+test('后单步回合从传送点起步时显示同点传送动作和普通相邻动作', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const moves = [...queenStepMoves(state, 'wQ').values()];
+  const portal = moves.find(move => move.usesPortal && move.portalSelf);
+  const ordinary = moves.filter(move => !move.usesPortal);
+
+  assert.ok(portal);
+  assert.deepEqual(portal.displayTarget, { q: 1, r: -2 });
+  assert.deepEqual(portal.portalTransition.exit.position, { q: -1, r: -1 });
+  assert.equal(portal.nextQueenContext.stepsUsed, 1);
+  assert.ok(ordinary.length > 0);
+  assert.ok(ordinary.every(move => move.path.length === 2));
+});
+
+test('后走到传送点后可先保留在当前面，再由下一步明确选择传送', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const firstMoves = [...queenStepMoves(state, 'wQ').values()];
+  const entry = firstMoves.find(move => !move.usesPortal && keyOf(move.target) === '1,-2');
+
+  assert.ok(entry);
+  assert.equal(entry.nextQueenContext.stepsUsed, 1);
+  const nextMoves = [...queenStepMoves(state, 'wQ', entry.nextQueenContext).values()];
+  const portal = nextMoves.find(move => move.usesPortal && move.portalSelf);
+  assert.ok(portal);
+  assert.equal(portal.nextQueenContext.stepsUsed, 2);
+  assert.equal(portal.nextQueenContext.usedPortal, true);
+  assert.ok(nextMoves.some(move => !move.usesPortal));
+});
+
+test('后可把传送点作为第三步普通落点且不会被强制传送', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const first = [...queenStepMoves(state, 'wQ').values()].find(move =>
+    !move.usesPortal && keyOf(move.target) === '2,-3');
+  const second = [...queenStepMoves(state, 'wQ', first.nextQueenContext).values()].find(move =>
+    !move.usesPortal && keyOf(move.target) === '2,-2');
+  const third = [...queenStepMoves(state, 'wQ', second.nextQueenContext).values()].find(move =>
+    !move.usesPortal && keyOf(move.target) === '1,-2');
+
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(third);
+  assert.equal(third.nextQueenContext.stepsUsed, 3);
+  assert.equal(third.nextQueenContext.usedPortal, false);
+});
+
+test('后只有第三个单步允许吃子，前两步遇到敌子不会生成动作', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 },
+    { ...piece('bB', 'black', 'bishop', 2, -3), panelIndex: 4 }
+  ]);
+  const firstMoves = [...queenStepMoves(state, 'wQ').values()];
+  assert.equal(firstMoves.some(move => move.captureId === 'bB'), false);
+  const first = firstMoves.find(move => !move.usesPortal && keyOf(move.target) === '1,-2');
+  const secondMoves = [...queenStepMoves(state, 'wQ', first.nextQueenContext).values()];
+  assert.equal(secondMoves.some(move => move.captureId === 'bB'), false);
+  const second = secondMoves.find(move => !move.usesPortal && keyOf(move.target) === '2,-2');
+  const finalMoves = [...queenStepMoves(state, 'wQ', second.nextQueenContext).values()];
+  assert.equal(finalMoves.some(move => move.captureId === 'bB'), true);
 });
 
 test('传送能力从1回合走棋后消失，剩余回合也进入局面指纹', () => {
@@ -1008,9 +1038,10 @@ test('传送能力按剩余回合进入评估且最多计十八分', () => {
 });
 
 test('限时搜索返回的传送主变例保留完整入口出口和路线', () => {
-  const state = defaultDoubleSidedState([
-    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 1 }
-  ]);
+  const state = defaultDoubleSidedState(
+    [{ ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 1 }],
+    [{ ...piece('bB', 'black', 'bishop', -1, 2), panelIndex: 1 }]
+  );
   const steps = [...iterativeGameSearch(state, {
     maxDepth: 1,
     maxNodes: 5000,
