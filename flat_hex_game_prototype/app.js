@@ -95,6 +95,7 @@ const rotateSelectedPanelButton = document.getElementById('rotateSelectedPanelBu
 const flipSelectedPanelButton = document.getElementById('flipSelectedPanelButton');
 const swapSelectedPanelButton = document.getElementById('swapSelectedPanelButton');
 const layoutNameInput = document.getElementById('layoutNameInput');
+const newFlatLayoutButton = document.getElementById('newFlatLayoutButton');
 const saveLayoutButton = document.getElementById('saveLayoutButton');
 const savedLayoutSelect = document.getElementById('savedLayoutSelect');
 const loadLayoutButton = document.getElementById('loadLayoutButton');
@@ -1694,6 +1695,35 @@ function enterCustomEditor() {
   render();
 }
 
+function createNewFlatLayout() {
+  if (!customEditor || customEditor.boardShape !== 'flat') return;
+  closePieceEditor();
+  customEditor = {
+    side: 'front',
+    mode: 'pieces',
+    boardShape: 'flat',
+    selectedPanel: null,
+    swapPending: false,
+    pendingPortalEndpoint: null,
+    portalPairs: clonePortalPairs(),
+    boardStates: { front: [], back: [] },
+    faceLabels: {
+      front: [...BOARD_FACE_LABELS.front],
+      back: [...BOARD_FACE_LABELS.back]
+    },
+    panelRotations: {
+      front: [...BOARD_PANEL_ROTATIONS.front],
+      back: [...BOARD_PANEL_ROTATIONS.back]
+    }
+  };
+  editorPoint = null;
+  draftPieceSequence = 0;
+  layoutNameInput.value = nextCustomLayoutName();
+  solidLayoutNameInput.value = '';
+  boardHelp.textContent = '已新建空白平面布局，并加入两对默认传送阵。';
+  render();
+}
+
 async function switchEditorFace() {
   if (!customEditor || animationLock) return;
   closePieceEditor();
@@ -2387,6 +2417,7 @@ solidShapeButton.addEventListener('click', () => setBoardShape('solid'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
 rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
+newFlatLayoutButton.addEventListener('click', createNewFlatLayout);
 saveLayoutButton.addEventListener('click', saveLayoutToLibrary);
 saveSolidLayoutButton.addEventListener('click', saveSolidLayoutToLibrary);
 loadLayoutButton.addEventListener('click', loadLayoutFromLibrary);

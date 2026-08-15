@@ -109,6 +109,21 @@ test('自定义编辑支持命名保存、载入和删除本地布局', () => {
   assert.match(html, /静态部署时自动保存在当前浏览器/);
 });
 
+test('平面布局管理可以新建自带默认传送阵的双面空棋盘', () => {
+  const creator = app.match(/function createNewFlatLayout\(\)[\s\S]*?\n}\n\n/);
+
+  assert.match(html, /id="newFlatLayoutButton"[^>]*>新建布局<\/button>/);
+  assert.ok(creator);
+  assert.match(creator[0], /boardStates: \{ front: \[\], back: \[\] \}/);
+  assert.match(creator[0], /portalPairs: clonePortalPairs\(\)/);
+  assert.match(creator[0], /front: \[\.\.\.BOARD_FACE_LABELS\.front\]/);
+  assert.match(creator[0], /back: \[\.\.\.BOARD_FACE_LABELS\.back\]/);
+  assert.match(creator[0], /front: \[\.\.\.BOARD_PANEL_ROTATIONS\.front\]/);
+  assert.match(creator[0], /back: \[\.\.\.BOARD_PANEL_ROTATIONS\.back\]/);
+  assert.match(creator[0], /layoutNameInput\.value = nextCustomLayoutName\(\)/);
+  assert.match(app, /newFlatLayoutButton\.addEventListener\('click', createNewFlatLayout\)/);
+});
+
 test('启用使用当前编辑覆盖所选存档且不会立即开局或退出编辑', () => {
   const activation = app.match(
     /async function activateLayoutFromLibrary[\s\S]*?\n}\n\nfunction activateSolidLayoutFromLibrary/
