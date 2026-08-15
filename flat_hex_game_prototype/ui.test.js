@@ -411,6 +411,15 @@ test('手动与算法走棋共用平面和立体传送特效并在换层前完�
   assert.match(styles, /\.portal-transition-path/);
 });
 
+test('传送路线重复经过入口时从实际穿越步骤开始播放特效', () => {
+  const animation = app.match(/async function animateMove\([\s\S]*?\n}\n\nasync function animateBoardLayerExchange/);
+
+  assert.ok(animation);
+  assert.match(animation[0], /portalTransition\.entryPathIndex/);
+  assert.match(animation[0], /Number\.isInteger\(portalTransition\.entryPathIndex\)/);
+  assert.doesNotMatch(animation[0], /const entryIndex = portalTransition\s*\? attackerPath\.findIndex/);
+});
+
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {
   assert.match(html, /id="solidPanelSelection"/);
   assert.match(html, /id="rotateSolidPanelButton"/);

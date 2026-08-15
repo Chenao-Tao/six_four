@@ -1275,7 +1275,8 @@ function addPortalMove(moves, target, route, captured = null) {
           exit: {
             ...route.portalTransition.exit,
             position: { ...route.portalTransition.exit.position }
-          }
+          },
+          entryPathIndex: route.portalTransition.entryPathIndex
         }
       : null,
     usesPortal: true,
@@ -1304,6 +1305,7 @@ function chargedQueenMoves(state, pieceToMove) {
     portalId: null,
     portalColor: null,
     portalTransition: null,
+    deferredPortal: null,
     pathSteps: [{
       layer: 'active',
       position: { ...pieceToMove.position },
@@ -1318,10 +1320,20 @@ function chargedQueenMoves(state, pieceToMove) {
     const depth = current.pathSteps.length - 1;
     if (depth >= 3) continue;
     const nextDepth = depth + 1;
-    const consider = (target, portal = null) => {
+    const consider = (target, portal = null, deferredPortal = current.deferredPortal) => {
       const visitKey = `${target.layer}:${target.pointKey}`;
-      if (current.visited.has(visitKey)) return;
-      const occupant = occupantsByLayer[target.layer].get(target.pointKey);
+      const returnsToDeferredPortal = Boolean(
+        !portal &&
+        deferredPortal &&
+        nextDepth === 2 &&
+        target.layer === deferredPortal.layer &&
+        target.pointKey === deferredPortal.pointKey
+      );
+      if (current.visited.has(visitKey) && !returnsToDeferredPortal) return;
+      const targetOccupant = occupantsByLayer[target.layer].get(target.pointKey);
+      const occupant = returnsToDeferredPortal && targetOccupant?.id === pieceToMove.id
+        ? null
+        : targetOccupant;
       const usedPortal = current.usedPortal || Boolean(portal);
       const portalId = portal?.portalId ?? current.portalId;
       const portalColor = portal?.portalColor ?? current.portalColor;
@@ -1338,7 +1350,8 @@ function chargedQueenMoves(state, pieceToMove) {
               position: { ...target.position },
               panelIndex: target.panelIndex,
               pointKey: target.pointKey
-            }
+            },
+            entryPathIndex: current.pathSteps.length - 1
           }
         : current.portalTransition;
       const pathSteps = [...current.pathSteps, {
@@ -1402,6 +1415,7 @@ function chargedQueenMoves(state, pieceToMove) {
         portalId,
         portalColor,
         portalTransition,
+        deferredPortal: portal ? null : deferredPortal,
         pathSteps,
         visited: new Set([...current.visited, visitKey])
       });
@@ -1416,6 +1430,37 @@ function chargedQueenMoves(state, pieceToMove) {
           portalId: transition.source.portalId,
           portalColor: transition.source.portalColor
         });
+      }
+      if (depth === 0) {
+        const deferredPortal = {
+          layer: current.layer,
+          position: { ...current.position },
+          panelIndex: current.panelIndex,
+          pointKey: current.pointKey
+        };
+        for (const transition of stepTransitions(
+          state,
+          current.position,
+          current.panelIndex,
+          'step'
+        )) {
+          consider({ ...transition, layer: current.layer }, null, deferredPortal);
+        }
+      }
+      continue;
+    }
+    if (current.deferredPortal) {
+      for (const transition of stepTransitions(
+        state,
+        current.position,
+        current.panelIndex,
+        'step'
+      )) {
+        const target = { ...transition, layer: current.layer };
+        if (target.layer === current.deferredPortal.layer &&
+            target.pointKey === current.deferredPortal.pointKey) {
+          consider(target);
+        }
       }
       continue;
     }

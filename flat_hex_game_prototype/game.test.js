@@ -321,7 +321,80 @@ test('有传送能力的后从传送点起步时可以选择普通移动或穿�
   assert.equal(portalMoves[0].portalTransition.exit.layer, 'active');
 });
 
-test('传送出口被占用时只阻止传送路线并保留普通路线', () => {
+test('后从传送点起步可离开一格再返回，并用第三步穿越', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
+  ]);
+
+  const delayedPortalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.usesPortal &&
+    move.pathSteps.length === 4 &&
+    move.pathSteps[0].layer === move.pathSteps[2].layer &&
+    move.pathSteps[0].pointKey === move.pathSteps[2].pointKey &&
+    move.pathSteps[1].pointKey !== move.pathSteps[0].pointKey &&
+    move.portalTransition.entry.pointKey === move.pathSteps[2].pointKey &&
+    move.portalTransition.exit.pointKey === move.pathSteps[3].pointKey
+  );
+
+  assert.ok(delayedPortalMove);
+  assert.equal(delayedPortalMove.portalTransition.entryPathIndex, 2);
+  const result = applyMove(state, 'wQ', {
+    ...delayedPortalMove.target,
+    panelIndex: delayedPortalMove.panelIndex,
+    mapKey: delayedPortalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(findPiece(result.state, 'wQ').position, delayedPortalMove.target);
+  assert.equal(findPiece(result.state, 'wQ').portalTurns, 2);
+});
+
+test('传送出口有象时后可延迟到第三步穿越并完成吃子', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
+    { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
+  ]);
+
+  const portalCaptures = [...legalMoves(state, 'wQ').values()].filter(move =>
+    move.usesPortal && move.captureId === 'bB'
+  );
+
+  assert.ok(portalCaptures.length > 0);
+  assert.ok(portalCaptures.every(move => move.portalTransition.entryPathIndex === 2));
+  assert.ok(portalCaptures.every(move => move.pathSteps[0].pointKey === move.pathSteps[2].pointKey));
+});
+
+test('立体后也可在外层传送点绕行一格后返回并穿入内层', () => {
+  const outer = [
+    { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
+  ];
+  const base = defaultDoubleSidedState(outer, []);
+  const state = {
+    ...base,
+    boardShape: 'solid',
+    solidLayers: { outer, inner: [] },
+    solidFaceSides: Array(6).fill('front'),
+    pieces: outer
+  };
+
+  const delayedPortalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.usesPortal &&
+    move.targetLayer === 'dormant' &&
+    move.pathSteps[0].pointKey === move.pathSteps[2].pointKey &&
+    move.portalTransition.entryPathIndex === 2
+  );
+
+  assert.ok(delayedPortalMove);
+  const result = applyMove(state, 'wQ', {
+    ...delayedPortalMove.target,
+    panelIndex: delayedPortalMove.panelIndex,
+    mapKey: delayedPortalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), false);
+  assert.equal(result.state.solidLayers.inner.some(item => item.id === 'wQ'), true);
+});
+
+test('出口己方棋子阻挡传送，敌象仅允许第三步穿越吃子', () => {
   const friendlyBlocked = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
     { ...piece('wP', 'white', 'pawn', -1, -1), panelIndex: 3 }
@@ -336,7 +409,10 @@ test('传送出口被占用时只阻止传送路线并保留普通路线', () =>
   assert.ok(friendlyMoves.length > 0);
   assert.ok(enemyMoves.length > 0);
   assert.ok(friendlyMoves.every(move => !move.usesPortal));
-  assert.ok(enemyMoves.every(move => !move.usesPortal));
+  const enemyPortalMoves = enemyMoves.filter(move => move.usesPortal);
+  assert.ok(enemyPortalMoves.length > 0);
+  assert.ok(enemyPortalMoves.every(move => move.captureId === 'bB'));
+  assert.ok(enemyPortalMoves.every(move => move.portalTransition.entryPathIndex === 2));
 });
 
 test('两组传送门都支持双向自动穿越', () => {

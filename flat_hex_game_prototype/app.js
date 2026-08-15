@@ -28,7 +28,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=optional-portal-1';
+} from './game.js?v=delayed-portal-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -1396,8 +1396,12 @@ async function animateMove(
     ? [...path, ...path.slice(0, -1).reverse()]
     : path;
   animationLock = true;
+  const configuredEntryIndex = portalTransition?.entryPathIndex;
   const entryIndex = portalTransition
-    ? attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
+    ? Number.isInteger(portalTransition.entryPathIndex) &&
+      configuredEntryIndex >= 0 && configuredEntryIndex < attackerPath.length
+      ? configuredEntryIndex
+      : attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
     : -1;
   if (entryIndex >= 0) {
     await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
@@ -1608,7 +1612,7 @@ function searchWithWorker(searchId, searchState, onProgress) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const worker = new Worker(
-      new URL('./ai-worker.js?v=ai-search-1', import.meta.url),
+      new URL('./ai-worker.js?v=delayed-portal-1', import.meta.url),
       { type: 'module' }
     );
     aiSearchWorker = worker;
