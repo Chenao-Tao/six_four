@@ -25,7 +25,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=portal-movement-1';
+} from './game.js?v=portal-charge-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -488,14 +488,16 @@ function solidBoardModel() {
       ...mapped,
       targetKey: move.mapKey ?? keyOf(move.target),
       captureId: move.captureId,
-      usesPortal: Boolean(move.usesPortal)
+      usesPortal: Boolean(move.usesPortal),
+      portalColor: move.portalColor
     };
   });
   const portalTargets = customEditor ? [] : portalEndpointLocations(state)
     .filter(location => location.layer === (previewSide === null ? 'active' : 'dormant'))
     .map(location => ({
       ...mapSolidPoint(location.position, location.panelIndex),
-      portalId: location.portalId
+      portalId: location.portalId,
+      portalColor: location.portalColor
     }));
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
@@ -880,7 +882,8 @@ function renderPortals() {
       const pixel = toPixel(location.position);
       const group = svgElement('g', {
         class: 'portal-marker',
-        'data-portal-id': location.portalId
+        'data-portal-id': location.portalId,
+        style: `--portal-color: ${location.portalColor}`
       });
       group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 10 }));
       const label = svgElement('text', {
@@ -941,6 +944,22 @@ function renderPiece(piece) {
   });
   label.textContent = pieceSymbol(piece.type);
   group.appendChild(label);
+  if (piece.type === 'queen' && piece.portalTurns > 0) {
+    group.appendChild(svgElement('circle', {
+      class: 'portal-charge',
+      cx: 18,
+      cy: -18,
+      r: 10
+    }));
+    const charge = svgElement('text', {
+      class: 'portal-charge-label',
+      x: 18,
+      y: -14,
+      'text-anchor': 'middle'
+    });
+    charge.textContent = String(piece.portalTurns);
+    group.appendChild(charge);
+  }
   group.addEventListener('click', event => {
     event.stopPropagation();
     if (customEditor) {
@@ -1000,14 +1019,16 @@ function renderMoves() {
   selectedMoves.forEach(move => {
     pathLayer.appendChild(svgElement('polyline', {
       class: `move-path ${move.usesPortal ? 'portal' : ''}`,
-      points: pointList(move.path)
+      points: pointList(move.path),
+      ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
     }));
     const pixel = toPixel(move.target);
     const target = svgElement('circle', {
       class: `move-target ${move.captureId ? 'capture' : ''} ${move.usesPortal ? 'portal' : ''}`,
       cx: pixel.x, cy: pixel.y, r: move.usesPortal ? 11 : 16,
       'data-target': move.mapKey ?? keyOf(move.target),
-      'aria-label': move.usesPortal ? '传送吃子' : move.captureId ? '吃子' : '移动'
+      'aria-label': move.usesPortal ? '传送移动' : move.captureId ? '吃子' : '移动',
+      ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
     });
     target.addEventListener('click', event => {
       event.stopPropagation();
@@ -1128,7 +1149,7 @@ function selectPiece(pieceId) {
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
     `${selectedMoves.size} 个合法落点`;
-  boardHelp.textContent = '青色为移动，红色为吃子，紫色小圆为满足本回合吃子条件的传送动作。';
+  boardHelp.textContent = '青色为移动，红色为吃子；有传送能力的后会显示3/2/1计数，彩色小圆为可穿越的传送路线。';
   render();
 }
 

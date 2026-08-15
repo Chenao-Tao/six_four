@@ -252,9 +252,12 @@ test('平面与立体棋盘都显示传送点并用唯一路线键提交动作',
   assert.match(app, /function renderPortals\(\)/);
   assert.match(app, /portalEndpointLocations\(state\)/);
   assert.match(app, /class: 'portal-marker'/);
+  assert.match(app, /class: 'portal-charge'/);
+  assert.match(app, /portalColor: location\.portalColor/);
   assert.match(app, /move\.mapKey \? \{ mapKey: move\.mapKey \} : \{\}/);
   assert.match(styles, /\.move-path\.portal/);
   assert.match(styles, /\.portal-marker circle/);
+  assert.match(styles, /\.portal-charge-label/);
 });
 
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {

@@ -15,6 +15,7 @@ import {
   iterativeGameSearch,
   keyOf,
   legalMoves,
+  PORTAL_PAIRS,
   portalEndpointLocations,
   positionSignature,
   promotionTypeForMove,
@@ -101,7 +102,7 @@ test('后吃象后双方换位，象强制降级为兵', () => {
 
 test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', () => {
   const state = defaultDoubleSidedState([
-    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4 },
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 },
     { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
   ]);
 
@@ -124,6 +125,7 @@ test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', (
   assert.equal(result.error, undefined);
   assert.equal(result.move.portalId, '1A5-4B5');
   assert.equal(result.positionEffect, 'swap');
+  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ' && item.portalTurns === 3), true);
   assert.equal(result.state.layerExchangeCount, (state.layerExchangeCount ?? 0) + 1);
   assert.equal(result.captured.type, 'bishop');
   assert.equal([
@@ -134,7 +136,7 @@ test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', (
 
 test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外层', () => {
   const outer = [
-    { ...piece('wQ', 'white', 'queen', -3, 2), panelIndex: 2 }
+    { ...piece('wQ', 'white', 'queen', -3, 2), panelIndex: 2, portalTurns: 3 }
   ];
   const inner = [
     { ...piece('bB', 'black', 'bishop', -1, 2), panelIndex: 1 }
@@ -166,6 +168,7 @@ test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外�
   });
   assert.equal(result.error, undefined);
   assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), true);
+  assert.equal(result.state.solidLayers.outer.find(item => item.id === 'wQ').portalTurns, 3);
   assert.equal(result.state.solidLayers.inner.some(item => item.id === 'bB' && item.type === 'pawn'), true);
   assert.equal(result.state.solidFaceSides.every(side => side === 'back'), true);
 });
@@ -179,32 +182,13 @@ test('象吃兵时兵被消灭且象占据目标点', () => {
   assert.equal(findPiece(bishopAttack.state, 'bP'), undefined);
 });
 
-test('象只有从传送点起步且落点为空时才能传送后再走一步吃兵', () => {
+test('象不再因为站在传送点而获得传送动作', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wB', 'white', 'bishop', 1, -2), panelIndex: 4 },
     { ...piece('bP', 'black', 'pawn', 0, -2), panelIndex: 3 }
   ]);
 
-  const portalMove = [...legalMoves(state, 'wB').values()].find(move => move.usesPortal);
-  assert.ok(portalMove);
-  assert.equal(portalMove.captureId, 'bP');
-  assert.deepEqual(portalMove.path, [
-    { q: 1, r: -2 },
-    { q: -1, r: -1 },
-    { q: 0, r: -2 }
-  ]);
-
-  const result = applyMove(state, 'wB', {
-    ...portalMove.target,
-    panelIndex: portalMove.panelIndex,
-    mapKey: portalMove.mapKey
-  });
-  assert.equal(result.error, undefined);
-  assert.equal(result.positionEffect, 'occupy');
-  assert.equal([
-    ...result.state.boardStates.front,
-    ...result.state.boardStates.back
-  ].some(item => item.id === 'bP'), false);
+  assert.equal([...legalMoves(state, 'wB').values()].some(move => move.usesPortal), false);
 });
 
 test('象的传送出口被占用时不能穿越且失败不消耗回合', () => {
@@ -226,20 +210,110 @@ test('象的传送出口被占用时不能穿越且失败不消耗回合', () =>
   assert.equal(result.state.moveNumber, 1);
 });
 
-test('兵站在传送点时只有出口可吃子才生成传送动作', () => {
+test('兵不再因为站在传送点而获得传送动作', () => {
   const successState = defaultDoubleSidedState([
     { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 },
     { ...piece('bP', 'black', 'pawn', -1, -1), panelIndex: 3 }
   ]);
-  const portalMove = [...legalMoves(successState, 'wP').values()].find(move => move.usesPortal);
-  assert.ok(portalMove);
-  assert.equal(portalMove.captureId, 'bP');
-  assert.equal(portalMove.path.length, 2);
+  assert.equal([...legalMoves(successState, 'wP').values()].some(move => move.usesPortal), false);
 
   const emptyExitState = defaultDoubleSidedState([
     { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 }
   ]);
   assert.equal([...legalMoves(emptyExitState, 'wP').values()].some(move => move.usesPortal), false);
+});
+
+test('后吃象获得三回合传送能力，普通走棋也会消耗一次能力回合', () => {
+  const state = stateOf([
+    piece('wQ', 'white', 'queen', -3, 0),
+    piece('bB', 'black', 'bishop', 0, 0)
+  ]);
+  const captured = applyMove(state, 'wQ', { q: 0, r: 0 });
+  assert.equal(findPiece(captured.state, 'wQ').portalTurns, 3);
+
+  const chargedState = {
+    ...stateOf([
+      { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 3 }
+    ]),
+    turn: 'white'
+  };
+  const ordinaryMove = [...legalMoves(chargedState, 'wQ').values()]
+    .find(move => !move.usesPortal);
+  const moved = applyMove(chargedState, 'wQ', {
+    ...ordinaryMove.target,
+    panelIndex: ordinaryMove.panelIndex,
+    mapKey: ordinaryMove.mapKey
+  });
+  assert.equal(findPiece(moved.state, 'wQ').portalTurns, 2);
+});
+
+test('后在能力有效期内可穿过空门，传送不再强制吃子', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move => move.usesPortal);
+  assert.ok(portalMove);
+  assert.equal(portalMove.captureId, null);
+  assert.equal(portalMove.path.length, 4);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.turn, 'black');
+  assert.equal(result.state.boardStates.front.find(item => item.id === 'wQ').portalTurns, 2);
+});
+
+test('后穿过跨层空门但未吃子时只移动到潜藏层，不触发上浮下沉', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
+  ]);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.usesPortal && move.targetLayer === 'dormant');
+  assert.ok(portalMove);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.layerExchangeCount ?? 0, 0);
+  assert.equal(result.state.boardStates.front.some(item => item.id === 'wQ'), false);
+  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ' && item.portalTurns === 2), true);
+});
+
+test('传送能力从1回合走棋后消失，剩余回合也进入局面指纹', () => {
+  const oneTurnState = stateOf([
+    { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 1 }
+  ]);
+  const threeTurnState = stateOf([
+    { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 3 }
+  ]);
+  assert.notEqual(positionSignature(oneTurnState), positionSignature(threeTurnState));
+  const ordinaryMove = [...legalMoves(oneTurnState, 'wQ').values()]
+    .find(move => !move.usesPortal);
+  const result = applyMove(oneTurnState, 'wQ', {
+    ...ordinaryMove.target,
+    panelIndex: ordinaryMove.panelIndex,
+    mapKey: ordinaryMove.mapKey
+  });
+  assert.equal(findPiece(result.state, 'wQ').portalTurns, undefined);
+});
+
+test('再次吃象会把已有传送能力刷新为三回合', () => {
+  const state = stateOf([
+    { ...piece('wQ', 'white', 'queen', -3, 0), portalTurns: 1 },
+    piece('bB', 'black', 'bishop', 0, 0)
+  ]);
+  const result = applyMove(state, 'wQ', { q: 0, r: 0 });
+  assert.equal(findPiece(result.state, 'wQ').portalTurns, 3);
+});
+
+test('两组传送门各自同色且颜色不同', () => {
+  assert.equal(PORTAL_PAIRS[0].color, PORTAL_PAIRS[0].color);
+  assert.equal(PORTAL_PAIRS[1].color, PORTAL_PAIRS[1].color);
+  assert.notEqual(PORTAL_PAIRS[0].color, PORTAL_PAIRS[1].color);
 });
 
 test('传送点绑定实体板编号并随 1A 板旋转', () => {

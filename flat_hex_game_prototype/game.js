@@ -83,6 +83,7 @@ export const BOARD_PANEL_ROTATIONS = {
 export const PORTAL_PAIRS = [
   {
     id: '1A5-4B5',
+    color: '#ffbe55',
     endpoints: [
       { faceLabel: '1A', pointNumber: 5 },
       { faceLabel: '4B', pointNumber: 5 }
@@ -90,6 +91,7 @@ export const PORTAL_PAIRS = [
   },
   {
     id: '3A5-6B5',
+    color: '#58d9ff',
     endpoints: [
       { faceLabel: '3A', pointNumber: 5 },
       { faceLabel: '6B', pointNumber: 5 }
@@ -677,7 +679,7 @@ export function positionSignature(state) {
       const positionKey = state.boardShape === 'solid'
         ? solidPointKey(item.position, piecePanelIndex(item))
         : keyOf(item.position);
-      return `${item.id}:${item.side}:${item.type}:${positionKey}`;
+      return `${item.id}:${item.side}:${item.type}:${item.portalTurns ?? 0}:${positionKey}`;
     })
     .join('|');
   const position = state.solidLayers
@@ -924,7 +926,12 @@ export function portalEndpointLocations(state) {
           endpoint.pointNumber,
           layer
         );
-        if (location) locations.push({ ...location, portalId: portal.id, endpointIndex });
+        if (location) locations.push({
+          ...location,
+          portalId: portal.id,
+          portalColor: portal.color,
+          endpointIndex
+        });
       }
     }
   }
@@ -1156,7 +1163,7 @@ function solidQueenMoves(state, pieceToMove, occupied) {
   return moves;
 }
 
-function addPortalMove(moves, pieceToMove, target, route, captured) {
+function addPortalMove(moves, target, route, captured = null) {
   const routeKey = route.pathSteps.map(step =>
     `${step.layer}:${step.panelIndex}:${keyOf(step.position)}`).join('>');
   const mapKey = `portal:${route.portalId}:${routeKey}`;
@@ -1169,16 +1176,18 @@ function addPortalMove(moves, pieceToMove, target, route, captured) {
     pathSteps: route.pathSteps,
     mapKey,
     portalId: route.portalId,
+    portalColor: route.portalColor,
     usesPortal: true,
     targetLayer: target.layer,
     captureLayer: target.layer,
-    captureId: captured.id,
-    capturedType: captured.type,
-    capturesKing: captured.type === 'king'
+    captureId: captured?.id ?? null,
+    capturedType: captured?.type ?? null,
+    capturesKing: captured?.type === 'king'
   });
 }
 
 function portalMovesForQueen(state, pieceToMove, moves) {
+  if (!(pieceToMove.portalTurns > 0)) return;
   const startPanel = piecePanelIndex(pieceToMove);
   const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
   const occupantsByLayer = {
@@ -1192,6 +1201,7 @@ function portalMovesForQueen(state, pieceToMove, moves) {
     pointKey: startPointKey,
     usedPortal: false,
     portalId: null,
+    portalColor: null,
     pathSteps: [{
       layer: 'active',
       position: { ...pieceToMove.position },
@@ -1206,34 +1216,47 @@ function portalMovesForQueen(state, pieceToMove, moves) {
     const depth = current.pathSteps.length - 1;
     if (depth >= 3) continue;
     const nextDepth = depth + 1;
-    const consider = (target, portalId = current.portalId) => {
+    const consider = (target, portal = null) => {
       const visitKey = `${target.layer}:${target.pointKey}`;
       if (current.visited.has(visitKey)) return;
       const occupant = occupantsByLayer[target.layer].get(target.pointKey);
-      const usedPortal = current.usedPortal || Boolean(portalId && !current.usedPortal);
+      const usedPortal = current.usedPortal || Boolean(portal);
+      const portalId = portal?.portalId ?? current.portalId;
+      const portalColor = portal?.portalColor ?? current.portalColor;
       const pathSteps = [...current.pathSteps, {
         layer: target.layer,
         position: { ...target.position },
         panelIndex: target.panelIndex,
         pointKey: target.pointKey,
-        ...(portalId && !current.usedPortal ? { portalEntry: true } : {})
+        ...(portal ? { portalEntry: true } : {})
       }];
       if (occupant) {
         if (nextDepth === 3 && usedPortal &&
             occupant.side !== pieceToMove.side &&
             canCapture(pieceToMove.type, occupant.type)) {
-          addPortalMove(moves, pieceToMove, target, {
+          addPortalMove(moves, target, {
             portalId,
+            portalColor,
             pathSteps
           }, occupant);
         }
         return;
       }
-      if (nextDepth === 3) return;
+      if (nextDepth === 3) {
+        if (usedPortal) {
+          addPortalMove(moves, target, {
+            portalId,
+            portalColor,
+            pathSteps
+          });
+        }
+        return;
+      }
       queue.push({
         ...target,
         usedPortal,
         portalId,
+        portalColor,
         pathSteps,
         visited: new Set([...current.visited, visitKey])
       });
@@ -1249,64 +1272,11 @@ function portalMovesForQueen(state, pieceToMove, moves) {
     }
     if (!current.usedPortal) {
       for (const transition of portalTransitions(state, current.layer, current.pointKey)) {
-        consider(transition.target, transition.source.portalId);
-      }
-    }
-  }
-}
-
-function portalMovesFromStart(state, pieceToMove, moves) {
-  const startPanel = piecePanelIndex(pieceToMove);
-  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
-  const transitions = portalTransitions(state, 'active', startPointKey);
-  for (const transition of transitions) {
-    const target = transition.target;
-    const targetOccupants = layerOccupants(state, target.layer);
-    const targetOccupant = targetOccupants.get(target.pointKey);
-    const startStep = {
-      layer: 'active',
-      position: { ...pieceToMove.position },
-      panelIndex: startPanel,
-      pointKey: startPointKey
-    };
-    const portalStep = {
-      ...target,
-      position: { ...target.position },
-      portalEntry: true
-    };
-
-    if (pieceToMove.type === 'pawn') {
-      if (targetOccupant?.side !== pieceToMove.side &&
-          canCapture(pieceToMove.type, targetOccupant?.type)) {
-        addPortalMove(moves, pieceToMove, target, {
+        consider(transition.target, {
           portalId: transition.source.portalId,
-          pathSteps: [startStep, portalStep]
-        }, targetOccupant);
+          portalColor: transition.source.portalColor
+        });
       }
-      continue;
-    }
-
-    if (pieceToMove.type !== 'bishop' || targetOccupant) continue;
-    for (const destination of stepTransitions(
-      state,
-      target.position,
-      target.panelIndex,
-      'step'
-    )) {
-      const captured = targetOccupants.get(destination.pointKey);
-      if (captured?.side === pieceToMove.side ||
-          !canCapture(pieceToMove.type, captured?.type)) continue;
-      addPortalMove(moves, pieceToMove, {
-        ...destination,
-        layer: target.layer
-      }, {
-        portalId: transition.source.portalId,
-        pathSteps: [startStep, portalStep, {
-          ...destination,
-          layer: target.layer,
-          position: { ...destination.position }
-        }]
-      }, captured);
     }
   }
 }
@@ -1314,9 +1284,6 @@ function portalMovesFromStart(state, pieceToMove, moves) {
 function addPortalMoves(state, pieceToMove, moves) {
   if (!state.boardStates && !state.solidLayers) return moves;
   if (pieceToMove.type === 'queen') portalMovesForQueen(state, pieceToMove, moves);
-  if (pieceToMove.type === 'bishop' || pieceToMove.type === 'pawn') {
-    portalMovesFromStart(state, pieceToMove, moves);
-  }
   return moves;
 }
 
@@ -1503,6 +1470,13 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
       ? move.panelIndex ?? panelIndexForPoint(move.target)
       : piecePanelIndex(movingPiece)
   };
+  if (movingPiece.type === 'queen') {
+    const nextPortalTurns = captured?.type === 'bishop'
+      ? 3
+      : Math.max(0, (movingPiece.portalTurns ?? 0) - 1);
+    if (nextPortalTurns > 0) nextMovingPiece.portalTurns = nextPortalTurns;
+    else delete nextMovingPiece.portalTurns;
+  }
   if (attackerMoves && targetLayer === 'dormant') nextDormantPieces.push(nextMovingPiece);
   else nextActivePieces.push(nextMovingPiece);
   if (capturedType) {
@@ -1516,6 +1490,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         ? piecePanelIndex(movingPiece)
         : piecePanelIndex(captured)
     };
+    if (nextCapturedPiece.type !== 'queen') delete nextCapturedPiece.portalTurns;
     if (positionEffect === 'swap' || captureLayer === 'active') {
       nextActivePieces.push(nextCapturedPiece);
     } else {
@@ -1530,6 +1505,13 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         : `，${PIECE_NAMES[captured.type]}在原位降级为${PIECE_NAMES[capturedType]}`
       : `，${PIECE_NAMES[captured.type]}移出棋盘`
     : '';
+  const portalAbilityResult = movingPiece.type === 'queen' && captured?.type === 'bishop'
+    ? '，后获得3回合传送能力'
+    : movingPiece.type === 'queen' && movingPiece.portalTurns > 0
+      ? nextMovingPiece.portalTurns
+        ? `，传送能力剩余${nextMovingPiece.portalTurns}回合`
+        : '，传送能力已结束'
+      : '';
   const description = `${movingPiece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[movingPiece.type]} ` +
     (captured
       ? `在 ${keyOf(movingPiece.position)} 攻击 ${keyOf(target)}，吃${PIECE_NAMES[captured.type]}`
@@ -1537,7 +1519,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     captureResult +
     (capturedIsEliminated && positionEffect === 'occupy' ? '，攻击者占据目标点' : '') +
     (capturedIsEliminated && positionEffect === 'hold' ? '，攻击者留在原位' : '') +
-    (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
+    (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '') +
+    portalAbilityResult;
   const nextTurn = state.turn === 'white' ? 'black' : 'white';
   const nextWinner = move.capturesKing ? movingPiece.side : null;
   const shouldExchangeLayers = Boolean(captured && (state.boardStates || state.solidLayers));
@@ -1561,7 +1544,16 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             back: physicalBackPieces(solidLayers.inner)
           }
         : flatLayerExchange.boardStates
-      : { ...state.boardStates, [state.boardSide]: nextActivePieces }
+      : solidLayers
+        ? {
+            front: solidLayers.outer,
+            back: physicalBackPieces(solidLayers.inner)
+          }
+        : {
+            ...state.boardStates,
+            [state.boardSide]: nextActivePieces,
+            [state.boardSide === 'front' ? 'back' : 'front']: nextDormantPieces
+          }
     : undefined;
   const layerExchangeResult = shouldExchangeLayers
     ? '，棋盘不旋转，棋盘与棋子整体交换上下层'

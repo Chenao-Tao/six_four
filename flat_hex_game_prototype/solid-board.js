@@ -513,6 +513,20 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
       context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
       context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+      if (piece.type === 'queen' && piece.portalTurns > 0) {
+        const badgeX = position.x + radius * 0.72;
+        const badgeY = position.y - radius * 0.72;
+        context.beginPath();
+        context.arc(badgeX, badgeY, Math.max(7, radius * 0.34), 0, Math.PI * 2);
+        context.fillStyle = '#172532';
+        context.fill();
+        context.lineWidth = 1.5;
+        context.strokeStyle = '#ffc96a';
+        context.stroke();
+        context.fillStyle = '#fff3c2';
+        context.font = `850 ${Math.max(9, radius * 0.42)}px "Microsoft YaHei", sans-serif`;
+        context.fillText(String(piece.portalTurns), badgeX, badgeY + 1);
+      }
       interactionTargets.push({
         type: 'piece',
         pieceId: piece.id,
@@ -577,13 +591,16 @@ export function createSolidBoardViewer(canvas, initialModel, {
           const world = barycentricPoint(vertices, portal.local);
           const position = project(add(world, scale(normal, 0.045)), width, height);
           const radius = Math.max(5, 7 * position.perspective * zoom);
+          context.save();
           context.beginPath();
           context.arc(position.x, position.y, radius, 0, Math.PI * 2);
-          context.fillStyle = 'rgba(123, 74, 174, .48)';
+          context.fillStyle = portal.portalColor ?? '#c889ff';
+          context.globalAlpha = 0.48;
           context.fill();
           context.lineWidth = 2;
-          context.strokeStyle = '#d8aaff';
+          context.strokeStyle = portal.portalColor ?? '#d8aaff';
           context.stroke();
+          context.restore();
         });
 
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
@@ -600,14 +617,17 @@ export function createSolidBoardViewer(canvas, initialModel, {
         context.beginPath();
         context.arc(position.x, position.y, radius, 0, Math.PI * 2);
         context.fillStyle = move.usesPortal
-          ? 'rgba(200, 137, 255, .42)'
+          ? move.portalColor ?? '#c889ff'
           : move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
+        if (move.usesPortal) context.save();
+        if (move.usesPortal) context.globalAlpha = 0.42;
         context.fill();
         context.lineWidth = 3;
         context.strokeStyle = move.usesPortal
-          ? '#d8aaff'
+          ? move.portalColor ?? '#d8aaff'
           : move.captureId ? '#ff6678' : '#61e7ff';
         context.stroke();
+        if (move.usesPortal) context.restore();
         const interactionTarget = {
           type: 'move',
           targetKey: move.targetKey,
