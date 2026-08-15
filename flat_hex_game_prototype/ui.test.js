@@ -279,6 +279,15 @@ test('传送阵使用略大于棋子的同色虚线圈且始终渲染双层端�
   assert.match(solidBoard, /Math\.max\(14, 20 \* position\.perspective \* zoom\)/);
 });
 
+test('手动与算法走棋共用平面和立体传送特效并在换层前完成', () => {
+  assert.match(app, /function playFlatPortalTransition\(transition, portalColor\)/);
+  assert.match(app, /await solidBoardViewer\.playPortalTransition\(move\.portalTransition/);
+  assert.match(app, /await playFlatPortalTransition\(portalTransition, portalColor\)/);
+  assert.match(solidBoard, /playPortalTransition\(transition, portalColor = '#d8aaff'\)/);
+  assert.match(solidBoard, /portalEffect\?\.resolve\(false\)/);
+  assert.match(styles, /\.portal-transition-path/);
+});
+
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {
   assert.match(html, /id="solidPanelSelection"/);
   assert.match(html, /id="rotateSolidPanelButton"/);

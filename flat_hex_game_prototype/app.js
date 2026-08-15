@@ -418,6 +418,7 @@ function drawStaticBoard() {
   svg.appendChild(nodes);
   svg.appendChild(svgElement('g', { id: 'faceLabelLayer' }));
   svg.appendChild(svgElement('g', { id: 'portalLayer' }));
+  svg.appendChild(svgElement('g', { id: 'portalEffectLayer' }));
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
@@ -1316,12 +1317,63 @@ async function animateElementPath(pieceId, path) {
   }
 }
 
-async function animateMove(pieceId, path, positionEffect, defenderId = null) {
+async function playFlatPortalTransition(transition, portalColor) {
+  if (!transition) return;
+  const effectLayer = document.getElementById('portalEffectLayer');
+  const entry = toPixel(transition.entry.position);
+  const exit = toPixel(transition.exit.position);
+  const path = svgElement('line', {
+    class: 'portal-transition-path',
+    x1: entry.x,
+    y1: entry.y,
+    x2: exit.x,
+    y2: exit.y,
+    style: `--portal-color: ${portalColor}`
+  });
+  const exitFlash = svgElement('circle', {
+    class: 'portal-transition-exit',
+    cx: exit.x,
+    cy: exit.y,
+    r: 31,
+    style: `--portal-color: ${portalColor}`
+  });
+  effectLayer.replaceChildren(path, exitFlash);
+  document.querySelectorAll(`[data-portal-id]`).forEach(marker =>
+    marker.classList.add('transitioning')
+  );
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  await new Promise(resolve => setTimeout(resolve, reducedMotion ? 120 : 480));
+  document.querySelectorAll('.portal-marker.transitioning').forEach(marker =>
+    marker.classList.remove('transitioning')
+  );
+  effectLayer.replaceChildren();
+}
+
+async function animateMove(
+  pieceId,
+  path,
+  positionEffect,
+  defenderId = null,
+  portalTransition = null,
+  portalColor = null
+) {
   const attackerPath = positionEffect === 'hold'
     ? [...path, ...path.slice(0, -1).reverse()]
     : path;
   animationLock = true;
-  if (positionEffect === 'swap' && defenderId) {
+  const entryIndex = portalTransition
+    ? attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
+    : -1;
+  if (entryIndex >= 0) {
+    await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
+    await playFlatPortalTransition(portalTransition, portalColor);
+    const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
+    if (positionEffect === 'swap' && defenderId) {
+      await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+    } else {
+      await continuation;
+    }
+  } else if (positionEffect === 'swap' && defenderId) {
     await Promise.all([
       animateElementPath(pieceId, attackerPath),
       animateElementPath(defenderId, [...path].reverse())
@@ -1357,7 +1409,23 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   const positionEffect = capturedType
     ? capturePositionEffect(mover.type, capturedType)
     : 'move';
-  if (!solidBoardViewer) await animateMove(pieceId, move.path, positionEffect, captured?.id);
+  if (!solidBoardViewer) {
+    await animateMove(
+      pieceId,
+      move.path,
+      positionEffect,
+      captured?.id,
+      move.portalTransition,
+      move.portalColor
+    );
+  } else if (move.portalTransition) {
+    animationLock = true;
+    try {
+      await solidBoardViewer.playPortalTransition(move.portalTransition, move.portalColor);
+    } finally {
+      animationLock = false;
+    }
+  }
   const result = applyMove(state, pieceId, {
     ...move.target,
     ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {}),

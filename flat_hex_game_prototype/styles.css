@@ -185,7 +185,13 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .portal-marker circle { fill: none; stroke: var(--portal-color, #d8aaff); stroke-width: 3; stroke-dasharray: 7 5; filter: drop-shadow(0 0 4px var(--portal-color, #d8aaff)); }
 .portal-marker.dormant { opacity: .34; }
 .portal-marker.dormant circle { stroke-dasharray: 3 7; }
+.portal-marker.transitioning circle { animation: portal-marker-pulse .22s ease-in-out infinite alternate; stroke-width: 5; }
 .portal-marker text { fill: var(--portal-color, #f2deff); font-size: 10px; font-weight: 850; paint-order: stroke; stroke: #0a131b; stroke-width: 3px; }
+.portal-transition-path { fill: none; stroke: var(--portal-color, #d8aaff); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 12 10; animation: portal-path-travel .48s linear infinite; filter: drop-shadow(0 0 8px var(--portal-color, #d8aaff)); }
+.portal-transition-exit { fill: none; stroke: var(--portal-color, #d8aaff); stroke-width: 4; animation: portal-exit-flash .48s ease-out both; }
+@keyframes portal-marker-pulse { from { opacity: .55; } to { opacity: 1; } }
+@keyframes portal-path-travel { to { stroke-dashoffset: -44; } }
+@keyframes portal-exit-flash { from { r: 8px; opacity: 1; } to { r: 34px; opacity: 0; } }
 .portal-editor-target { fill: transparent; stroke: rgba(216, 170, 255, .42); stroke-width: 1.5; stroke-dasharray: 5 5; cursor: crosshair; }
 .portal-editor-target:hover, .portal-editor-target:focus { fill: rgba(216, 170, 255, .14); stroke: #d8aaff; stroke-width: 3; outline: none; }
 .portal-editor-target.occupied { stroke: var(--gold); stroke-width: 3; }
