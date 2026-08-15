@@ -29,7 +29,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=queen-step-1';
+} from './game.js?v=queen-step-2';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -1637,6 +1637,18 @@ async function animateElementPath(pieceId, path) {
     const to = toPixel(path[index]);
     const startedAt = performance.now();
     await new Promise(resolve => {
+      let settled = false;
+      let fallbackTimer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+        resolve();
+      };
+      fallbackTimer = setTimeout(() => {
+        pieceElement.setAttribute('transform', `translate(${to.x} ${to.y})`);
+        finish();
+      }, 430);
       function frame(now) {
         const progress = Math.min(1, (now - startedAt) / 170);
         const eased = progress < 0.5
@@ -1646,7 +1658,7 @@ async function animateElementPath(pieceId, path) {
         const y = from.y + (to.y - from.y) * eased;
         pieceElement.setAttribute('transform', `translate(${x} ${y})`);
         if (progress < 1) requestAnimationFrame(frame);
-        else resolve();
+        else finish();
       }
       requestAnimationFrame(frame);
     });
@@ -1704,24 +1716,27 @@ async function animateMove(
       ? configuredEntryIndex
       : attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
     : -1;
-  if (entryIndex >= 0) {
-    await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
-    await playFlatPortalTransition(portalTransition, portalColor);
-    const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
-    if (positionEffect === 'swap' && defenderId) {
-      await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+  try {
+    if (entryIndex >= 0) {
+      await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
+      await playFlatPortalTransition(portalTransition, portalColor);
+      const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
+      if (positionEffect === 'swap' && defenderId) {
+        await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+      } else {
+        await continuation;
+      }
+    } else if (positionEffect === 'swap' && defenderId) {
+      await Promise.all([
+        animateElementPath(pieceId, attackerPath),
+        animateElementPath(defenderId, [...path].reverse())
+      ]);
     } else {
-      await continuation;
+      await animateElementPath(pieceId, attackerPath);
     }
-  } else if (positionEffect === 'swap' && defenderId) {
-    await Promise.all([
-      animateElementPath(pieceId, attackerPath),
-      animateElementPath(defenderId, [...path].reverse())
-    ]);
-  } else {
-    await animateElementPath(pieceId, attackerPath);
+  } finally {
+    animationLock = false;
   }
-  animationLock = false;
 }
 
 async function animateBoardLayerExchange(nextState) {

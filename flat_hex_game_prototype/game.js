@@ -1830,7 +1830,15 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
       ? move.panelIndex ?? panelIndexForPoint(move.target)
       : piecePanelIndex(movingPiece)
   };
-  if (movingPiece.type === 'queen') {
+  const gainsPortalAbility = promotedType === 'queen' && (
+    (movingPiece.type === 'queen' && captured?.type === 'bishop') ||
+    (movingPiece.type === 'bishop' && captured?.type === 'pawn' && promote)
+  );
+  if (promotedType !== 'queen') {
+    delete nextMovingPiece.portalTurns;
+  } else if (gainsPortalAbility) {
+    nextMovingPiece.portalTurns = 3;
+  } else if (movingPiece.type === 'queen') {
     const nextPortalTurns = captured?.type === 'bishop'
       ? 3
       : Math.max(0, (movingPiece.portalTurns ?? 0) - 1);
@@ -1865,7 +1873,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         : `，${PIECE_NAMES[captured.type]}在原位降级为${PIECE_NAMES[capturedType]}`
       : `，${PIECE_NAMES[captured.type]}移出棋盘`
     : '';
-  const portalAbilityResult = movingPiece.type === 'queen' && captured?.type === 'bishop'
+  const portalAbilityResult = gainsPortalAbility
     ? '，后获得3回合传送能力'
     : movingPiece.type === 'queen' && movingPiece.portalTurns > 0
       ? nextMovingPiece.portalTurns

@@ -68,6 +68,13 @@ test('动画和算法搜索一开始就锁定回退按钮，并在交互结束�
   assert.match(simulation[0], /simulationLock = true;\s*lockUndoControls\(\)/);
 });
 
+test('单步动画即使没有 requestAnimationFrame 也会释放移动锁', () => {
+  const animation = app.match(/async function animateElementPath\([\s\S]*?\n}\n\nasync function playFlatPortalTransition/);
+  assert.ok(animation);
+  assert.match(animation[0], /setTimeout\(/);
+  assert.match(animation[0], /clearTimeout\(/);
+});
+
 test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /let previewSide = null/);
   assert.match(app, /return state\.boardStates\?\.\[side\] \?\? state\.pieces/);

@@ -248,6 +248,22 @@ test('后吃象获得三回合传送能力，普通走棋也会消耗一次能�
   assert.equal(findPiece(moved.state, 'wQ').portalTurns, 2);
 });
 
+test('象吃兵升级为后时立即获得三回合传送能力', () => {
+  const state = stateOf([
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+  const move = legalMoves(state, 'wB').get('1,1');
+  const result = applyMove(state, 'wB', move.target, true);
+  const promoted = findPiece(result.state, 'wB');
+  const unpromoted = findPiece(applyMove(state, 'wB', move.target, false).state, 'wB');
+
+  assert.equal(promoted.type, 'queen');
+  assert.equal(promoted.portalTurns, 3);
+  assert.equal(unpromoted.type, 'bishop');
+  assert.equal(unpromoted.portalTurns, undefined);
+});
+
 test('空门传送只进入人工检测，不作为可提交或供AI搜索的完整动作', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
@@ -657,6 +673,18 @@ test('王吃后时双方保持原位，后强制降级为象', () => {
   assert.deepEqual(findPiece(result.state, 'wK').position, { q: 4, r: 0 });
   assert.deepEqual(findPiece(result.state, 'bQ').position, { q: 0, r: 4 });
   assert.equal(findPiece(result.state, 'bQ').type, 'bishop');
+});
+
+test('带传送能力的后被降级时立即清除传送能力', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    { ...piece('bQ', 'black', 'queen', 0, 4), portalTurns: 2 }
+  ]);
+  const result = applyMove(state, 'wK', { q: 0, r: 4 });
+  const downgraded = findPiece(result.state, 'bQ');
+
+  assert.equal(downgraded.type, 'bishop');
+  assert.equal(downgraded.portalTurns, undefined);
 });
 
 test('普通移动仍将棋子落到目标点', () => {
