@@ -23,15 +23,15 @@ h1 { margin-bottom: 0; font-size: clamp(24px, 3vw, 38px); }
 h2 { margin-bottom: 12px; font-size: 16px; }
 .eyebrow { color: var(--cyan); font-size: 11px; letter-spacing: .18em; }
 .turn { padding: 10px 16px; border: 1px solid #33475a; border-radius: 999px; background: #111923; }
-.workspace { display: grid; grid-template-columns: minmax(560px, 1fr) 360px; gap: 18px; }
+.workspace { display: grid; grid-template-columns: minmax(560px, 1fr) 360px; align-items: start; gap: 18px; }
 .board-card, .card {
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 18px;
   background: var(--panel);
   box-shadow: 0 25px 80px rgba(0,0,0,.3);
 }
-.board-card { position: relative; min-height: 720px; display: grid; place-items: center; overflow: hidden; perspective: 1300px; }
-.board-stage { width: min(100%, 760px); transform-style: preserve-3d; }
+.board-card { position: sticky; top: 16px; height: calc(100vh - 32px); min-height: 0; display: grid; place-items: center; overflow: hidden; perspective: 1300px; }
+.board-stage { width: min(100%, 760px, calc(100vh - 48px)); transform-style: preserve-3d; }
 .board-shell {
   position: relative;
   width: 100%;
@@ -269,7 +269,8 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .modal-actions { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 1fr; }
-  .board-card { min-height: auto; }
+  .board-card { position: relative; top: auto; height: auto; min-height: auto; }
+  .board-stage { width: min(100%, 760px); }
   .solid-viewer-panel { top: 12px; right: 12px; left: 12px; width: auto; max-height: calc(55vh - 18px); overflow-y: auto; }
   .solid-panel-tray { top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; max-height: 40vh; overflow-y: auto; }
   #solidPanelList { grid-template-columns: repeat(3, minmax(0, 1fr)); }

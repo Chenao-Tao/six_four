@@ -305,6 +305,17 @@ test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () =>
   assert.doesNotMatch(styles, /\.solid-viewer\s*\{[^}]*position:\s*fixed;/);
 });
 
+test('桌面端棋盘不被长侧栏拉伸并在滚动时保持视口内可见', () => {
+  assert.match(styles, /\.workspace\s*\{[^}]*align-items:\s*start;/);
+  assert.match(styles, /\.board-card\s*\{[^}]*position:\s*sticky;[^}]*top:\s*16px;/);
+  assert.match(styles, /\.board-card\s*\{[^}]*height:\s*calc\(100vh\s*-\s*32px\);/);
+  assert.match(styles, /\.board-stage\s*\{[^}]*width:\s*min\(100%,\s*760px,\s*calc\(100vh\s*-\s*48px\)\);/);
+  assert.match(
+    styles,
+    /@media \(max-width:\s*1000px\)\s*\{[\s\S]*?\.board-card\s*\{[^}]*position:\s*relative;[^}]*top:\s*auto;[^}]*height:\s*auto;/,
+  );
+});
+
 test('立体棋盘重新开局保持立体视图且单步结束恢复操作按钮', () => {
   assert.match(html, /id="solidStepButton"/);
   assert.match(html, /id="solidAutoButton"/);
