@@ -23,15 +23,15 @@ h1 { margin-bottom: 0; font-size: clamp(24px, 3vw, 38px); }
 h2 { margin-bottom: 12px; font-size: 16px; }
 .eyebrow { color: var(--cyan); font-size: 11px; letter-spacing: .18em; }
 .turn { padding: 10px 16px; border: 1px solid #33475a; border-radius: 999px; background: #111923; }
-.workspace { display: grid; grid-template-columns: minmax(560px, 1fr) 360px; gap: 18px; }
+.workspace { display: grid; grid-template-columns: minmax(560px, 1fr) 360px; align-items: start; gap: 18px; }
 .board-card, .card {
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 18px;
   background: var(--panel);
   box-shadow: 0 25px 80px rgba(0,0,0,.3);
 }
-.board-card { position: relative; min-height: 720px; display: grid; place-items: center; overflow: hidden; perspective: 1300px; }
-.board-stage { width: min(100%, 760px); transform-style: preserve-3d; }
+.board-card { position: sticky; top: 16px; height: calc(100vh - 32px); min-height: 0; display: grid; place-items: center; overflow: hidden; perspective: 1300px; }
+.board-stage { width: min(100%, 760px, calc(100vh - 48px)); transform-style: preserve-3d; }
 .board-shell {
   position: relative;
   width: 100%;
@@ -68,6 +68,37 @@ h2 { margin-bottom: 12px; font-size: 16px; }
 #board { display: block; width: 100%; height: auto; overflow: visible; }
 .face-badge { position: absolute; top: 16px; left: 18px; z-index: 3; padding: 8px 12px; border: 1px solid rgba(97,231,255,.28); border-radius: 999px; color: #bcefff; background: rgba(7,16,24,.78); font-size: 12px; }
 .board-help { position: absolute; left: 20px; bottom: 16px; color: #91a4b5; font-size: 12px; }
+.portal-detection { --portal-eye-red: #ff1f3d; position: absolute; left: 50%; top: 72px; z-index: 6; display: flex; align-items: center; gap: 12px; transform: translateX(-50%); max-width: calc(100% - 36px); padding: 10px 12px 10px 10px; border: 1px solid rgba(255,31,61,.68); border-radius: 999px; color: #ffe8ec; background: linear-gradient(180deg, rgba(42,3,12,.96), rgba(17,5,10,.94)); box-shadow: 0 0 30px rgba(255,31,61,.34), inset 0 0 18px rgba(255,31,61,.09); backdrop-filter: blur(10px); font-size: 12px; }
+.portal-detection.hidden { display: none; }
+.portal-detection-eye { position: relative; width: 56px; height: 34px; flex: 0 0 auto; overflow: hidden; border: 3px solid var(--portal-eye-red); border-radius: 50% / 64%; display: grid; place-items: center; background: radial-gradient(ellipse at center, #ffd7dc 0 38%, #9d071b 68%, #2a0007 100%); box-shadow: 0 0 9px #ff1f3d, 0 0 22px rgba(255,0,38,.72), inset 0 0 12px rgba(83,0,12,.85); }
+.portal-detection-eye::before,
+.portal-detection-eye::after { position: absolute; left: -4px; z-index: 3; width: calc(100% + 8px); height: 56%; content: ""; pointer-events: none; background: linear-gradient(180deg, #4b020e, #180006); }
+.portal-detection-eye::before { top: -1px; transform: translateY(-96%); animation: portal-eye-lid-top 3.2s cubic-bezier(.72,0,.28,1) infinite; }
+.portal-detection-eye::after { bottom: -1px; transform: translateY(96%); animation: portal-eye-lid-bottom 3.2s cubic-bezier(.72,0,.28,1) infinite; }
+.portal-detection-iris { position: relative; width: 21px; height: 21px; border: 2px solid #ff5269; border-radius: 50%; background: radial-gradient(circle, #090002 0 28%, #d00025 31% 58%, #ff6177 72%, #5a0010 100%); box-shadow: 0 0 10px #ff001f, inset 0 0 6px #3b0009; animation: portal-eye-scan 2.8s ease-in-out infinite; }
+.portal-detection-pupil { position: absolute; top: 3px; left: 50%; width: 6px; height: 11px; transform: translateX(-50%); border-radius: 50%; background: #050001; box-shadow: 0 0 4px rgba(0,0,0,.95); }
+.portal-detection button { padding: 5px 9px; border-color: rgba(255,31,61,.48); color: #ffe8ec; background: rgba(91,3,18,.72); font-size: 11px; }
+.portal-detection button:hover { border-color: #ff5269; }
+.board-shell.portal-detecting { filter: drop-shadow(0 0 18px rgba(255,31,61,.58)); }
+@keyframes portal-eye-lid-top {
+  0%, 38%, 46%, 100% { transform: translateY(-96%); }
+  41%, 43% { transform: translateY(0); }
+}
+@keyframes portal-eye-lid-bottom {
+  0%, 38%, 46%, 100% { transform: translateY(96%); }
+  41%, 43% { transform: translateY(0); }
+}
+@keyframes portal-eye-scan {
+  0%, 12% { transform: translateX(-8px); }
+  34%, 58% { transform: translateX(0); }
+  80%, 92% { transform: translateX(8px); }
+  100% { transform: translateX(-8px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-detection-iris { animation: none; }
+  .portal-detection-eye::before,
+  .portal-detection-eye::after { animation-duration: 7s; }
+}
 aside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -238,7 +269,8 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .modal-actions { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1000px) {
   .workspace { grid-template-columns: 1fr; }
-  .board-card { min-height: auto; }
+  .board-card { position: relative; top: auto; height: auto; min-height: auto; }
+  .board-stage { width: min(100%, 760px); }
   .solid-viewer-panel { top: 12px; right: 12px; left: 12px; width: auto; max-height: calc(55vh - 18px); overflow-y: auto; }
   .solid-panel-tray { top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; max-height: 40vh; overflow-y: auto; }
   #solidPanelList { grid-template-columns: repeat(3, minmax(0, 1fr)); }

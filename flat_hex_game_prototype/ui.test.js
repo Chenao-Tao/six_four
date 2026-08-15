@@ -68,6 +68,22 @@ test('动画和算法搜索一开始就锁定回退按钮，并在交互结束�
   assert.match(simulation[0], /simulationLock = true;\s*lockUndoControls\(\)/);
 });
 
+test('单步动画即使没有 requestAnimationFrame 也会释放移动锁', () => {
+  const animation = app.match(/async function animateElementPath\([\s\S]*?\n}\n\nasync function playFlatPortalTransition/);
+  assert.ok(animation);
+  assert.match(animation[0], /setTimeout\(/);
+  assert.match(animation[0], /clearTimeout\(/);
+});
+
+test('选择后时传送渲染允许尚未建立当前分步位置', () => {
+  const renderPortals = app.match(/function renderPortals\(\)[\s\S]*?\n}\n\nfunction appendPortalMarker/);
+  assert.ok(renderPortals);
+  assert.match(renderPortals[0], /queenTurn\?\.current\?\.layer/);
+  const animateQueen = app.match(/async function animateQueenStep\([\s\S]*?\n}\n\nasync function animatePortalObservationLayer/);
+  assert.ok(animateQueen);
+  assert.match(animateQueen[0], /queenTurn\?\.current\?\.position/);
+});
+
 test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /let previewSide = null/);
   assert.match(app, /return state\.boardStates\?\.\[side\] \?\? state\.pieces/);
@@ -289,6 +305,17 @@ test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () =>
   assert.doesNotMatch(styles, /\.solid-viewer\s*\{[^}]*position:\s*fixed;/);
 });
 
+test('桌面端棋盘不被长侧栏拉伸并在滚动时保持视口内可见', () => {
+  assert.match(styles, /\.workspace\s*\{[^}]*align-items:\s*start;/);
+  assert.match(styles, /\.board-card\s*\{[^}]*position:\s*sticky;[^}]*top:\s*16px;/);
+  assert.match(styles, /\.board-card\s*\{[^}]*height:\s*calc\(100vh\s*-\s*32px\);/);
+  assert.match(styles, /\.board-stage\s*\{[^}]*width:\s*min\(100%,\s*760px,\s*calc\(100vh\s*-\s*48px\)\);/);
+  assert.match(
+    styles,
+    /@media \(max-width:\s*1000px\)\s*\{[\s\S]*?\.board-card\s*\{[^}]*position:\s*relative;[^}]*top:\s*auto;[^}]*height:\s*auto;/,
+  );
+});
+
 test('立体棋盘重新开局保持立体视图且单步结束恢复操作按钮', () => {
   assert.match(html, /id="solidStepButton"/);
   assert.match(html, /id="solidAutoButton"/);
@@ -312,7 +339,7 @@ test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角',
   assert.match(app, /setAutoSimulationButtonState\('暂停模拟', true\)/);
   assert.match(app, /solidBoardViewer\?\.followPiece\(step\.pieceId\)/);
   assert.match(app, /solidBoardViewer\?\.followPoint\(/);
-  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion \|\| pendingMoveChoice\)/);
+  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\|[\s\S]*?Boolean\(pendingPromotion \|\| pendingMoveChoice \|\| queenTurn\)/);
 });
 
 test('AI 搜索在专用 Worker 中迭代加深并可立即取消', () => {
@@ -343,11 +370,51 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /onMoveSelect: selectSolidMove/);
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
-  assert.match(app, /if \(move\) requestMoveChoice\(move\)/);
+  assert.match(app, /if \(move\) handleSelectedMove\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
-  assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
+  assert.match(app, /const renderedTarget = move\.displayTarget \?\? move\.target/);
+  assert.match(app, /mapSolidPoint\(renderedTarget, renderedPanelIndex\)/);
   assert.match(app, /visibleFaceSides\.forEach/);
   assert.match(app, /state\.boardShape === 'solid' && state\.solidLayers/);
+});
+
+test('人工后回合拆成三次单步并持续显示剩余步数', () => {
+  assert.match(app, /queenStepMoves/);
+  assert.match(app, /let queenTurn = null/);
+  assert.match(app, /async function chooseQueenStep\(move\)/);
+  assert.match(app, /后正在分步移动：已走 \$\{queenTurn\.stepsUsed\}\/3 步/);
+  assert.match(app, /还可走 \$\{Math\.max\(0, 3 - queenTurn\.stepsUsed\)\} 步/);
+  assert.match(app, /只有第3步可以吃子/);
+  assert.match(app, /skipMoveAnimation: true/);
+  assert.match(app, /remaining > 0 && selectedMoves\.size === 0/);
+  assert.match(app, /当前后没有合法的单步起点/);
+});
+
+test('传送后进入眼睛检测态并在五秒或手动结束时提交空门落点', () => {
+  const finishDetection = app.match(
+    /async function finishPortalDetection\([\s\S]*?\n}\n\nfunction queenRouteMatches/,
+  );
+
+  assert.match(html, /id="portalDetection"/);
+  assert.match(html, /id="finishPortalDetectionButton"/);
+  assert.match(html, /class="portal-detection-iris"/);
+  assert.match(html, /class="portal-detection-pupil"/);
+  assert.match(app, /function showPortalDetection\(autoFinish = false\)/);
+  assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?\}, 5000\)/);
+  assert.match(app, /finishPortalDetectionButton\.addEventListener\('click'/);
+  assert.ok(finishDetection);
+  assert.match(finishDetection[0], /completeQueenMove\(queenTurn/);
+  assert.match(finishDetection[0], /await commitMove\(/);
+  assert.match(finishDetection[0], /if \(!completeMove\)/);
+  assert.match(app, /setTimeout\(\(\) => \{\s*finishPortalDetection\(/);
+  assert.match(app, /finishPortalDetectionButton\.addEventListener\('click', finishPortalDetection\)/);
+  assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+  assert.match(styles, /\.portal-detection-eye\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*34px/);
+  assert.match(styles, /\.portal-detection\s*\{[\s\S]*?top:\s*72px/);
+  assert.match(styles, /--portal-eye-red:\s*#ff1f3d/);
+  assert.match(styles, /@keyframes portal-eye-lid-top/);
+  assert.match(styles, /@keyframes portal-eye-lid-bottom/);
+  assert.match(styles, /@keyframes portal-eye-scan/);
 });
 
 test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {

@@ -24,11 +24,12 @@ import {
   panelPointNumber,
   portalEndpointLocations,
   promotionTypeForMove,
+  queenStepMoves,
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=delayed-portal-1';
+} from './game.js?v=queen-step-3';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -65,6 +66,9 @@ const turnBadge = document.getElementById('turnBadge');
 const selectedInfo = document.getElementById('selectedInfo');
 const historyElement = document.getElementById('history');
 const boardHelp = document.getElementById('boardHelp');
+const portalDetection = document.getElementById('portalDetection');
+const portalDetectionText = document.getElementById('portalDetectionText');
+const finishPortalDetectionButton = document.getElementById('finishPortalDetectionButton');
 const promotionModal = document.getElementById('promotionModal');
 const promotionTitle = document.getElementById('promotionTitle');
 const promotionQuestion = document.getElementById('promotionQuestion');
@@ -147,6 +151,8 @@ let selectedPieceId = null;
 let selectedMoves = new Map();
 let pendingPromotion = null;
 let pendingMoveChoice = null;
+let queenTurn = null;
+let portalDetectionTimer = null;
 let autoTimer = null;
 let autoPaused = false;
 let simulationPauseRequested = false;
@@ -456,12 +462,41 @@ function activeBoardSide() {
 
 function displayedBoardSide() {
   if (customEditor) return customEditor.side;
+  if (queenTurn?.current && state.boardShape !== 'solid') {
+    return queenTurn.current.layer === 'active'
+      ? activeBoardSide()
+      : oppositeBoardSide(activeBoardSide());
+  }
   return previewSide ?? activeBoardSide();
+}
+
+function piecesForQueenLayer(layer) {
+  if (state.solidLayers) {
+    return layer === 'active' ? state.solidLayers.outer : state.solidLayers.inner;
+  }
+  const activeSide = activeBoardSide();
+  const side = layer === 'active' ? activeSide : oppositeBoardSide(activeSide);
+  return state.boardStates?.[side] ?? (layer === 'active' ? state.pieces : []);
 }
 
 function displayedPieces() {
   const side = displayedBoardSide();
   if (customEditor) return customEditor.boardStates[side];
+  if (queenTurn?.current) {
+    const layer = queenTurn.current.layer;
+    const mover = state.pieces.find(piece => piece.id === queenTurn.pieceId);
+    const pieces = piecesForQueenLayer(layer)
+      .filter(piece => piece.id !== queenTurn.pieceId)
+      .map(piece => ({ ...piece, position: { ...piece.position } }));
+    if (mover) {
+      pieces.push({
+        ...mover,
+        position: { ...queenTurn.current.position },
+        panelIndex: queenTurn.current.panelIndex
+      });
+    }
+    return pieces;
+  }
   if (state.boardShape === 'solid' && state.solidLayers) {
     return previewSide === null ? state.solidLayers.outer : state.solidLayers.inner;
   }
@@ -498,9 +533,10 @@ function solidBoardModel() {
   const faceLabels = [...displayedFaceLabels().front];
   const panelRotations = [...displayedPanelRotations().front];
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
-    const visibleFaceSides = previewSide === null
-      ? state.solidFaceSides
-      : state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back');
+    const showInnerLayer = previewSide !== null || queenTurn?.current.layer === 'dormant';
+    const visibleFaceSides = showInnerLayer
+      ? state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back')
+      : state.solidFaceSides;
     visibleFaceSides.forEach((faceSide, panelIndex) => {
       if (faceSide !== 'back') return;
       const oppositeIndex = verticalMirrorPanelIndex(panelIndex);
@@ -510,7 +546,11 @@ function solidBoardModel() {
   }
   const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
     const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
-    const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
+    const renderedTarget = move.displayTarget ?? move.target;
+    const renderedPanelIndex = move.portalSelf
+      ? move.portalTransition?.entry.panelIndex
+      : move.panelIndex ?? captured?.panelIndex;
+    const mapped = mapSolidPoint(renderedTarget, renderedPanelIndex);
     return {
       ...mapped,
       targetKey: move.mapKey ?? keyOf(move.target),
@@ -519,9 +559,10 @@ function solidBoardModel() {
       portalColor: move.portalColor
     };
   });
+  const visiblePortalLayer = queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
   const portalTargets = customEditor ? [] : portalEndpointLocations(state)
     .map(location => {
-      const dormant = location.layer !== (previewSide === null ? 'active' : 'dormant');
+      const dormant = location.layer !== visiblePortalLayer;
       return {
         ...mapSolidPoint(location.position, location.panelIndex),
         portalId: location.portalId,
@@ -717,9 +758,11 @@ function refreshSolidBoard(message = '') {
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
   solidStepButton.disabled = editingSolid || simulationLock || animationLock ||
-    Boolean(pendingPromotion || pendingMoveChoice);
-  solidAutoButton.disabled = editingSolid || animationLock || Boolean(pendingPromotion || pendingMoveChoice);
-  solidUndoButton.disabled = editingSolid || animationLock || simulationLock || !undoHistory.canUndo;
+    Boolean(pendingPromotion || pendingMoveChoice || queenTurn);
+  solidAutoButton.disabled = editingSolid || animationLock ||
+    Boolean(pendingPromotion || pendingMoveChoice || queenTurn);
+  solidUndoButton.disabled = editingSolid || animationLock || simulationLock ||
+    Boolean(queenTurn) || !undoHistory.canUndo;
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -746,12 +789,25 @@ function selectAssemblyPanel(panelId) {
   refreshSolidBoard();
 }
 
+function selectedCaptureMove(defenderId) {
+  if (!selectedPieceId) return null;
+  if (queenTurn?.pieceId === selectedPieceId) {
+    return [...selectedMoves.values()].find(move => move.captureId === defenderId) ?? null;
+  }
+  return captureMoveForClickedPiece(state, selectedPieceId, defenderId);
+}
+
 function selectSolidPiece(pieceId) {
   if (!solidBoardViewer || customEditor) return;
+  if (queenTurn?.pieceId === pieceId) {
+    const portalMove = [...selectedMoves.values()].find(move => move.portalSelf);
+    if (portalMove) handleSelectedMove(portalMove);
+    return;
+  }
   if (selectedPieceId && pieceId !== selectedPieceId) {
-    const captureMove = captureMoveForClickedPiece(state, selectedPieceId, pieceId);
+    const captureMove = selectedCaptureMove(pieceId);
     if (captureMove) {
-      requestMoveChoice(captureMove);
+      handleSelectedMove(captureMove);
       return;
     }
   }
@@ -762,7 +818,7 @@ function selectSolidPiece(pieceId) {
 function selectSolidMove(targetKey) {
   if (!solidBoardViewer || customEditor || !selectedPieceId) return;
   const move = selectedMoves.get(targetKey);
-  if (move) requestMoveChoice(move);
+  if (move) handleSelectedMove(move);
 }
 
 function selectSolidPanel(panelIndex) {
@@ -929,7 +985,7 @@ function renderPortals() {
     });
     return;
   }
-  const visibleLayer = previewSide === null ? 'active' : 'dormant';
+  const visibleLayer = queenTurn?.current?.layer ?? (previewSide === null ? 'active' : 'dormant');
   portalEndpointLocations(state)
     .forEach(location => {
       appendPortalMarker(
@@ -1135,10 +1191,15 @@ function renderPiece(piece) {
       boardHelp.textContent = '当前是背面预览；返回当前朝上面后才能移动棋子。';
       return;
     }
+    if (queenTurn?.pieceId === piece.id) {
+      const portalMove = [...selectedMoves.values()].find(move => move.portalSelf);
+      if (portalMove) handleSelectedMove(portalMove);
+      return;
+    }
     if (selectedPieceId && piece.id !== selectedPieceId) {
-      const captureMove = captureMoveForClickedPiece(state, selectedPieceId, piece.id);
+      const captureMove = selectedCaptureMove(piece.id);
       if (captureMove) {
-        requestMoveChoice(captureMove);
+        handleSelectedMove(captureMove);
         return;
       }
     }
@@ -1183,22 +1244,27 @@ function renderMoves() {
   pathLayer.replaceChildren();
   targetLayer.replaceChildren();
   selectedMoves.forEach(move => {
-    pathLayer.appendChild(svgElement('polyline', {
-      class: `move-path ${move.usesPortal ? 'portal' : ''}`,
-      points: pointList(move.path),
-      ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
-    }));
-    const pixel = toPixel(move.target);
+    if (!move.portalSelf) {
+      const renderedPath = move.queenStep ? move.path.slice(-2) : move.path;
+      pathLayer.appendChild(svgElement('polyline', {
+        class: `move-path ${move.usesPortal ? 'portal' : ''}`,
+        points: pointList(renderedPath),
+        ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
+      }));
+    }
+    const renderedTarget = move.displayTarget ?? move.target;
+    const pixel = toPixel(renderedTarget);
     const target = svgElement('circle', {
-      class: `move-target ${move.captureId ? 'capture' : ''} ${move.usesPortal ? 'portal' : ''}`,
+      class: `move-target ${move.captureId ? 'capture' : ''} ${move.usesPortal ? 'portal' : ''} ` +
+        `${move.portalSelf ? 'portal-self' : ''}`,
       cx: pixel.x, cy: pixel.y, r: move.usesPortal ? 11 : 16,
       'data-target': move.mapKey ?? keyOf(move.target),
-      'aria-label': move.usesPortal ? '传送移动' : move.captureId ? '吃子' : '移动',
+      'aria-label': move.portalSelf ? '从当前传送点穿越' : move.captureId ? '吃子' : '移动一步',
       ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
     });
     target.addEventListener('click', event => {
       event.stopPropagation();
-      requestMoveChoice(move);
+      handleSelectedMove(move);
     });
     targetLayer.appendChild(target);
   });
@@ -1228,6 +1294,8 @@ function render() {
     ? `自定义棋盘 · 编辑${boardSide === 'front' ? 'A 面' : 'B 面'}`
     : state.winner
       ? `${state.winner === 'white' ? '白方' : '黑方'}获胜 · 王被吃`
+      : queenTurn
+        ? `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}后 · 还可走 ${Math.max(0, 3 - queenTurn.stepsUsed)} 步`
       : `第 ${state.moveNumber} 手 · ${state.turn === 'white' ? '白方' : '黑方'}行动`;
   const sideName = previewing ? '下层 · 对应拼图' : '上层 · 当前拼图';
   faceBadge.textContent = editing
@@ -1242,12 +1310,12 @@ function render() {
       : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
-  stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
-  autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
+  stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
+  autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   resetButton.disabled = editing;
-  undoButton.disabled = previewing || editing || animationLock || simulationLock || !undoHistory.canUndo;
-  previewButton.disabled = editing;
-  customizeButton.disabled = editing;
+  undoButton.disabled = previewing || editing || animationLock || simulationLock || Boolean(queenTurn) || !undoHistory.canUndo;
+  previewButton.disabled = editing || Boolean(queenTurn);
+  customizeButton.disabled = editing || Boolean(queenTurn);
   customEditorControls.classList.toggle('hidden', !editing);
   const editingFlat = editing && customEditor.boardShape === 'flat';
   const editingSolid = editing && customEditor.boardShape === 'solid';
@@ -1307,6 +1375,231 @@ function render() {
   if (solidBoardViewer) refreshSolidBoard();
 }
 
+function clearPortalDetection() {
+  clearTimeout(portalDetectionTimer);
+  portalDetectionTimer = null;
+  portalDetection.classList.add('hidden');
+  boardShell.classList.remove('portal-detecting');
+}
+
+function resetQueenTurnState() {
+  clearPortalDetection();
+  queenTurn = null;
+}
+
+function cancelQueenTurn(message = '已取消后的本回合单步路线，棋子回到起点且不消耗回合。') {
+  if (pendingMoveChoice?.type === 'queen-portal') closeMoveChoice();
+  resetQueenTurnState();
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  boardHelp.textContent = message;
+  if (solidBoardViewer) solidViewerStatus.textContent = message;
+  render();
+}
+
+function showPortalDetection(autoFinish = false) {
+  if (!queenTurn?.usedPortal) return;
+  clearPortalDetection();
+  queenTurn.detecting = true;
+  const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
+  portalDetectionText.textContent = remaining > 0
+    ? `观察传送后的后：还可走 ${remaining} 步，第3步吃象才正式升沉`
+    : '观察传送结果：未吃子也保留出口位置，但不会触发棋盘升沉';
+  portalDetection.classList.remove('hidden');
+  boardShell.classList.add('portal-detecting');
+  if (autoFinish) {
+    portalDetectionTimer = setTimeout(() => {
+      finishPortalDetection();
+    }, 5000);
+  }
+}
+
+async function finishPortalDetection() {
+  if (!queenTurn?.detecting || queenTurn.stepsUsed < 3) return;
+  const completeMove = completeQueenMove(queenTurn, queenTurn.finalStep);
+  if (!completeMove) {
+    cancelQueenTurn('传送检测无法完成结算，已取消这条分步路线。');
+    return;
+  }
+  const pieceId = queenTurn.pieceId;
+  clearPortalDetection();
+  await commitMove(
+    pieceId,
+    completeMove,
+    false,
+    '传送完成：后留在出口位置，未吃子所以不触发棋盘升沉。',
+    { skipMoveAnimation: true }
+  );
+}
+
+function queenRouteMatches(move, context) {
+  const expected = context.pathSteps ?? [];
+  if (move.path?.length !== expected.length) return false;
+  if (Boolean(move.usesPortal) !== Boolean(context.usedPortal)) return false;
+  if ((move.targetLayer ?? 'active') !== context.current.layer) return false;
+  for (let index = 0; index < expected.length; index += 1) {
+    const actualPoint = move.path[index];
+    const expectedPoint = expected[index].position;
+    if (actualPoint.q !== expectedPoint.q || actualPoint.r !== expectedPoint.r) return false;
+    if (move.pathSteps?.[index] && move.pathSteps[index].layer !== expected[index].layer) return false;
+  }
+  return true;
+}
+
+function completeQueenMove(context, finalStep) {
+  const moves = [...legalMoves(state, context.pieceId).values()];
+  if (!context.usedPortal) {
+    return moves.find(move =>
+      !move.usesPortal &&
+      move.pointKey === finalStep.pointKey &&
+      (move.captureId ?? null) === (finalStep.captureId ?? null)
+    ) ?? null;
+  }
+  return moves.find(move => queenRouteMatches(move, context)) ?? null;
+}
+
+function updateQueenStepSelection(message = '') {
+  if (!queenTurn) return;
+  selectedMoves = queenStepMoves(state, queenTurn.pieceId, queenTurn);
+  const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
+  if (remaining > 0 && selectedMoves.size === 0) {
+    cancelQueenTurn('当前分步路线没有可继续的合法动作，后已回到起点且不消耗回合。');
+    return;
+  }
+  selectedInfo.textContent = `后正在分步移动：已走 ${queenTurn.stepsUsed}/3 步，还可走 ${remaining} 步` +
+    (queenTurn.usedPortal ? ' · 传送检测中' : '');
+  boardHelp.textContent = message || (remaining > 0
+    ? `请选择第 ${queenTurn.stepsUsed + 1} 步；后只有第3步可以吃子。`
+    : '后的三步已经完成。');
+  if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
+  render();
+}
+
+function requestQueenPortalChoice() {
+  if (!queenTurn || pendingMoveChoice || queenTurn.stepsUsed >= 3) return;
+  const transferContext = { ...queenTurn, portalDecision: 'transfer' };
+  const portalMove = [...queenStepMoves(state, queenTurn.pieceId, transferContext).values()]
+    .find(move => move.portalSelf);
+  if (!portalMove) return;
+  pendingMoveChoice = { type: 'queen-portal', pieceId: queenTurn.pieceId };
+  moveChoiceQuestion.textContent = '后已到达传送点。下一步要穿越，还是继续在当前面移动？';
+
+  const transferButton = document.createElement('button');
+  transferButton.type = 'button';
+  transferButton.className = 'portal-move-choice';
+  transferButton.textContent = `下一步传送（传送后剩余 ${Math.max(0, 2 - queenTurn.stepsUsed)} 步）`;
+  transferButton.addEventListener('click', () => {
+    closeMoveChoice();
+    queenTurn = transferContext;
+    updateQueenStepSelection('已选择传送；请再次点击后所在的传送点，消耗下一步完成穿越。');
+  });
+
+  const ordinaryButton = document.createElement('button');
+  ordinaryButton.type = 'button';
+  ordinaryButton.className = 'ordinary-move-choice';
+  ordinaryButton.textContent = '继续在当前面移动';
+  ordinaryButton.addEventListener('click', () => {
+    closeMoveChoice();
+    queenTurn = { ...queenTurn, portalDecision: 'normal' };
+    updateQueenStepSelection('已选择不传送；继续完成后剩余的单步移动。');
+  });
+
+  moveChoiceOptions.replaceChildren(transferButton, ordinaryButton);
+  moveChoiceModal.classList.remove('hidden');
+}
+
+async function animateQueenStep(move) {
+  if (move.portalSelf) {
+    animationLock = true;
+    try {
+      if (solidBoardViewer) {
+        await solidBoardViewer.playPortalTransition(move.portalTransition, move.portalColor);
+      } else {
+        await playFlatPortalTransition(move.portalTransition, move.portalColor);
+      }
+    } finally {
+      animationLock = false;
+    }
+    return;
+  }
+  if (solidBoardViewer) return;
+  animationLock = true;
+  try {
+    const from = queenTurn?.current?.position ?? move.path.at(-2);
+    await animateElementPath(move.nextQueenContext.pieceId, [from, move.target]);
+  } finally {
+    animationLock = false;
+  }
+}
+
+async function animatePortalObservationLayer() {
+  animationLock = true;
+  try {
+    if (solidBoardViewer) {
+      await solidBoardViewer.exchangeLayers(solidBoardModel());
+      return;
+    }
+    boardShell.classList.add('layer-sinking');
+    await new Promise(resolve => setTimeout(resolve, 220));
+    render();
+    boardShell.classList.remove('layer-sinking');
+    boardShell.classList.add('layer-rising');
+    await new Promise(resolve => setTimeout(resolve, 260));
+    boardShell.classList.remove('layer-rising');
+  } finally {
+    animationLock = false;
+  }
+}
+
+async function chooseQueenStep(move) {
+  if (!queenTurn || !move?.queenStep || animationLock || pendingMoveChoice) return;
+  const previousContext = queenTurn;
+  await animateQueenStep(move);
+  queenTurn = move.nextQueenContext;
+  queenTurn.portalDecision = null;
+  queenTurn.detecting = Boolean(previousContext.detecting || move.portalSelf);
+
+  if (move.portalSelf) {
+    if (!solidBoardViewer) render();
+    await animatePortalObservationLayer();
+    showPortalDetection(false);
+  }
+
+  if (queenTurn.stepsUsed < 3) {
+    updateQueenStepSelection();
+    if (!move.portalSelf && [...selectedMoves.values()].some(candidate => candidate.portalSelf)) {
+      requestQueenPortalChoice();
+    }
+    return;
+  }
+
+  selectedMoves = new Map();
+  if (queenTurn.usedPortal && !move.captureId) {
+    queenTurn.finalStep = move;
+    showPortalDetection(true);
+    updateQueenStepSelection('传送后的三步已用完，检测结束后保留出口位置；可等待5秒或手动结束。');
+    return;
+  }
+
+  const completeMove = completeQueenMove(queenTurn, move);
+  if (!completeMove) {
+    queenTurn = previousContext;
+    cancelQueenTurn('这条分步路线无法形成合法的完整三步动作，已回到起点且不消耗回合。');
+    return;
+  }
+  const pieceId = queenTurn.pieceId;
+  clearPortalDetection();
+  await commitMove(pieceId, completeMove, false, '', { skipMoveAnimation: true });
+}
+
+function handleSelectedMove(move) {
+  if (queenTurn && move?.queenStep) {
+    chooseQueenStep(move);
+    return;
+  }
+  requestMoveChoice(move);
+}
+
 function selectPiece(pieceId) {
   if (customEditor) return;
   if (isPreviewing()) {
@@ -1314,6 +1607,10 @@ function selectPiece(pieceId) {
     return;
   }
   if (animationLock || state.winner || pendingPromotion || pendingMoveChoice) return;
+  if (queenTurn && queenTurn.pieceId !== pieceId) {
+    boardHelp.textContent = `后本回合还剩 ${3 - queenTurn.stepsUsed} 步，必须先完成当前三步。`;
+    return;
+  }
   const piece = state.pieces.find(item => item.id === pieceId);
   if (!piece || piece.side !== state.turn) {
     boardHelp.textContent = '只能选择当前行动方的棋子。';
@@ -1321,6 +1618,29 @@ function selectPiece(pieceId) {
   }
   simulationPreview = null;
   selectedPieceId = pieceId;
+  if (piece.type === 'queen') {
+    queenTurn = {
+      pieceId,
+      stepsUsed: 0,
+      usedPortal: false,
+      portalTransition: null,
+      portalDecision: null
+    };
+    selectedMoves = queenStepMoves(state, pieceId, queenTurn);
+    if (selectedMoves.size === 0) {
+      resetQueenTurnState();
+      selectedPieceId = null;
+      selectedInfo.textContent = '当前后没有可完成的第1步。';
+      boardHelp.textContent = '当前后没有合法的单步起点，请选择其他棋子。';
+      render();
+      return;
+    }
+    selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方后：还可走 3 步`;
+    boardHelp.textContent = '请选择后的第1个单步；只有第3步可以吃子。若后在传送点上，可再次点击自身位置传送。';
+    render();
+    return;
+  }
+  resetQueenTurnState();
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
     `${selectedMoves.size} 个合法落点`;
@@ -1336,6 +1656,18 @@ async function animateElementPath(pieceId, path) {
     const to = toPixel(path[index]);
     const startedAt = performance.now();
     await new Promise(resolve => {
+      let settled = false;
+      let fallbackTimer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+        resolve();
+      };
+      fallbackTimer = setTimeout(() => {
+        pieceElement.setAttribute('transform', `translate(${to.x} ${to.y})`);
+        finish();
+      }, 430);
       function frame(now) {
         const progress = Math.min(1, (now - startedAt) / 170);
         const eased = progress < 0.5
@@ -1345,7 +1677,7 @@ async function animateElementPath(pieceId, path) {
         const y = from.y + (to.y - from.y) * eased;
         pieceElement.setAttribute('transform', `translate(${x} ${y})`);
         if (progress < 1) requestAnimationFrame(frame);
-        else resolve();
+        else finish();
       }
       requestAnimationFrame(frame);
     });
@@ -1403,24 +1735,27 @@ async function animateMove(
       ? configuredEntryIndex
       : attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
     : -1;
-  if (entryIndex >= 0) {
-    await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
-    await playFlatPortalTransition(portalTransition, portalColor);
-    const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
-    if (positionEffect === 'swap' && defenderId) {
-      await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+  try {
+    if (entryIndex >= 0) {
+      await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
+      await playFlatPortalTransition(portalTransition, portalColor);
+      const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
+      if (positionEffect === 'swap' && defenderId) {
+        await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+      } else {
+        await continuation;
+      }
+    } else if (positionEffect === 'swap' && defenderId) {
+      await Promise.all([
+        animateElementPath(pieceId, attackerPath),
+        animateElementPath(defenderId, [...path].reverse())
+      ]);
     } else {
-      await continuation;
+      await animateElementPath(pieceId, attackerPath);
     }
-  } else if (positionEffect === 'swap' && defenderId) {
-    await Promise.all([
-      animateElementPath(pieceId, attackerPath),
-      animateElementPath(defenderId, [...path].reverse())
-    ]);
-  } else {
-    await animateElementPath(pieceId, attackerPath);
+  } finally {
+    animationLock = false;
   }
-  animationLock = false;
 }
 
 async function animateBoardLayerExchange(nextState) {
@@ -1438,7 +1773,13 @@ async function animateBoardLayerExchange(nextState) {
   animationLock = false;
 }
 
-async function commitMove(pieceId, move, promote = false, decisionNote = '') {
+async function commitMove(
+  pieceId,
+  move,
+  promote = false,
+  decisionNote = '',
+  { skipMoveAnimation = false } = {}
+) {
   if (customEditor || isPreviewing()) return;
   lockUndoControls();
   const previousState = cloneGameState(state);
@@ -1450,7 +1791,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
   const positionEffect = capturedType
     ? capturePositionEffect(mover.type, capturedType)
     : 'move';
-  if (!solidBoardViewer) {
+  if (!skipMoveAnimation && !solidBoardViewer) {
     await animateMove(
       pieceId,
       move.path,
@@ -1459,7 +1800,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
       move.portalTransition,
       move.portalColor
     );
-  } else if (move.portalTransition) {
+  } else if (!skipMoveAnimation && move.portalTransition) {
     animationLock = true;
     try {
       await solidBoardViewer.playPortalTransition(move.portalTransition, move.portalColor);
@@ -1478,6 +1819,7 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
     return;
   }
   undoHistory.push(previousState);
+  resetQueenTurnState();
   selectedPieceId = null;
   selectedMoves = new Map();
   simulationPreview = null;
@@ -2359,7 +2701,7 @@ function beginPanelSwap() {
 }
 
 function undoLastMove() {
-  if (customEditor || isPreviewing() || animationLock || simulationLock) return;
+  if (customEditor || isPreviewing() || animationLock || simulationLock || queenTurn) return;
   stopAutoSimulation();
   const previousState = undoHistory.undo();
   if (!previousState) return;
@@ -2380,6 +2722,7 @@ function resetGame() {
   if (customEditor) return;
   stopAutoSimulation();
   closeMoveChoice();
+  resetQueenTurnState();
   undoHistory.clear();
   state = cloneGameState(activeInitialState);
   previewSide = null;
@@ -2394,7 +2737,7 @@ function resetGame() {
 }
 
 async function toggleFacePreview() {
-  if (customEditor || animationLock || simulationLock || pendingPromotion || pendingMoveChoice) return;
+  if (customEditor || animationLock || simulationLock || pendingPromotion || pendingMoveChoice || queenTurn) return;
   if (autoTimer) {
     clearInterval(autoTimer);
     autoTimer = null;
@@ -2423,6 +2766,7 @@ async function toggleFacePreview() {
 
 async function simulateStep() {
   if (customEditor) return;
+  if (queenTurn) return;
   if (simulationPauseRequested) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面预览期间不能运行算法；请先返回当前朝上面。';
@@ -2548,12 +2892,17 @@ pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
 pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
 pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
 moveChoiceModal.querySelector('[data-move-choice-action="cancel"]').addEventListener('click', closeMoveChoice);
+finishPortalDetectionButton.addEventListener('click', finishPortalDetection);
 autoButton.addEventListener('click', toggleAutoSimulation);
 
 svg.addEventListener('click', () => {
   if (customEditor) return;
   if (isPreviewing()) {
     boardHelp.textContent = '背面仅供预览；返回当前朝上面后才能移动棋子。';
+    return;
+  }
+  if (queenTurn) {
+    boardHelp.textContent = `后本回合还剩 ${Math.max(0, 3 - queenTurn.stepsUsed)} 步；请完成三步，或在传送检测时点击“结束检测”。`;
     return;
   }
   selectedPieceId = null;
