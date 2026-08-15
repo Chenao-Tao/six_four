@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=portal-editor-1">
+  <link rel="stylesheet" href="styles.css?v=portal-choice-1">
 </head>
 <body>
   <main class="app-shell">
@@ -144,7 +144,7 @@
             <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
             <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象占据目标；兵吃兵/王后占据目标；王吃后双方原位不变。降级也属于成功吃子。</li>
             <li><b>传送阵</b>：彩色“传”标记为实体板上的固定端点：1A-5 ↔ 4B-5、3A-5 ↔ 6B-5；同一对传送门颜色相同，不同对颜色不同。</li>
-            <li><b>传送能力</b>：后吃象成功后获得3回合传送能力，后身上显示3、2、1；之后每当该后完成一次走棋消耗1回合，吃象会重新刷新为3。能力有效时后可选择普通三步路线，或在三步中穿过一组传送门；穿越消耗1步，不再要求传送后必须吃子。象和兵不能使用传送阵。</li>
+            <li><b>传送能力</b>：后吃象成功后获得3回合传送能力，后身上显示3、2、1；之后每当该后完成一次走棋消耗1回合，吃象会重新刷新为3。能力有效时后可选择普通三步路线，或在三步中穿过一组传送门；穿越消耗1步，不再要求传送后必须吃子。同一落点同时存在普通和传送路线时会先询问移动方式。象和兵不能使用传送阵。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
             <li><b>限时博弈</b>：后台搜索在3秒内迭代加深，执行最后一个完整深度的结论；同时使用 Alpha-Beta 剪枝、置换表、吃子静态延伸并优先避开近期重复局面。</li>
             <li><b>双层棋盘</b>：当前上层才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后棋盘不旋转，当前棋盘与棋子整体下沉，正下方对应的棋盘与棋子整体上浮，两层交换位置。</li>
@@ -159,6 +159,16 @@
       </aside>
     </section>
   </main>
+  <div class="modal hidden" id="moveChoiceModal">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="moveChoiceTitle">
+      <h2 id="moveChoiceTitle">选择移动方式</h2>
+      <p id="moveChoiceQuestion">请选择正常移动或传送路线。</p>
+      <div class="move-choice-options" id="moveChoiceOptions"></div>
+      <div class="buttons modal-actions">
+        <button data-move-choice-action="cancel">取消，重新选动作</button>
+      </div>
+    </div>
+  </div>
   <div class="modal hidden" id="promotionModal">
     <div class="modal-card">
       <h2 id="promotionTitle">吃子成功</h2>
@@ -195,6 +205,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=optional-portal-1"></script>
+  <script type="module" src="app.js?v=portal-choice-1"></script>
 </body>
 </html>

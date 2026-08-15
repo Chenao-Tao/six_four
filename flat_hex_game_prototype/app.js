@@ -57,6 +57,7 @@ import {
   solidLayoutCandidates,
   solidLayouts
 } from './layout-library.js?v=pending-solid-1';
+import { moveChoicesAtTarget } from './move-choice.js?v=portal-choice-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -67,6 +68,9 @@ const promotionModal = document.getElementById('promotionModal');
 const promotionTitle = document.getElementById('promotionTitle');
 const promotionQuestion = document.getElementById('promotionQuestion');
 const promoteButton = document.getElementById('promoteButton');
+const moveChoiceModal = document.getElementById('moveChoiceModal');
+const moveChoiceQuestion = document.getElementById('moveChoiceQuestion');
+const moveChoiceOptions = document.getElementById('moveChoiceOptions');
 const boardShell = document.getElementById('boardShell');
 const faceBadge = document.getElementById('faceBadge');
 const previewButton = document.getElementById('previewButton');
@@ -139,6 +143,7 @@ let state = createInitialState();
 let selectedPieceId = null;
 let selectedMoves = new Map();
 let pendingPromotion = null;
+let pendingMoveChoice = null;
 let autoTimer = null;
 let autoPaused = false;
 let simulationPauseRequested = false;
@@ -700,8 +705,9 @@ function refreshSolidBoard(message = '') {
   solidViewerHelp.textContent = editingSolid
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
-  solidStepButton.disabled = editingSolid || simulationLock || animationLock || Boolean(pendingPromotion);
-  solidAutoButton.disabled = editingSolid || animationLock || Boolean(pendingPromotion);
+  solidStepButton.disabled = editingSolid || simulationLock || animationLock ||
+    Boolean(pendingPromotion || pendingMoveChoice);
+  solidAutoButton.disabled = editingSolid || animationLock || Boolean(pendingPromotion || pendingMoveChoice);
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -733,7 +739,7 @@ function selectSolidPiece(pieceId) {
   if (selectedPieceId && pieceId !== selectedPieceId) {
     const captureMove = captureMoveForClickedPiece(state, selectedPieceId, pieceId);
     if (captureMove) {
-      chooseMove(captureMove);
+      requestMoveChoice(captureMove);
       return;
     }
   }
@@ -744,7 +750,7 @@ function selectSolidPiece(pieceId) {
 function selectSolidMove(targetKey) {
   if (!solidBoardViewer || customEditor || !selectedPieceId) return;
   const move = selectedMoves.get(targetKey);
-  if (move) chooseMove(move);
+  if (move) requestMoveChoice(move);
 }
 
 function selectSolidPanel(panelIndex) {
@@ -811,7 +817,7 @@ function removeSolidPanel() {
 }
 
 function openSolidBoard() {
-  if (animationLock || simulationLock || pendingPromotion || solidBoardViewer) return;
+  if (animationLock || simulationLock || pendingPromotion || pendingMoveChoice || solidBoardViewer) return;
   stopAutoSimulation();
   closePieceEditor();
   if (customEditor) customEditor.boardShape = 'solid';
@@ -836,6 +842,7 @@ function openSolidBoard() {
 
 function closeSolidBoard() {
   if (!solidBoardViewer) return;
+  closeMoveChoice();
   solidBoardViewer.destroy();
   solidBoardViewer = null;
   solidSelectedPanel = null;
@@ -1119,7 +1126,7 @@ function renderPiece(piece) {
     if (selectedPieceId && piece.id !== selectedPieceId) {
       const captureMove = captureMoveForClickedPiece(state, selectedPieceId, piece.id);
       if (captureMove) {
-        chooseMove(captureMove);
+        requestMoveChoice(captureMove);
         return;
       }
     }
@@ -1179,7 +1186,7 @@ function renderMoves() {
     });
     target.addEventListener('click', event => {
       event.stopPropagation();
-      chooseMove(move);
+      requestMoveChoice(move);
     });
     targetLayer.appendChild(target);
   });
@@ -1223,8 +1230,8 @@ function render() {
       : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
-  stepButton.disabled = previewing || editing;
-  autoButton.disabled = previewing || editing;
+  stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
+  autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice);
   resetButton.disabled = editing;
   previewButton.disabled = editing;
   customizeButton.disabled = editing;
@@ -1293,7 +1300,7 @@ function selectPiece(pieceId) {
     boardHelp.textContent = '背面预览不可操作；返回当前朝上面后才能移动棋子。';
     return;
   }
-  if (animationLock || state.winner || pendingPromotion) return;
+  if (animationLock || state.winner || pendingPromotion || pendingMoveChoice) return;
   const piece = state.pieces.find(item => item.id === pieceId);
   if (!piece || piece.side !== state.turn) {
     boardHelp.textContent = '只能选择当前行动方的棋子。';
@@ -1503,6 +1510,51 @@ function chooseMove(move) {
   commitMove(selectedPieceId, move, false);
 }
 
+function closeMoveChoice() {
+  pendingMoveChoice = null;
+  moveChoiceOptions.replaceChildren();
+  moveChoiceModal.classList.add('hidden');
+}
+
+function portalChoiceLabel(move, portalIndex, portalCount) {
+  const portalName = (move.portalId ?? '传送阵').replace('-', ' ⇄ ');
+  const destination = move.targetLayer === 'dormant' ? ' · 前往背面/内层' : '';
+  const route = portalCount > 1 ? ` · 路线 ${portalIndex + 1}` : '';
+  return `传送：${portalName}${destination}${route}`;
+}
+
+function requestMoveChoice(move) {
+  if (customEditor || isPreviewing() || animationLock || !selectedPieceId || pendingMoveChoice) return;
+  const choices = moveChoicesAtTarget(selectedMoves, move, state.boardShape);
+  const ordinaryChoices = choices.filter(candidate => !candidate.usesPortal);
+  const portalChoices = choices.filter(candidate => candidate.usesPortal);
+  if (!ordinaryChoices.length || !portalChoices.length) {
+    chooseMove(move);
+    return;
+  }
+
+  pendingMoveChoice = { pieceId: selectedPieceId, choices };
+  moveChoiceQuestion.textContent = '这个落点既能正常到达，也能通过传送阵到达。请选择本回合使用的路线：';
+  let portalIndex = 0;
+  const optionButtons = choices.map(choice => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = choice.usesPortal ? 'portal-move-choice' : 'ordinary-move-choice';
+    button.textContent = choice.usesPortal
+      ? portalChoiceLabel(choice, portalIndex++, portalChoices.length)
+      : '正常移动（不传送）';
+    button.addEventListener('click', () => {
+      const pieceId = pendingMoveChoice?.pieceId;
+      closeMoveChoice();
+      if (!pieceId || pieceId !== selectedPieceId) return;
+      chooseMove(choice);
+    });
+    return button;
+  });
+  moveChoiceOptions.replaceChildren(...optionButtons);
+  moveChoiceModal.classList.remove('hidden');
+}
+
 promotionModal.querySelectorAll('[data-promote]').forEach(button => {
   button.addEventListener('click', () => {
     if (!pendingPromotion) return;
@@ -1612,7 +1664,7 @@ function toggleAutoSimulation() {
     setAutoSimulationButtonState('继续模拟', true);
     return;
   }
-  if (customEditor || isPreviewing() || animationLock || pendingPromotion || state.winner) return;
+  if (customEditor || isPreviewing() || animationLock || pendingPromotion || pendingMoveChoice || state.winner) return;
   if (autoTimer && autoPaused) {
     autoPaused = false;
     simulationPauseRequested = false;
@@ -1678,7 +1730,7 @@ function removeEditorPiece() {
 }
 
 function enterCustomEditor() {
-  if (animationLock || simulationLock || pendingPromotion || customEditor) return;
+  if (animationLock || simulationLock || pendingPromotion || pendingMoveChoice || customEditor) return;
   stopAutoSimulation();
   previewSide = null;
   selectedPieceId = null;
@@ -2287,6 +2339,7 @@ function beginPanelSwap() {
 function resetGame() {
   if (customEditor) return;
   stopAutoSimulation();
+  closeMoveChoice();
   state = cloneGameState(activeInitialState);
   previewSide = null;
   selectedPieceId = null;
@@ -2300,7 +2353,7 @@ function resetGame() {
 }
 
 async function toggleFacePreview() {
-  if (customEditor || animationLock || simulationLock || pendingPromotion) return;
+  if (customEditor || animationLock || simulationLock || pendingPromotion || pendingMoveChoice) return;
   if (autoTimer) {
     clearInterval(autoTimer);
     autoTimer = null;
@@ -2332,7 +2385,7 @@ async function simulateStep() {
     boardHelp.textContent = '背面预览期间不能运行算法；请先返回当前朝上面。';
     return;
   }
-  if (simulationLock || animationLock || pendingPromotion || state.winner) return;
+  if (simulationLock || animationLock || pendingPromotion || pendingMoveChoice || state.winner) return;
   const runId = simulationRunId;
   simulationLock = true;
   try {
@@ -2448,6 +2501,7 @@ pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
 });
 pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
 pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
+moveChoiceModal.querySelector('[data-move-choice-action="cancel"]').addEventListener('click', closeMoveChoice);
 autoButton.addEventListener('click', toggleAutoSimulation);
 
 svg.addEventListener('click', () => {
@@ -2462,6 +2516,10 @@ svg.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !moveChoiceModal.classList.contains('hidden')) {
+    closeMoveChoice();
+    return;
+  }
   if (event.key === 'Escape' && solidBoardViewer) {
     closeSolidBoard();
     return;

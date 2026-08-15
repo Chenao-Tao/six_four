@@ -223,6 +223,10 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(2,5,8,.72); }
 .modal.hidden { display: none; }
 .modal-card { width: min(360px, calc(100vw - 32px)); padding: 22px; border: 1px solid #55728a; border-radius: 16px; background: #131d27; }
+.move-choice-options { display: grid; gap: 10px; margin-top: 16px; }
+.move-choice-options button { width: 100%; text-align: left; }
+.move-choice-options .portal-move-choice { border-color: #c384ff; box-shadow: inset 3px 0 #c384ff; }
+.move-choice-options .ordinary-move-choice { border-color: #54d7c2; box-shadow: inset 3px 0 #54d7c2; }
 .piece-editor-card { width: min(480px, calc(100vw - 32px)); }
 .piece-editor-card p { color: #aebfce; line-height: 1.5; }
 .piece-palette { display: grid; gap: 10px; margin: 16px 0; }

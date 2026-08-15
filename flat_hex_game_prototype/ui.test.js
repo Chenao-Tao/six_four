@@ -258,7 +258,7 @@ test('连续算法模拟支持暂停继续并在立体界面跟随棋子视角',
   assert.match(app, /setAutoSimulationButtonState\('暂停模拟', true\)/);
   assert.match(app, /solidBoardViewer\?\.followPiece\(step\.pieceId\)/);
   assert.match(app, /solidBoardViewer\?\.followPoint\(/);
-  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion\)/);
+  assert.match(app, /solidAutoButton\.disabled = editingSolid \|\| animationLock \|\| Boolean\(pendingPromotion \|\| pendingMoveChoice\)/);
 });
 
 test('AI 搜索在专用 Worker 中迭代加深并可立即取消', () => {
@@ -289,7 +289,7 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /onMoveSelect: selectSolidMove/);
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
-  assert.match(app, /if \(move\) chooseMove\(move\)/);
+  assert.match(app, /if \(move\) requestMoveChoice\(move\)/);
   assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
   assert.match(app, /mapSolidPoint\(move\.target, move\.panelIndex \?\? captured\?\.panelIndex\)/);
   assert.match(app, /visibleFaceSides\.forEach/);
@@ -326,6 +326,18 @@ test('平面和立体传送端点显示具体板面点号与潜藏层标识', ()
   assert.match(solidBoard, /portal\.displayLabel/);
   assert.match(styles, /\.portal-marker\.active text/);
   assert.match(styles, /\.portal-marker\.dormant text/);
+});
+
+test('同一落点存在普通与传送路线时平面和立体共用移动方式选择弹窗', () => {
+  assert.match(html, /id="moveChoiceModal"/);
+  assert.match(html, /id="moveChoiceOptions"/);
+  assert.match(html, /data-move-choice-action="cancel"/);
+  assert.match(app, /moveChoicesAtTarget/);
+  assert.match(app, /function requestMoveChoice\(move\)/);
+  assert.match(app, /function selectSolidMove\(targetKey\)[\s\S]*?requestMoveChoice\(move\)/);
+  assert.match(app, /function renderMoves\(\)[\s\S]*?requestMoveChoice\(move\)/);
+  assert.match(app, /moveChoiceOptions\.replaceChildren/);
+  assert.match(app, /closeMoveChoice\(\)/);
 });
 
 test('平面编辑按实际板面显示默认 4B5 传送阵而不是按 A/B 后缀过滤', () => {
