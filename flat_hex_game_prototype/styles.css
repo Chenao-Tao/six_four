@@ -185,6 +185,8 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .portal-marker circle { fill: none; stroke: var(--portal-color, #d8aaff); stroke-width: 3; stroke-dasharray: 7 5; filter: drop-shadow(0 0 4px var(--portal-color, #d8aaff)); }
 .portal-marker.dormant { opacity: .34; }
 .portal-marker.dormant circle { stroke-dasharray: 3 7; }
+.portal-marker.active text { opacity: .92; }
+.portal-marker.dormant text { opacity: .78; }
 .portal-marker.transitioning circle { animation: portal-marker-pulse .22s ease-in-out infinite alternate; stroke-width: 5; }
 .portal-marker text { fill: var(--portal-color, #f2deff); font-size: 10px; font-weight: 850; paint-order: stroke; stroke: #0a131b; stroke-width: 3px; }
 .portal-transition-path { fill: none; stroke: var(--portal-color, #d8aaff); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 12 10; animation: portal-path-travel .48s linear infinite; filter: drop-shadow(0 0 8px var(--portal-color, #d8aaff)); }
@@ -221,6 +223,10 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(2,5,8,.72); }
 .modal.hidden { display: none; }
 .modal-card { width: min(360px, calc(100vw - 32px)); padding: 22px; border: 1px solid #55728a; border-radius: 16px; background: #131d27; }
+.move-choice-options { display: grid; gap: 10px; margin-top: 16px; }
+.move-choice-options button { width: 100%; text-align: left; }
+.move-choice-options .portal-move-choice { border-color: #c384ff; box-shadow: inset 3px 0 #c384ff; }
+.move-choice-options .ordinary-move-choice { border-color: #54d7c2; box-shadow: inset 3px 0 #54d7c2; }
 .piece-editor-card { width: min(480px, calc(100vw - 32px)); }
 .piece-editor-card p { color: #aebfce; line-height: 1.5; }
 .piece-palette { display: grid; gap: 10px; margin: 16px 0; }

@@ -265,7 +265,7 @@ test('后在能力有效期内可穿过空门，传送不再强制吃子', () =>
   assert.equal(result.state.boardStates.front.find(item => item.id === 'wQ').portalTurns, 2);
 });
 
-test('有传送能力的后不能在第三步停在传送入口', () => {
+test('有传送能力的后可以选择普通路线停在传送入口', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
   ]);
@@ -278,10 +278,11 @@ test('有传送能力的后不能在第三步停在传送入口', () => {
   const stoppedAtPortal = [...legalMoves(state, 'wQ').values()].filter(move =>
     !move.usesPortal && portalPointKeys.has(move.pointKey));
 
-  assert.deepEqual(stoppedAtPortal, []);
+  assert.ok(stoppedAtPortal.length > 0);
+  assert.ok(stoppedAtPortal.every(move => move.path.length === 4));
 });
 
-test('有传送能力的后经过传送入口时必须生成自动穿越路线', () => {
+test('有传送能力的后经过传送入口时可以选择普通路线或传送路线', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
   ]);
@@ -295,29 +296,32 @@ test('有传送能力的后经过传送入口时必须生成自动穿越路线',
     !move.usesPortal && move.path.slice(1).some(point => portalPointKeys.has(keyOf(point)))
   );
 
-  assert.deepEqual(ordinaryThroughPortal, []);
+  assert.ok(ordinaryThroughPortal.length > 0);
   assert.ok(moves.some(move =>
     move.usesPortal && move.pathSteps.some(step => step.portalEntry)
   ));
 });
 
-test('有传送能力的后从传送点起步时第一步强制穿越并记录入口出口', () => {
+test('有传送能力的后从传送点起步时可以选择普通移动或穿越并记录入口出口', () => {
   const state = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
   ]);
 
   const moves = [...legalMoves(state, 'wQ').values()];
+  const ordinaryMoves = moves.filter(move => !move.usesPortal);
+  const portalMoves = moves.filter(move => move.usesPortal);
 
   assert.ok(moves.length > 0);
-  assert.ok(moves.every(move => move.usesPortal));
-  assert.ok(moves.every(move => move.portalTransition));
-  assert.deepEqual(moves[0].portalTransition.entry.position, { q: 1, r: -2 });
-  assert.deepEqual(moves[0].portalTransition.exit.position, { q: -1, r: -1 });
-  assert.equal(moves[0].portalTransition.entry.layer, 'active');
-  assert.equal(moves[0].portalTransition.exit.layer, 'active');
+  assert.ok(ordinaryMoves.length > 0);
+  assert.ok(portalMoves.length > 0);
+  assert.ok(portalMoves.every(move => move.portalTransition));
+  assert.deepEqual(portalMoves[0].portalTransition.entry.position, { q: 1, r: -2 });
+  assert.deepEqual(portalMoves[0].portalTransition.exit.position, { q: -1, r: -1 });
+  assert.equal(portalMoves[0].portalTransition.entry.layer, 'active');
+  assert.equal(portalMoves[0].portalTransition.exit.layer, 'active');
 });
 
-test('自动传送出口被占用时保持最终一步吃子约束', () => {
+test('传送出口被占用时只阻止传送路线并保留普通路线', () => {
   const friendlyBlocked = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
     { ...piece('wP', 'white', 'pawn', -1, -1), panelIndex: 3 }
@@ -327,15 +331,20 @@ test('自动传送出口被占用时保持最终一步吃子约束', () => {
     { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
   ]);
 
-  assert.equal(legalMoves(friendlyBlocked, 'wQ').size, 0);
-  assert.equal(legalMoves(earlyEnemyBlocked, 'wQ').size, 0);
+  const friendlyMoves = [...legalMoves(friendlyBlocked, 'wQ').values()];
+  const enemyMoves = [...legalMoves(earlyEnemyBlocked, 'wQ').values()];
+  assert.ok(friendlyMoves.length > 0);
+  assert.ok(enemyMoves.length > 0);
+  assert.ok(friendlyMoves.every(move => !move.usesPortal));
+  assert.ok(enemyMoves.every(move => !move.usesPortal));
 });
 
 test('两组传送门都支持双向自动穿越', () => {
   const frontState = defaultDoubleSidedState([
     { ...piece('wQ', 'white', 'queen', -1, -1), panelIndex: 3, portalTurns: 3 }
   ]);
-  const frontMove = [...legalMoves(frontState, 'wQ').values()][0];
+  const frontMove = [...legalMoves(frontState, 'wQ').values()].find(move => move.usesPortal);
+  assert.ok(frontMove);
   assert.deepEqual(frontMove.portalTransition.entry.position, { q: -1, r: -1 });
   assert.deepEqual(frontMove.portalTransition.exit.position, { q: 1, r: -2 });
 
@@ -347,7 +356,8 @@ test('两组传送门都支持双向自动穿越', () => {
     boardStates: { front: [], back: [backQueen] },
     pieces: [backQueen]
   };
-  const backMove = [...legalMoves(backState, 'wQ').values()][0];
+  const backMove = [...legalMoves(backState, 'wQ').values()].find(move => move.usesPortal);
+  assert.ok(backMove);
   assert.equal(backMove.portalId, '3A5-6B5');
   assert.equal(backMove.portalTransition.entry.layer, 'active');
   assert.equal(backMove.portalTransition.exit.layer, 'dormant');

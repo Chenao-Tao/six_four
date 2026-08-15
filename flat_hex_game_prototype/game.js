@@ -1434,7 +1434,11 @@ function chargedQueenMoves(state, pieceToMove) {
 function addPortalMoves(state, pieceToMove, moves) {
   if (!state.boardStates && !state.solidLayers) return moves;
   if (pieceToMove.type === 'queen' && pieceToMove.portalTurns > 0) {
-    return chargedQueenMoves(state, pieceToMove);
+    const combinedMoves = new Map(moves);
+    chargedQueenMoves(state, pieceToMove).forEach((move, moveKey) => {
+      combinedMoves.set(moveKey, move);
+    });
+    return combinedMoves;
   }
   return moves;
 }

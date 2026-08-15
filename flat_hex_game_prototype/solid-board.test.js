@@ -7,9 +7,18 @@ import {
   findSolidTargetAtPoint,
   isSharedSolidPoint,
   mapPiecesToPanels,
+  portalEndpointDisplayLabel,
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
+
+test('传送端点标签区分当前层与立体潜藏层', () => {
+  const endpoint = { faceLabel: '6B', pointNumber: 5 };
+
+  assert.equal(portalEndpointDisplayLabel(endpoint), '6B5');
+  assert.equal(portalEndpointDisplayLabel({ ...endpoint, dormant: true }), '内·6B5');
+  assert.equal(portalEndpointDisplayLabel({ ...endpoint, dormant: true }, '背'), '背·6B5');
+});
 
 test('平面棋子映射到六块立体板时不丢失、不复制且不修改原数据', () => {
   const pieces = [
