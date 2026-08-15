@@ -9,7 +9,11 @@ import {
   shouldFallbackToBrowserStorage
 } from './layout-storage.js';
 import { builtInLayouts } from './built-in-layouts.js';
-import { flatLayouts, resolvePlayableLayout } from './layout-library.js';
+import {
+  flatLayouts,
+  resolvePlayableLayout,
+  solidLayoutCandidates
+} from './layout-library.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -80,6 +84,25 @@ function solidLayout(name, sourceFlatLayoutName) {
     panelRotations: initial.boardPanelRotations
   };
 }
+
+test('新平面布局自动提供同名待组装立体入口', () => {
+  const candidates = solidLayoutCandidates([flatLayout('布局1')]);
+
+  assert.deepEqual(candidates, [{
+    name: '布局1',
+    boardShape: 'solid',
+    sourceFlatLayoutName: '布局1',
+    pendingAssembly: true,
+    displayName: '布局1（待组装）'
+  }]);
+});
+
+test('已保存立体布局替代同名待组装入口且不重复显示', () => {
+  const flat = flatLayout('布局1');
+  const solid = solidLayout('布局1', '布局1');
+
+  assert.deepEqual(solidLayoutCandidates([flat, solid]), [solid]);
+});
 
 test('平面布局持久化成对传送阵且立体布局实时同步', () => {
   const store = createBrowserLayoutStore(memoryStorage());

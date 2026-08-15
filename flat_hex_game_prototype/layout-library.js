@@ -45,6 +45,24 @@ export function solidLayouts(layouts) {
   return layouts.filter(layout => layout.boardShape === 'solid');
 }
 
+export function solidLayoutCandidates(layouts) {
+  const savedSolids = solidLayouts(layouts);
+  const solidByName = new Map(savedSolids.map(layout => [layout.name, layout]));
+  const flatNames = new Set();
+  const candidates = flatLayouts(layouts).map(layout => {
+    flatNames.add(layout.name);
+    return solidByName.get(layout.name) ?? {
+      name: layout.name,
+      boardShape: 'solid',
+      sourceFlatLayoutName: layout.name,
+      pendingAssembly: true,
+      displayName: `${layout.name}（待组装）`
+    };
+  });
+
+  return candidates.concat(savedSolids.filter(layout => !flatNames.has(layout.name)));
+}
+
 export function resolveSolidLayout(layout, layouts) {
   if (!layout || layout.boardShape !== 'solid') return { error: '选择的不是立体布局' };
   if (!layout.sourceFlatLayoutName && layout.boardStates) {

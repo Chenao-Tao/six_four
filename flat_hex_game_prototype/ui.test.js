@@ -183,6 +183,31 @@ test('平面与立体结构按同名方案配对且只显示当前形态的存�
   assert.match(app, /loadSolidLayoutButton\.disabled = !selectedLayout/);
 });
 
+test('新平面方案在立体列表显示为待组装且只能载入装配', () => {
+  assert.match(app, /solidLayoutCandidates\(savedLayouts\)/);
+  assert.match(app, /option\.textContent = layout\.displayName \?\? layout\.name/);
+  assert.match(app, /activateSolidLayoutButton\.disabled = !selectedLayout \|\| Boolean\(selectedLayout\.pendingAssembly\)/);
+  assert.match(app, /deleteSolidLayoutButton\.disabled = !selectedLayout \|\|[\s\S]*?Boolean\(selectedLayout\.pendingAssembly\)/);
+  assert.match(html, /每个平面方案自动生成待组装入口/);
+});
+
+test('载入待组装入口会创建空骨架且平面方案可直接切换到立体装配', () => {
+  const loader = app.match(
+    /function loadSolidLayoutFromLibrary\(name = savedSolidLayoutSelect\.value\)[\s\S]*?\n}\n\nasync function activateLayoutFromLibrary/
+  );
+  const switcher = app.match(/function setBoardShape\(boardShape\)[\s\S]*?\n}\n\nfunction selectEditorPanel/);
+
+  assert.ok(loader);
+  assert.ok(switcher);
+  assert.match(loader[0], /solidLayoutCandidates\(savedLayouts\)/);
+  assert.match(loader[0], /layout\.pendingAssembly/);
+  assert.match(loader[0], /createSolidAssembly\(sourceLayout\)/);
+  assert.match(loader[0], /待组装状态/);
+  assert.match(switcher[0], /const schemeName = enteredName \|\| selectedFlatName \|\| selectedSolidName/);
+  assert.doesNotMatch(switcher[0], /solidLayouts\(savedLayouts\)\.some\(layout => layout\.name === selectedFlatName\)/);
+  assert.match(app, /saveSolidLayoutButton\.disabled = Boolean\(assemblyToLayout\(customEditor\.solidAssembly\)\.error\)/);
+});
+
 test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
   const boardCardStart = html.indexOf('<div class="board-card">');
   const solidViewerStart = html.indexOf('<div class="solid-viewer hidden"');

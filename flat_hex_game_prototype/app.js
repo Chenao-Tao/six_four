@@ -53,8 +53,9 @@ import {
   flatLayouts,
   resolvePlayableLayout,
   resolveSolidLayout,
+  solidLayoutCandidates,
   solidLayouts
-} from './layout-library.js?v=portal-editor-1';
+} from './layout-library.js?v=pending-solid-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -325,26 +326,28 @@ function replaceLayoutOptions(select, layouts, emptyLabel, selectedName = '') {
   layouts.forEach(layout => {
     const option = document.createElement('option');
     option.value = layout.name;
-    option.textContent = layout.name;
+    option.textContent = layout.displayName ?? layout.name;
     select.appendChild(option);
   });
   select.value = layouts.some(layout => layout.name === selectedName) ? selectedName : layouts[0].name;
 }
 
 function refreshSolidLayoutOptions(selectedName = '') {
-  const solidSavedLayouts = solidLayouts(savedLayouts);
-  replaceLayoutOptions(savedSolidLayoutSelect, solidSavedLayouts, '暂无已保存立体布局', selectedName);
-  const selectedLayout = solidSavedLayouts.find(layout => layout.name === savedSolidLayoutSelect.value);
+  const solidCandidates = solidLayoutCandidates(savedLayouts);
+  replaceLayoutOptions(savedSolidLayoutSelect, solidCandidates, '暂无可装配的立体布局', selectedName);
+  const selectedLayout = solidCandidates.find(layout => layout.name === savedSolidLayoutSelect.value);
   if (customEditor?.boardShape === 'solid') {
     solidLayoutNameInput.value = selectedLayout?.name ?? customEditor.sourceFlatLayoutName ?? '';
   }
   const solidIsActive = Boolean(selectedLayout) &&
+    !selectedLayout.pendingAssembly &&
     selectedLayout.name === activeLayoutName && activeBoardShape === 'solid';
-  activateSolidLayoutButton.disabled = !selectedLayout;
+  activateSolidLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.pendingAssembly);
   activateSolidLayoutButton.textContent = solidIsActive ? '覆盖并启用' : '启用';
   activateSolidLayoutButton.classList.toggle('active', solidIsActive);
   loadSolidLayoutButton.disabled = !selectedLayout;
-  deleteSolidLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.builtIn);
+  deleteSolidLayoutButton.disabled = !selectedLayout ||
+    Boolean(selectedLayout.pendingAssembly) || Boolean(selectedLayout.builtIn);
 }
 
 function toPixel(point) {
@@ -701,6 +704,7 @@ function refreshSolidBoard(message = '') {
     rotateSolidPanelButton.disabled = !selectedPanel;
     flipSolidPanelButton.disabled = !selectedPanel;
     removeSolidPanelButton.disabled = !selectedPanel || selectedPanel.installedSlot === null;
+    saveSolidLayoutButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
     saveSolidCustomButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
     renderSolidSlotPicker();
     renderSolidPanelTray();
@@ -1950,18 +1954,20 @@ function loadLayoutFromLibrary() {
 
 function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
   if (!customEditor || !name) return;
-  const layout = savedLayouts.find(item =>
-    item.name === name && item.boardShape === 'solid');
+  const layout = solidLayoutCandidates(savedLayouts).find(item => item.name === name);
   if (!layout) {
-    boardHelp.textContent = '选择的立体布局存档不存在。';
+    boardHelp.textContent = '选择的立体布局入口不存在。';
     return;
   }
-  const resolved = resolveSolidLayout(layout, savedLayouts);
-  if (resolved.error) {
-    boardHelp.textContent = `立体布局存档无效：${resolved.error}`;
-    return;
+  if (!layout.pendingAssembly) {
+    const resolved = resolveSolidLayout(layout, savedLayouts);
+    if (resolved.error) {
+      boardHelp.textContent = `立体布局存档无效：${resolved.error}`;
+      return;
+    }
   }
-  const sourceLayout = flatLayouts(savedLayouts).find(item => item.name === layout.name);
+  const sourceLayout = flatLayouts(savedLayouts)
+    .find(item => item.name === (layout.sourceFlatLayoutName ?? layout.name));
   const sourceValidation = sourceLayout && createCustomLayout(
     sourceLayout.boardStates,
     sourceLayout.faceLabels,
@@ -1985,16 +1991,19 @@ function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
   customEditor.portalPairs = clonePortalPairs(sourceValidation.portalPairs);
   customEditor.pendingPortalEndpoint = null;
   customEditor.boardShape = 'solid';
-  customEditor.sourceFlatLayoutName = layout.name;
-  layoutNameInput.value = layout.name;
-  solidLayoutNameInput.value = layout.name;
-  customEditor.solidAssembly = createSolidAssembly(
-    sourceLayout,
-    { installed: true, arrangement: layout }
-  );
+  customEditor.sourceFlatLayoutName = sourceLayout.name;
+  layoutNameInput.value = sourceLayout.name;
+  solidLayoutNameInput.value = sourceLayout.name;
+  customEditor.solidAssembly = layout.pendingAssembly
+    ? createSolidAssembly(sourceLayout)
+    : createSolidAssembly(sourceLayout, { installed: true, arrangement: layout });
   if (solidBoardViewer) closeSolidBoard();
   openSolidBoard();
-  boardHelp.textContent = `已载入方案“${layout.name}”的立体结构，棋子同步自同名平面结构。`;
+  const message = layout.pendingAssembly
+    ? `方案“${layout.name}”当前为待组装状态；完成六块板安装后才能保存、启用或开局。`
+    : `已载入方案“${layout.name}”的立体结构，棋子同步自同名平面结构。`;
+  boardHelp.textContent = message;
+  solidViewerStatus.textContent = message;
 }
 
 async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardShape = 'flat') {
@@ -2105,10 +2114,7 @@ function setBoardShape(boardShape) {
     const enteredName = layoutNameInput.value.trim();
     const selectedFlatName = savedLayoutSelect.value;
     const selectedSolidName = savedSolidLayoutSelect.value;
-    const schemeName = enteredName ||
-      (solidLayouts(savedLayouts).some(layout => layout.name === selectedFlatName)
-        ? selectedFlatName
-        : selectedSolidName);
+    const schemeName = enteredName || selectedFlatName || selectedSolidName;
     const savedSource = flatLayouts(savedLayouts).find(layout => layout.name === schemeName);
     if (!schemeName || (!enteredName && !savedSource)) {
       boardHelp.textContent = '请先载入或保存一个平面方案，再编辑其同名立体结构。';

@@ -110,14 +110,14 @@
               </div>
             </div>
             <div class="layout-library" id="solidLayoutLibrary">
-              <label for="solidLayoutNameInput">立体装配结构（棋子自动同步自同名平面方案）</label>
+              <label for="solidLayoutNameInput">立体装配结构（每个平面方案自动生成待组装入口）</label>
               <div class="layout-save-row">
                 <input id="solidLayoutNameInput" maxlength="40" placeholder="请先载入同名平面方案" readonly>
                 <button id="saveSolidLayoutButton">保存立体布局</button>
               </div>
               <div class="layout-save-row">
-                <select id="savedSolidLayoutSelect" aria-label="已保存立体布局">
-                  <option value="">暂无已保存立体布局</option>
+                <select id="savedSolidLayoutSelect" aria-label="立体布局与待组装入口">
+                  <option value="">暂无可装配的立体布局</option>
                 </select>
                 <button id="loadSolidLayoutButton" disabled>载入装配</button>
                 <button id="activateSolidLayoutButton" disabled>启用</button>
