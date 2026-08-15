@@ -923,23 +923,20 @@ test('传送能力按剩余回合进入评估且最多计十八分', () => {
 
 test('限时搜索返回的传送主变例保留完整入口出口和路线', () => {
   const state = defaultDoubleSidedState([
-    { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 1 },
-    piece('wK', 'white', 'king', -4, 0),
-    piece('bK', 'black', 'king', 4, 0)
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 1 }
   ]);
   const steps = [...iterativeGameSearch(state, {
     maxDepth: 1,
     maxNodes: 5000,
     quiescenceDepth: 1
   })];
-  const portalAction = steps.find(step => step.move.usesPortal);
+  const portalAction = steps[0];
 
-  if (portalAction) {
-    assert.ok(portalAction.move.portalTransition.entry);
-    assert.ok(portalAction.move.portalTransition.exit);
-    assert.ok(portalAction.move.pathSteps.length >= 2);
-  }
-  assert.ok(steps.length >= 1);
+  assert.equal(portalAction.move.usesPortal, true);
+  assert.ok(portalAction.move.portalTransition.entry);
+  assert.ok(portalAction.move.portalTransition.exit);
+  assert.ok(portalAction.move.pathSteps.length >= 2);
+  assert.equal(portalAction.principalVariation[0].move.usesPortal, true);
 });
 
 test('近期重复只作同分决胜，不会过滤立即获胜动作', () => {
