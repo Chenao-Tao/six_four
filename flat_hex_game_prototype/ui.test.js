@@ -75,6 +75,15 @@ test('单步动画即使没有 requestAnimationFrame 也会释放移动锁', () 
   assert.match(animation[0], /clearTimeout\(/);
 });
 
+test('选择后时传送渲染允许尚未建立当前分步位置', () => {
+  const renderPortals = app.match(/function renderPortals\(\)[\s\S]*?\n}\n\nfunction appendPortalMarker/);
+  assert.ok(renderPortals);
+  assert.match(renderPortals[0], /queenTurn\?\.current\?\.layer/);
+  const animateQueen = app.match(/async function animateQueenStep\([\s\S]*?\n}\n\nasync function animatePortalObservationLayer/);
+  assert.ok(animateQueen);
+  assert.match(animateQueen[0], /queenTurn\?\.current\?\.position/);
+});
+
 test('背面预览使用独立显示状态并锁定移动入口', () => {
   assert.match(app, /let previewSide = null/);
   assert.match(app, /return state\.boardStates\?\.\[side\] \?\? state\.pieces/);

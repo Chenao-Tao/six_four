@@ -29,7 +29,7 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=queen-step-2';
+} from './game.js?v=queen-step-3';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -985,7 +985,7 @@ function renderPortals() {
     });
     return;
   }
-  const visibleLayer = queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
+  const visibleLayer = queenTurn?.current?.layer ?? (previewSide === null ? 'active' : 'dormant');
   portalEndpointLocations(state)
     .forEach(location => {
       appendPortalMarker(
@@ -1507,7 +1507,7 @@ async function animateQueenStep(move) {
   if (solidBoardViewer) return;
   animationLock = true;
   try {
-    const from = queenTurn?.current.position ?? move.path.at(-2);
+    const from = queenTurn?.current?.position ?? move.path.at(-2);
     await animateElementPath(move.nextQueenContext.pieceId, [from, move.target]);
   } finally {
     animationLock = false;
