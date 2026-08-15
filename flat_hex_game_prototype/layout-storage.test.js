@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createCustomState, createInitialState } from './game.js';
+import { createCustomState, createInitialState, PORTAL_PAIRS } from './game.js';
 import {
   createBrowserLayoutStore,
   DEFAULT_LAYOUT_NAME,
@@ -80,6 +80,58 @@ function solidLayout(name, sourceFlatLayoutName) {
     panelRotations: initial.boardPanelRotations
   };
 }
+
+test('平面布局持久化成对传送阵且立体布局实时同步', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  const portalPairs = [{
+    id: '2A4-5B7',
+    color: '#7ee081',
+    endpoints: [
+      { faceLabel: '2A', pointNumber: 4 },
+      { faceLabel: '5B', pointNumber: 7 }
+    ]
+  }];
+  let library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: { ...flatLayout('传送同步'), portalPairs },
+      activate: false
+    })
+  });
+  library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('传送同步', '传送同步'), activate: false })
+  });
+
+  const storedFlat = library.layouts.find(layout =>
+    layout.name === '传送同步' && layout.boardShape === 'flat');
+  const playable = resolvePlayableLayout(
+    library.layouts.find(layout =>
+      layout.name === '传送同步' && layout.boardShape === 'solid'),
+    library.layouts
+  );
+
+  assert.deepEqual(storedFlat.portalPairs, portalPairs);
+  assert.deepEqual(playable.state.portalPairs, portalPairs);
+});
+
+test('旧平面布局补默认传送阵且显式空数组保持无传送阵', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  let library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('旧布局'), activate: false })
+  });
+  library = store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: { ...flatLayout('无传送阵'), portalPairs: [] },
+      activate: false
+    })
+  });
+
+  assert.deepEqual(library.layouts.find(layout => layout.name === '旧布局').portalPairs, PORTAL_PAIRS);
+  assert.deepEqual(library.layouts.find(layout => layout.name === '无传送阵').portalPairs, []);
+});
 
 test('同名方案的平面与立体结构独立保存且立体实时使用平面棋子', () => {
   const store = createBrowserLayoutStore(memoryStorage());

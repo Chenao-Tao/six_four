@@ -590,16 +590,16 @@ export function createSolidBoardViewer(canvas, initialModel, {
         .forEach(portal => {
           const world = barycentricPoint(vertices, portal.local);
           const position = project(add(world, scale(normal, 0.045)), width, height);
-          const radius = Math.max(5, 7 * position.perspective * zoom);
+          const radius = Math.max(14, 20 * position.perspective * zoom);
           context.save();
           context.beginPath();
           context.arc(position.x, position.y, radius, 0, Math.PI * 2);
-          context.fillStyle = portal.portalColor ?? '#c889ff';
-          context.globalAlpha = 0.48;
-          context.fill();
-          context.lineWidth = 2;
+          context.globalAlpha = portal.dormant ? 0.3 : 0.9;
+          context.lineWidth = portal.dormant ? 2 : 3;
           context.strokeStyle = portal.portalColor ?? '#d8aaff';
+          context.setLineDash(portal.dormant ? [3, 7] : [7, 5]);
           context.stroke();
+          context.setLineDash([]);
           context.restore();
         });
 

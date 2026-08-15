@@ -99,6 +99,57 @@ export const PORTAL_PAIRS = [
   }
 ];
 
+export function clonePortalPairs(portalPairs = PORTAL_PAIRS) {
+  return portalPairs.map(portal => ({
+    id: portal.id,
+    color: portal.color,
+    endpoints: portal.endpoints.map(endpoint => ({ ...endpoint }))
+  }));
+}
+
+export function normalizePortalPairs(portalPairs, faceLabels = BOARD_FACE_LABELS) {
+  const source = portalPairs === undefined ? PORTAL_PAIRS : portalPairs;
+  if (!Array.isArray(source)) return { error: '传送阵数据必须是数组' };
+  const validFaceLabels = new Set([...faceLabels.front, ...faceLabels.back]);
+  const usedEndpoints = new Set();
+  const normalized = [];
+  for (const [pairIndex, portal] of source.entries()) {
+    if (!Array.isArray(portal?.endpoints) || portal.endpoints.length !== 2) {
+      return { error: `第 ${pairIndex + 1} 对传送阵必须包含两个端点` };
+    }
+    if (typeof portal.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(portal.color)) {
+      return { error: `第 ${pairIndex + 1} 对传送阵颜色无效` };
+    }
+    const endpoints = [];
+    for (const endpoint of portal.endpoints) {
+      if (!validFaceLabels.has(endpoint?.faceLabel) ||
+          !Number.isInteger(endpoint?.pointNumber) ||
+          endpoint.pointNumber < 1 || endpoint.pointNumber > 15) {
+        return { error: `第 ${pairIndex + 1} 对传送阵端点无效` };
+      }
+      const endpointKey = `${endpoint.faceLabel}${endpoint.pointNumber}`;
+      if (usedEndpoints.has(endpointKey)) {
+        return { error: `端点 ${endpointKey} 只能属于一对传送阵` };
+      }
+      usedEndpoints.add(endpointKey);
+      endpoints.push({
+        faceLabel: endpoint.faceLabel,
+        pointNumber: endpoint.pointNumber
+      });
+    }
+    const generatedId = endpoints
+      .map(endpoint => `${endpoint.faceLabel}${endpoint.pointNumber}`)
+      .sort()
+      .join('-');
+    normalized.push({
+      id: typeof portal.id === 'string' && portal.id.trim() ? portal.id.trim() : generatedId,
+      color: portal.color.toLowerCase(),
+      endpoints
+    });
+  }
+  return { portalPairs: normalized };
+}
+
 function cloneFaceLabels(faceLabels = BOARD_FACE_LABELS) {
   return {
     front: [...faceLabels.front],
@@ -457,6 +508,17 @@ export function panelPointForNumber(panelIndex, pointNumber, rotation = 0) {
   return point;
 }
 
+export function panelPointNumber(panelIndex, position, rotation = 0) {
+  if (!validatePanelIndex(panelIndex) || !position || ![0, 120, 240].includes(rotation)) return null;
+  const targetKey = keyOf(position);
+  for (let pointNumber = 1; pointNumber <= 15; pointNumber += 1) {
+    if (keyOf(panelPointForNumber(panelIndex, pointNumber, rotation)) === targetKey) {
+      return pointNumber;
+    }
+  }
+  return null;
+}
+
 function rotatePiecesOnPanel(pieces, panelIndex, clockwise = true) {
   const movingIds = new Set(
     pieces.filter(item => piecePanelIndex(item) === panelIndex).map(item => item.id)
@@ -668,6 +730,7 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
     boardStates,
     boardFaceLabels: cloneFaceLabels(),
     boardPanelRotations: clonePanelRotations(),
+    portalPairs: clonePortalPairs(),
     pieces: boardStates.front,
     ...extra
   };
@@ -688,7 +751,12 @@ export function positionSignature(state) {
     ? `front[${serializePieces(state.boardStates.front)}]:back[${serializePieces(state.boardStates.back)}]`
     : serializePieces(state.pieces);
   const faceSides = state.solidFaceSides?.join('') ?? state.boardSide ?? 'single';
-  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${position}`;
+  const portals = (state.portalPairs ?? PORTAL_PAIRS)
+    .map(portal => `${portal.id}:${portal.endpoints
+      .map(endpoint => `${endpoint.faceLabel}${endpoint.pointNumber}`)
+      .join('>')}`)
+    .join('|');
+  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${portals}:${position}`;
 }
 
 function withInitialPositionHistory(state) {
@@ -746,7 +814,14 @@ function normalizeCustomFace(face, pieces, boardShape) {
   return { pieces: normalized, kingCounts };
 }
 
-function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings, boardShape) {
+function normalizeCustomBoard(
+  boardStates,
+  faceLabels,
+  panelRotations,
+  requireKings,
+  boardShape,
+  portalPairs
+) {
   const migrated = migrateLegacyHorizontalMirrorLayout(boardStates, faceLabels, panelRotations);
   const front = normalizeCustomFace('front', migrated.boardStates?.front, boardShape);
   if (front.error) return { error: front.error };
@@ -764,10 +839,13 @@ function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKi
   if (faceLabelsError) return { error: faceLabelsError };
   const rotationsError = validatePanelRotations(migrated.panelRotations);
   if (rotationsError) return { error: rotationsError };
+  const normalizedPortals = normalizePortalPairs(portalPairs, migrated.faceLabels);
+  if (normalizedPortals.error) return normalizedPortals;
   return {
     boardStates: { front: front.pieces, back: back.pieces },
     faceLabels: cloneFaceLabels(migrated.faceLabels),
-    panelRotations: clonePanelRotations(migrated.panelRotations)
+    panelRotations: clonePanelRotations(migrated.panelRotations),
+    portalPairs: normalizedPortals.portalPairs
   };
 }
 
@@ -775,17 +853,26 @@ export function createCustomLayout(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
-  boardShape = 'flat'
+  boardShape = 'flat',
+  portalPairs = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
-  return normalizeCustomBoard(boardStates, faceLabels, panelRotations, false, normalizedBoardShape);
+  return normalizeCustomBoard(
+    boardStates,
+    faceLabels,
+    panelRotations,
+    false,
+    normalizedBoardShape,
+    portalPairs
+  );
 }
 
 export function createCustomState(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
-  boardShape = 'flat'
+  boardShape = 'flat',
+  portalPairs = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
   const layout = normalizeCustomBoard(
@@ -793,7 +880,8 @@ export function createCustomState(
     faceLabels,
     panelRotations,
     true,
-    normalizedBoardShape
+    normalizedBoardShape,
+    portalPairs
   );
   if (layout.error) return { error: layout.error };
   const solidExtra = normalizedBoardShape === 'solid'
@@ -813,6 +901,7 @@ export function createCustomState(
         boardShape: normalizedBoardShape,
         boardFaceLabels: layout.faceLabels,
         boardPanelRotations: layout.panelRotations,
+        portalPairs: layout.portalPairs,
         history: ['自定义棋盘已保存：白方先行'],
         ...solidExtra
       }
@@ -917,7 +1006,7 @@ function physicalFaceLocation(state, faceLabel, pointNumber, layer) {
 export function portalEndpointLocations(state) {
   if (!state.boardStates && !state.solidLayers) return [];
   const locations = [];
-  for (const portal of PORTAL_PAIRS) {
+  for (const portal of state.portalPairs ?? PORTAL_PAIRS) {
     for (const [endpointIndex, endpoint] of portal.endpoints.entries()) {
       for (const layer of ['active', 'dormant']) {
         const location = physicalFaceLocation(

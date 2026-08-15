@@ -1,4 +1,9 @@
-import { createCustomLayout, createCustomState, createInitialState } from './game.js?v=separate-layout-storage-1';
+import {
+  clonePortalPairs,
+  createCustomLayout,
+  createCustomState,
+  createInitialState
+} from './game.js?v=portal-editor-1';
 import { assemblyToLayout, createSolidAssembly } from './solid-assembly.js?v=paired-layouts-5';
 
 function clonePiecesByFace(boardStates) {
@@ -21,6 +26,10 @@ function cloneBoardConfiguration(source) {
   };
 }
 
+function cloneLayoutPortals(source) {
+  return { portalPairs: clonePortalPairs(source.portalPairs) };
+}
+
 export function flatLayouts(layouts) {
   const pairedSolidNames = new Set(layouts
     .filter(layout => layout.boardShape === 'solid' && layout.sourceFlatLayoutName === layout.name)
@@ -41,14 +50,16 @@ export function resolveSolidLayout(layout, layouts) {
   if (!layout.sourceFlatLayoutName && layout.boardStates) {
     return {
       boardStates: clonePiecesByFace(layout.boardStates),
-      ...cloneBoardConfiguration(layout)
+      ...cloneBoardConfiguration(layout),
+      ...cloneLayoutPortals(layout)
     };
   }
   const source = flatLayouts(layouts)
     .find(candidate => candidate.name === layout.sourceFlatLayoutName);
   if (!source) return { error: `立体布局引用的平面布局“${layout.sourceFlatLayoutName}”不存在` };
   const assembly = createSolidAssembly(source, { installed: true, arrangement: layout });
-  return assemblyToLayout(assembly);
+  const assembled = assemblyToLayout(assembly);
+  return assembled.error ? assembled : { ...assembled, ...cloneLayoutPortals(source) };
 }
 
 export function resolvePlayableLayout(layout, layouts) {
@@ -62,7 +73,8 @@ export function resolvePlayableLayout(layout, layouts) {
     source.boardStates,
     source.faceLabels,
     source.panelRotations,
-    layout.boardShape
+    layout.boardShape,
+    source.portalPairs
   );
 }
 
@@ -86,13 +98,15 @@ export function normalizeLayoutForStorage(layout, layouts, requirePlayable = fal
           resolved.boardStates,
           resolved.faceLabels,
           resolved.panelRotations,
-          'solid'
+          'solid',
+          resolved.portalPairs
         )
       : createCustomLayout(
           resolved.boardStates,
           resolved.faceLabels,
           resolved.panelRotations,
-          'solid'
+          'solid',
+          resolved.portalPairs
         );
     if (validation.error) return validation;
     const configuration = requirePlayable
@@ -112,14 +126,27 @@ export function normalizeLayoutForStorage(layout, layouts, requirePlayable = fal
   }
 
   const validation = requirePlayable
-    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations, 'flat')
-    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations, 'flat');
+    ? createCustomState(
+        layout.boardStates,
+        layout.faceLabels,
+        layout.panelRotations,
+        'flat',
+        layout.portalPairs
+      )
+    : createCustomLayout(
+        layout.boardStates,
+        layout.faceLabels,
+        layout.panelRotations,
+        'flat',
+        layout.portalPairs
+      );
   if (validation.error) return validation;
   const source = requirePlayable
     ? {
         boardStates: validation.state.boardStates,
         faceLabels: validation.state.boardFaceLabels,
-        panelRotations: validation.state.boardPanelRotations
+        panelRotations: validation.state.boardPanelRotations,
+        portalPairs: validation.state.portalPairs
       }
     : validation;
   return {
@@ -127,7 +154,8 @@ export function normalizeLayoutForStorage(layout, layouts, requirePlayable = fal
       name: layout.name,
       boardShape: 'flat',
       boardStates: clonePiecesByFace(source.boardStates),
-      ...cloneBoardConfiguration(source)
+      ...cloneBoardConfiguration(source),
+      ...cloneLayoutPortals(source)
     }
   };
 }
@@ -147,7 +175,8 @@ export function migrateLegacySolidLayouts(layouts) {
         name: layout.name,
         boardShape: 'flat',
         boardStates: clonePiecesByFace(layout.boardStates),
-        ...cloneBoardConfiguration(layout)
+        ...cloneBoardConfiguration(layout),
+        ...cloneLayoutPortals(layout)
       };
     }
     if (!pairedFlat && layout.sourceFlatLayoutName) {
@@ -159,7 +188,8 @@ export function migrateLegacySolidLayouts(layouts) {
           name: layout.name,
           boardShape: 'flat',
           boardStates: clonePiecesByFace(legacySource.boardStates),
-          ...cloneBoardConfiguration(legacySource)
+          ...cloneBoardConfiguration(legacySource),
+          ...cloneLayoutPortals(legacySource)
         };
       }
     }

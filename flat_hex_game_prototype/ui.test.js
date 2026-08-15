@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
 const aiWorker = readFileSync(new URL('./ai-worker.js', import.meta.url), 'utf8');
+const solidBoard = readFileSync(new URL('./solid-board.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
 test('模拟控制保留重开、背面预览和算法按钮，并移除吃子演示', () => {
@@ -71,6 +72,15 @@ test('自定义编辑提供棋子摆放和板块拆装两种工具', () => {
   assert.match(app, /function selectEditorPanel\(panelIndex\)/);
   assert.match(app, /function flipSelectedPanel\(\)/);
   assert.match(app, /function beginPanelSwap\(\)/);
+});
+
+test('平面编辑支持成对添加传送阵并保存到布局', () => {
+  assert.match(html, /id="portalModeButton"/);
+  assert.match(app, /function editPortalEndpoint\(endpoint\)/);
+  assert.match(app, /pendingPortalEndpoint/);
+  assert.match(app, /customEditor\.portalPairs\.push/);
+  assert.match(app, /portalPairs: clonePortalPairs\(layout\.portalPairs\)/);
+  assert.match(app, /传送阵必须成对/);
 });
 
 test('选中板块后可以单次旋转120度并显示方向标记', () => {
@@ -251,13 +261,22 @@ test('平面与立体棋盘都显示传送点并用唯一路线键提交动作',
   assert.match(html, /3A-5 ↔ 6B-5/);
   assert.match(app, /function renderPortals\(\)/);
   assert.match(app, /portalEndpointLocations\(state\)/);
-  assert.match(app, /class: 'portal-marker'/);
+  assert.match(app, /class: `portal-marker/);
   assert.match(app, /class: 'portal-charge'/);
   assert.match(app, /portalColor: location\.portalColor/);
   assert.match(app, /move\.mapKey \? \{ mapKey: move\.mapKey \} : \{\}/);
   assert.match(styles, /\.move-path\.portal/);
   assert.match(styles, /\.portal-marker circle/);
   assert.match(styles, /\.portal-charge-label/);
+});
+
+test('传送阵使用略大于棋子的同色虚线圈且始终渲染双层端点', () => {
+  assert.match(app, /r: 28/);
+  assert.match(styles, /\.portal-marker circle[^}]*stroke-dasharray/);
+  assert.match(styles, /\.portal-marker\.dormant/);
+  assert.doesNotMatch(app, /portalEndpointLocations\(state\)\s*\n\s*\.filter/);
+  assert.match(solidBoard, /context\.setLineDash\(portal\.dormant \? \[3, 7\] : \[7, 5\]\)/);
+  assert.match(solidBoard, /Math\.max\(14, 20 \* position\.perspective \* zoom\)/);
 });
 
 test('六面体装配台提供待选板、空骨架、旋转翻面和拆卸操作', () => {

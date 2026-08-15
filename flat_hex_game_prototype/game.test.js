@@ -406,6 +406,87 @@ test('两组传送门各自同色且颜色不同', () => {
   assert.notEqual(PORTAL_PAIRS[0].color, PORTAL_PAIRS[1].color);
 });
 
+test('自定义布局保存成对传送阵且旧布局继续使用默认传送阵', () => {
+  const customPairs = [{
+    id: '2A4-5B7',
+    color: '#7ee081',
+    endpoints: [
+      { faceLabel: '2A', pointNumber: 4 },
+      { faceLabel: '5B', pointNumber: 7 }
+    ]
+  }];
+  const custom = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    customPairs
+  );
+  const legacy = createCustomLayout({ front: [], back: [] });
+
+  assert.deepEqual(custom.portalPairs, customPairs);
+  assert.deepEqual(legacy.portalPairs, PORTAL_PAIRS);
+});
+
+test('自定义传送阵必须成对且端点不能重复使用', () => {
+  const unpaired = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    [{ id: 'bad', color: '#58d9ff', endpoints: [{ faceLabel: '1A', pointNumber: 5 }] }]
+  );
+  const duplicated = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    [
+      {
+        id: 'first',
+        color: '#58d9ff',
+        endpoints: [
+          { faceLabel: '1A', pointNumber: 5 },
+          { faceLabel: '4B', pointNumber: 5 }
+        ]
+      },
+      {
+        id: 'second',
+        color: '#ffbe55',
+        endpoints: [
+          { faceLabel: '1A', pointNumber: 5 },
+          { faceLabel: '6B', pointNumber: 5 }
+        ]
+      }
+    ]
+  );
+
+  assert.match(unpaired.error, /必须包含两个端点/);
+  assert.match(duplicated.error, /只能属于一对传送阵/);
+});
+
+test('棋局使用布局自己的传送阵配置定位端点', () => {
+  const customPairs = [{
+    id: '2A4-5B7',
+    color: '#7ee081',
+    endpoints: [
+      { faceLabel: '2A', pointNumber: 4 },
+      { faceLabel: '5B', pointNumber: 7 }
+    ]
+  }];
+  const playable = createCustomState({
+    front: [piece('wk', 'white', 'king', 4, 0)],
+    back: [piece('bk', 'black', 'king', -4, 0)]
+  }, BOARD_FACE_LABELS, undefined, 'flat', customPairs);
+
+  assert.equal(playable.error, undefined);
+  assert.deepEqual(playable.state.portalPairs, customPairs);
+  assert.deepEqual(
+    portalEndpointLocations(playable.state).map(location => location.faceLabel).sort(),
+    ['2A', '5B']
+  );
+});
+
 test('传送点绑定实体板编号并随 1A 板旋转', () => {
   const state = defaultDoubleSidedState([]);
   const before = portalEndpointLocations(state).find(location =>

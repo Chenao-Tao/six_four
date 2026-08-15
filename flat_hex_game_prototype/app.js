@@ -11,6 +11,7 @@ import {
   applyMove,
   capturePositionEffect,
   captureMoveForClickedPiece,
+  clonePortalPairs,
   createCustomLayout,
   createCustomState,
   createInitialState,
@@ -19,13 +20,15 @@ import {
   keyOf,
   legalMoves,
   panelIndexForPoint,
+  panelPointForNumber,
+  panelPointNumber,
   portalEndpointLocations,
   promotionTypeForMove,
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=portal-charge-1';
+} from './game.js?v=portal-editor-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -34,7 +37,7 @@ import {
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=separate-layout-storage-1';
+} from './solid-board.js?v=portal-editor-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -51,7 +54,7 @@ import {
   resolvePlayableLayout,
   resolveSolidLayout,
   solidLayouts
-} from './layout-library.js?v=paired-layouts-5';
+} from './layout-library.js?v=portal-editor-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -82,6 +85,7 @@ const pieceEditorModal = document.getElementById('pieceEditorModal');
 const pieceEditorPoint = document.getElementById('pieceEditorPoint');
 const pieceModeButton = document.getElementById('pieceModeButton');
 const panelModeButton = document.getElementById('panelModeButton');
+const portalModeButton = document.getElementById('portalModeButton');
 const flatShapeButton = document.getElementById('flatShapeButton');
 const solidShapeButton = document.getElementById('solidShapeButton');
 const panelEditorActions = document.getElementById('panelEditorActions');
@@ -127,6 +131,7 @@ const solidSlotList = document.getElementById('solidSlotList');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const PORTAL_COLOR_PALETTE = ['#ffbe55', '#58d9ff', '#d889ff', '#7ee081', '#ff7b8b', '#b9a5ff'];
 let state = createInitialState();
 let selectedPieceId = null;
 let selectedMoves = new Map();
@@ -189,7 +194,8 @@ function cloneGameState(source) {
     boardPanelRotations: {
       front: [...source.boardPanelRotations.front],
       back: [...source.boardPanelRotations.back]
-    }
+    },
+    portalPairs: clonePortalPairs(source.portalPairs)
   };
 }
 
@@ -493,11 +499,11 @@ function solidBoardModel() {
     };
   });
   const portalTargets = customEditor ? [] : portalEndpointLocations(state)
-    .filter(location => location.layer === (previewSide === null ? 'active' : 'dormant'))
     .map(location => ({
       ...mapSolidPoint(location.position, location.panelIndex),
       portalId: location.portalId,
-      portalColor: location.portalColor
+      portalColor: location.portalColor,
+      dormant: location.layer !== (previewSide === null ? 'active' : 'dormant')
     }));
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
@@ -874,27 +880,151 @@ function renderFaceLabels(side) {
 function renderPortals() {
   const layer = document.getElementById('portalLayer');
   layer.replaceChildren();
-  if (customEditor) return;
+  if (customEditor) {
+    customEditor.portalPairs.forEach(portal => {
+      portal.endpoints
+        .filter(endpoint => endpoint.faceLabel.endsWith(customEditor.side === 'front' ? 'A' : 'B'))
+        .forEach(endpoint => {
+          const panelIndex = customEditor.faceLabels[customEditor.side].indexOf(endpoint.faceLabel);
+          if (panelIndex < 0) return;
+          const position = panelPointForNumber(
+            panelIndex,
+            endpoint.pointNumber,
+            customEditor.panelRotations[customEditor.side][panelIndex]
+          );
+          if (!position) return;
+          appendPortalMarker(layer, position, portal, false, true);
+        });
+    });
+    return;
+  }
   const visibleLayer = previewSide === null ? 'active' : 'dormant';
   portalEndpointLocations(state)
-    .filter(location => location.layer === visibleLayer)
     .forEach(location => {
-      const pixel = toPixel(location.position);
-      const group = svgElement('g', {
-        class: 'portal-marker',
-        'data-portal-id': location.portalId,
-        style: `--portal-color: ${location.portalColor}`
-      });
-      group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 10 }));
-      const label = svgElement('text', {
-        x: pixel.x,
-        y: pixel.y + 4,
-        'text-anchor': 'middle'
-      });
-      label.textContent = '传';
-      group.appendChild(label);
-      layer.appendChild(group);
+      appendPortalMarker(
+        layer,
+        location.position,
+        { id: location.portalId, color: location.portalColor },
+        location.layer !== visibleLayer,
+        false
+      );
     });
+}
+
+function appendPortalMarker(layer, position, portal, dormant = false, editing = false) {
+  const pixel = toPixel(position);
+  const group = svgElement('g', {
+    class: `portal-marker ${dormant ? 'dormant' : 'active'} ${editing ? 'editing' : ''}`,
+    'data-portal-id': portal.id,
+    style: `--portal-color: ${portal.color}`
+  });
+  group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 28 }));
+  if (dormant) {
+    const label = svgElement('text', {
+      x: pixel.x,
+      y: pixel.y + 4,
+      'text-anchor': 'middle'
+    });
+    label.textContent = previewSide === null ? '背' : '内';
+    group.appendChild(label);
+  }
+  layer.appendChild(group);
+}
+
+function editorPortalEndpointAt(point) {
+  const panelIndex = panelIndexForPoint(point);
+  if (panelIndex === null) return null;
+  const pointNumber = panelPointNumber(
+    panelIndex,
+    point,
+    customEditor.panelRotations[customEditor.side][panelIndex]
+  );
+  if (pointNumber === null) return null;
+  return {
+    faceLabel: customEditor.faceLabels[customEditor.side][panelIndex],
+    pointNumber
+  };
+}
+
+function portalEndpointKey(endpoint) {
+  return `${endpoint.faceLabel}${endpoint.pointNumber}`;
+}
+
+function renderPortalEditorTargets() {
+  const layer = document.getElementById('editorTargetLayer');
+  if (!customEditor || customEditor.mode !== 'portals') return;
+  const endpointToPortal = new Map();
+  customEditor.portalPairs.forEach(portal => {
+    portal.endpoints.forEach(endpoint => endpointToPortal.set(portalEndpointKey(endpoint), portal));
+  });
+  BOARD_POINTS.forEach(point => {
+    const endpoint = editorPortalEndpointAt(point);
+    if (!endpoint) return;
+    const endpointKey = portalEndpointKey(endpoint);
+    const portal = endpointToPortal.get(endpointKey);
+    const pending = customEditor.pendingPortalEndpoint &&
+      portalEndpointKey(customEditor.pendingPortalEndpoint) === endpointKey;
+    const pixel = toPixel(point);
+    const target = svgElement('circle', {
+      class: `portal-editor-target ${portal ? 'occupied' : ''} ${pending ? 'pending' : ''}`,
+      cx: pixel.x,
+      cy: pixel.y,
+      r: 20,
+      'data-portal-endpoint': endpointKey,
+      tabindex: 0,
+      role: 'button',
+      'aria-label': portal ? `删除传送阵 ${portal.id}` : `选择传送阵端点 ${endpointKey}`
+    });
+    const chooseEndpoint = event => {
+      event.stopPropagation();
+      editPortalEndpoint(endpoint);
+    };
+    target.addEventListener('click', chooseEndpoint);
+    target.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') chooseEndpoint(event);
+    });
+    layer.appendChild(target);
+  });
+}
+
+function editPortalEndpoint(endpoint) {
+  if (!customEditor || customEditor.mode !== 'portals') return;
+  const endpointKey = portalEndpointKey(endpoint);
+  const existingIndex = customEditor.portalPairs.findIndex(portal =>
+    portal.endpoints.some(item => portalEndpointKey(item) === endpointKey)
+  );
+  if (existingIndex >= 0) {
+    const [removed] = customEditor.portalPairs.splice(existingIndex, 1);
+    customEditor.pendingPortalEndpoint = null;
+    boardHelp.textContent = `已删除成对传送阵“${removed.id}”。`;
+    render();
+    return;
+  }
+  if (!customEditor.pendingPortalEndpoint) {
+    customEditor.pendingPortalEndpoint = { ...endpoint };
+    boardHelp.textContent = `已选择 ${endpointKey}，请点击另一个空端点完成成对传送阵；再次点击可取消。`;
+    render();
+    return;
+  }
+  if (portalEndpointKey(customEditor.pendingPortalEndpoint) === endpointKey) {
+    customEditor.pendingPortalEndpoint = null;
+    boardHelp.textContent = '已取消待配对的传送阵端点。';
+    render();
+    return;
+  }
+  const first = customEditor.pendingPortalEndpoint;
+  const endpoints = [first, endpoint].sort((left, right) =>
+    portalEndpointKey(left).localeCompare(portalEndpointKey(right))
+  );
+  const color = PORTAL_COLOR_PALETTE[customEditor.portalPairs.length % PORTAL_COLOR_PALETTE.length];
+  customEditor.portalPairs.push({
+    id: endpoints.map(portalEndpointKey).join('-'),
+    color,
+    endpoints
+  });
+  customEditor.pendingPortalEndpoint = null;
+  boardHelp.textContent = `已创建 ${endpoints.map(portalEndpointKey).join(' ⇄ ')} 传送阵。`;
+  render();
 }
 
 function renderPanelTargets() {
@@ -985,6 +1115,7 @@ function renderPiece(piece) {
 function renderEditorTargets() {
   const layer = document.getElementById('editorTargetLayer');
   layer.replaceChildren();
+  renderPortalEditorTargets();
   if (!customEditor || customEditor.mode !== 'pieces') return;
   const occupiedKeys = new Set(displayedPieces().map(item => keyOf(item.position)));
   BOARD_POINTS.forEach(point => {
@@ -1066,7 +1197,11 @@ function render() {
   const sideName = previewing ? '下层 · 对应拼图' : '上层 · 当前拼图';
   faceBadge.textContent = editing
     ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · ` +
-      (customEditor.mode === 'pieces' ? '点击交点设子' : '选择三角板拆装')
+      (customEditor.mode === 'pieces'
+        ? '点击交点设子'
+        : customEditor.mode === 'portals'
+          ? '成对设置传送阵'
+          : '选择三角板拆装')
     : previewing
       ? `背面预览 · ${sideName} · 禁止移动`
       : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
@@ -1086,12 +1221,16 @@ function render() {
     const pieceCount = customEditor.boardStates[boardSide].length;
     editorStatus.textContent = customEditor.mode === 'pieces'
       ? `棋子摆放 · ${boardSide === 'front' ? 'A' : 'B'} 面 · ${pieceCount} 枚棋子`
-      : `板块拆装 · ${boardSide === 'front' ? 'A' : 'B'} 面`;
+      : customEditor.mode === 'portals'
+        ? `传送阵 · ${customEditor.portalPairs.length} 对${customEditor.pendingPortalEndpoint ? ' · 待选第二端' : ''}`
+        : `板块拆装 · ${boardSide === 'front' ? 'A' : 'B'} 面`;
     switchEditorFaceButton.textContent = `切换到 ${boardSide === 'front' ? 'B' : 'A'} 面`;
     pieceModeButton.classList.toggle('active', customEditor.mode === 'pieces');
     panelModeButton.classList.toggle('active', customEditor.mode === 'panels');
+    portalModeButton.classList.toggle('active', customEditor.mode === 'portals');
     pieceModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'pieces'));
     panelModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'panels'));
+    portalModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'portals'));
     flatShapeButton.classList.toggle('active', customEditor.boardShape === 'flat');
     solidShapeButton.classList.toggle('active', customEditor.boardShape === 'solid');
     flatShapeButton.setAttribute('aria-pressed', String(customEditor.boardShape === 'flat'));
@@ -1468,6 +1607,8 @@ function enterCustomEditor() {
     boardShape: 'flat',
     selectedPanel: null,
     swapPending: false,
+    pendingPortalEndpoint: null,
+    portalPairs: clonePortalPairs(state.portalPairs),
     boardStates: { front: [], back: [] },
     faceLabels: {
       front: [...(state.boardFaceLabels?.front ?? BOARD_FACE_LABELS.front)],
@@ -1517,6 +1658,10 @@ function cancelCustomBoard() {
 
 async function saveCustomBoard() {
   if (!customEditor) return;
+  if (customEditor.pendingPortalEndpoint) {
+    boardHelp.textContent = '传送阵必须成对：请完成第二个端点，或再次点击待选端点取消。';
+    return;
+  }
   const enteredName = customEditor.boardShape === 'solid'
     ? solidLayoutNameInput.value.trim()
     : layoutNameInput.value.trim();
@@ -1536,7 +1681,8 @@ async function saveCustomBoard() {
     assembled.boardStates,
     assembled.faceLabels,
     assembled.panelRotations,
-    customEditor.boardShape
+    customEditor.boardShape,
+    customEditor.portalPairs
   );
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
@@ -1549,7 +1695,8 @@ async function saveCustomBoard() {
         boardShape: 'flat',
         boardStates: result.state.boardStates,
         faceLabels: result.state.boardFaceLabels,
-        panelRotations: result.state.boardPanelRotations
+        panelRotations: result.state.boardPanelRotations,
+        portalPairs: result.state.portalPairs
       });
   if (snapshot.error) {
     boardHelp.textContent = `无法保存：${snapshot.error}`;
@@ -1589,7 +1736,8 @@ function layoutSnapshotFromEditor(name, layout = customEditor) {
     panelRotations: {
       front: [...layout.panelRotations.front],
       back: [...layout.panelRotations.back]
-    }
+    },
+    portalPairs: clonePortalPairs(layout.portalPairs)
   };
 }
 
@@ -1619,6 +1767,10 @@ function nextCustomLayoutName() {
 
 async function saveLayoutToLibrary() {
   if (!customEditor) return;
+  if (customEditor.pendingPortalEndpoint) {
+    boardHelp.textContent = '传送阵必须成对：请先完成或取消待配对端点。';
+    return;
+  }
   const name = layoutNameInput.value.trim();
   if (!name) {
     boardHelp.textContent = '请输入布局名称后再保存。';
@@ -1628,7 +1780,8 @@ async function saveLayoutToLibrary() {
     customEditor.boardStates,
     customEditor.faceLabels,
     customEditor.panelRotations,
-    'flat'
+    'flat',
+    customEditor.portalPairs
   );
   if (validation.error) {
     boardHelp.textContent = `布局不能保存：${validation.error}`;
@@ -1696,7 +1849,8 @@ function loadLayoutFromLibrary() {
     layout.boardStates,
     layout.faceLabels,
     layout.panelRotations,
-    layout.boardShape
+    layout.boardShape,
+    layout.portalPairs
   );
   if (validation.error) {
     boardHelp.textContent = `布局存档无效：${validation.error}`;
@@ -1712,6 +1866,8 @@ function loadLayoutFromLibrary() {
     front: [...validation.panelRotations.front],
     back: [...validation.panelRotations.back]
   };
+  customEditor.portalPairs = clonePortalPairs(validation.portalPairs);
+  customEditor.pendingPortalEndpoint = null;
   customEditor.boardShape = 'flat';
   if (previousPairName && previousPairName !== layout.name) customEditor.solidAssembly = null;
   customEditor.sourceFlatLayoutName = layout.name;
@@ -1742,7 +1898,8 @@ function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
     sourceLayout.boardStates,
     sourceLayout.faceLabels,
     sourceLayout.panelRotations,
-    'flat'
+    'flat',
+    sourceLayout.portalPairs
   );
   if (!sourceLayout || sourceValidation.error) {
     boardHelp.textContent = `同名平面方案无效：${sourceValidation?.error ?? '不存在'}`;
@@ -1757,6 +1914,8 @@ function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
     front: [...sourceValidation.panelRotations.front],
     back: [...sourceValidation.panelRotations.back]
   };
+  customEditor.portalPairs = clonePortalPairs(sourceValidation.portalPairs);
+  customEditor.pendingPortalEndpoint = null;
   customEditor.boardShape = 'solid';
   customEditor.sourceFlatLayoutName = layout.name;
   layoutNameInput.value = layout.name;
@@ -1794,7 +1953,8 @@ async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardSh
       customEditor.boardStates,
       customEditor.faceLabels,
       customEditor.panelRotations,
-      'flat'
+      'flat',
+      customEditor.portalPairs
     );
     if (validation.error) {
       boardHelp.textContent = `无法启用平面布局：${validation.error}`;
@@ -1804,7 +1964,8 @@ async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardSh
       boardShape: 'flat',
       boardStates: validation.state.boardStates,
       faceLabels: validation.state.boardFaceLabels,
-      panelRotations: validation.state.boardPanelRotations
+      panelRotations: validation.state.boardPanelRotations,
+      portalPairs: validation.state.portalPairs
     });
   }
   if (snapshot.error) {
@@ -1854,14 +2015,17 @@ function deleteSolidLayoutFromLibrary() {
 }
 
 function setEditorMode(mode) {
-  if (!customEditor || !['pieces', 'panels'].includes(mode)) return;
+  if (!customEditor || !['pieces', 'panels', 'portals'].includes(mode)) return;
   closePieceEditor();
+  if (mode !== 'portals') customEditor.pendingPortalEndpoint = null;
   customEditor.mode = mode;
   customEditor.selectedPanel = null;
   customEditor.swapPending = false;
   boardHelp.textContent = mode === 'pieces'
     ? '棋子摆放模式：点击交点设置或替换棋子。'
-    : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
+    : mode === 'portals'
+      ? '传送阵模式：依次点击两个空端点成对创建；点击已有端点会删除整对。'
+      : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
   render();
 }
 
@@ -2144,6 +2308,7 @@ saveCustomButton.addEventListener('click', saveCustomBoard);
 cancelCustomButton.addEventListener('click', cancelCustomBoard);
 pieceModeButton.addEventListener('click', () => setEditorMode('pieces'));
 panelModeButton.addEventListener('click', () => setEditorMode('panels'));
+portalModeButton.addEventListener('click', () => setEditorMode('portals'));
 flatShapeButton.addEventListener('click', () => setBoardShape('flat'));
 solidShapeButton.addEventListener('click', () => setBoardShape('solid'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
