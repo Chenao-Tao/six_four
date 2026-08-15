@@ -382,12 +382,18 @@ test('人工后回合拆成三次单步并持续显示剩余步数', () => {
 test('传送后进入眼睛检测态并支持五秒或手动结束', () => {
   assert.match(html, /id="portalDetection"/);
   assert.match(html, /id="finishPortalDetectionButton"/);
+  assert.match(html, /class="portal-detection-iris"/);
+  assert.match(html, /class="portal-detection-pupil"/);
   assert.match(app, /function showPortalDetection\(autoFinish = false\)/);
   assert.match(app, /setTimeout\(\(\) => \{[\s\S]*?\}, 5000\)/);
   assert.match(app, /finishPortalDetectionButton\.addEventListener\('click'/);
   assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
-  assert.match(styles, /\.portal-detection-eye/);
-  assert.match(styles, /@keyframes portal-eye-watch/);
+  assert.match(styles, /\.portal-detection-eye\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*34px/);
+  assert.match(styles, /\.portal-detection\s*\{[\s\S]*?top:\s*72px/);
+  assert.match(styles, /--portal-eye-red:\s*#ff1f3d/);
+  assert.match(styles, /@keyframes portal-eye-lid-top/);
+  assert.match(styles, /@keyframes portal-eye-lid-bottom/);
+  assert.match(styles, /@keyframes portal-eye-scan/);
 });
 
 test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {

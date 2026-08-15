@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=queen-step-1">
+  <link rel="stylesheet" href="styles.css?v=portal-eye-1">
 </head>
 <body>
   <main class="app-shell">
@@ -22,7 +22,11 @@
         </div>
         <div class="board-help" id="boardHelp">点击己方棋子，查看合法移动位置。</div>
         <div class="portal-detection hidden" id="portalDetection" aria-live="polite">
-          <span class="portal-detection-eye" aria-hidden="true">◉</span>
+          <span class="portal-detection-eye" aria-hidden="true">
+            <span class="portal-detection-iris">
+              <span class="portal-detection-pupil"></span>
+            </span>
+          </span>
           <span id="portalDetectionText">正在观察传送后的棋子状态</span>
           <button id="finishPortalDetectionButton">结束检测</button>
         </div>
