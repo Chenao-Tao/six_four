@@ -1,4 +1,4 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=board-layer-exchange-3';
+import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=separate-layout-storage-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -219,6 +219,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let lastRenderFaces = [];
   let lastInteractionTargets = [];
   let operationEffect = null;
+  let portalEffect = null;
   let cameraMotion = null;
   let layerExchange = null;
 
@@ -389,6 +390,52 @@ export function createSolidBoardViewer(canvas, initialModel, {
     }
   }
 
+  function drawPortalEffect(renderFaces, now) {
+    if (!portalEffect) return;
+    const progress = Math.max(0, Math.min(1, (now - portalEffect.startedAt) / portalEffect.duration));
+    const endpoints = [portalEffect.transition.entry, portalEffect.transition.exit].map(endpoint => {
+      const mapped = mapPiecesToPanels([{
+        id: 'portal-effect',
+        position: endpoint.position,
+        panelIndex: endpoint.panelIndex
+      }])[0];
+      const face = renderFaces.find(item => item.panelIndex === mapped.panelIndex);
+      if (!face) return null;
+      const normal = normalize(cross(
+        subtract(face.vertices[1], face.vertices[0]),
+        subtract(face.vertices[2], face.vertices[0])
+      ));
+      return project(add(barycentricPoint(face.vertices, mapped.local), scale(normal, 0.075)),
+        canvas.clientWidth, canvas.clientHeight);
+    });
+    if (endpoints.every(Boolean)) {
+      const [entry, exit] = endpoints;
+      context.save();
+      context.strokeStyle = portalEffect.portalColor;
+      context.lineWidth = 5;
+      context.setLineDash([12, 10]);
+      context.lineDashOffset = -progress * 70;
+      context.shadowColor = portalEffect.portalColor;
+      context.shadowBlur = 16;
+      context.beginPath();
+      context.moveTo(entry.x, entry.y);
+      context.lineTo(exit.x, exit.y);
+      context.stroke();
+      context.setLineDash([]);
+      for (const endpoint of endpoints) {
+        context.beginPath();
+        context.arc(endpoint.x, endpoint.y, 18 + Math.sin(progress * Math.PI) * 8, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.restore();
+    }
+    if (progress >= 1) {
+      const resolve = portalEffect.resolve;
+      portalEffect = null;
+      resolve(true);
+    }
+  }
+
   function drawPlannedMove(renderFaces) {
     if (!model.plannedMove) return;
     const endpoints = [model.plannedMove.from, model.plannedMove.to].map(point => {
@@ -513,6 +560,20 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
       context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
       context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+      if (piece.type === 'queen' && piece.portalTurns > 0) {
+        const badgeX = position.x + radius * 0.72;
+        const badgeY = position.y - radius * 0.72;
+        context.beginPath();
+        context.arc(badgeX, badgeY, Math.max(7, radius * 0.34), 0, Math.PI * 2);
+        context.fillStyle = '#172532';
+        context.fill();
+        context.lineWidth = 1.5;
+        context.strokeStyle = '#ffc96a';
+        context.stroke();
+        context.fillStyle = '#fff3c2';
+        context.font = `850 ${Math.max(9, radius * 0.42)}px "Microsoft YaHei", sans-serif`;
+        context.fillText(String(piece.portalTurns), badgeX, badgeY + 1);
+      }
       interactionTargets.push({
         type: 'piece',
         pieceId: piece.id,
@@ -572,6 +633,23 @@ export function createSolidBoardViewer(canvas, initialModel, {
         labelPoint.y
       );
 
+      (displayedModel.portalTargets ?? []).filter(portal => portal.panelIndex === panelIndex)
+        .forEach(portal => {
+          const world = barycentricPoint(vertices, portal.local);
+          const position = project(add(world, scale(normal, 0.045)), width, height);
+          const radius = Math.max(14, 20 * position.perspective * zoom);
+          context.save();
+          context.beginPath();
+          context.arc(position.x, position.y, radius, 0, Math.PI * 2);
+          context.globalAlpha = portal.dormant ? 0.3 : 0.9;
+          context.lineWidth = portal.dormant ? 2 : 3;
+          context.strokeStyle = portal.portalColor ?? '#d8aaff';
+          context.setLineDash(portal.dormant ? [3, 7] : [7, 5]);
+          context.stroke();
+          context.setLineDash([]);
+          context.restore();
+        });
+
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
         if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
         else drawPiece(face, piece);
@@ -580,22 +658,33 @@ export function createSolidBoardViewer(canvas, initialModel, {
       (displayedModel.moveTargets ?? []).filter(move => move.panelIndex === panelIndex).forEach(move => {
         const world = barycentricPoint(vertices, move.local);
         const position = project(add(world, scale(normal, 0.05)), width, height);
-        const radius = Math.max(9, 12 * position.perspective * zoom);
+        const radius = move.usesPortal
+          ? Math.max(6, 8 * position.perspective * zoom)
+          : Math.max(9, 12 * position.perspective * zoom);
         context.beginPath();
         context.arc(position.x, position.y, radius, 0, Math.PI * 2);
-        context.fillStyle = move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
+        context.fillStyle = move.usesPortal
+          ? move.portalColor ?? '#c889ff'
+          : move.captureId ? 'rgba(255, 94, 112, .35)' : 'rgba(97, 231, 255, .32)';
+        if (move.usesPortal) context.save();
+        if (move.usesPortal) context.globalAlpha = 0.42;
         context.fill();
         context.lineWidth = 3;
-        context.strokeStyle = move.captureId ? '#ff6678' : '#61e7ff';
+        context.strokeStyle = move.usesPortal
+          ? move.portalColor ?? '#d8aaff'
+          : move.captureId ? '#ff6678' : '#61e7ff';
         context.stroke();
-        interactionTargets.push({
+        if (move.usesPortal) context.restore();
+        const interactionTarget = {
           type: 'move',
           targetKey: move.targetKey,
           x: position.x,
           y: position.y,
           radius: radius + 8,
           depth: position.z
-        });
+        };
+        if (move.usesPortal) interactionTargets.unshift(interactionTarget);
+        else interactionTargets.push(interactionTarget);
       });
     });
     drawPlannedMove(renderFaces);
@@ -603,6 +692,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
     context.restore();
     lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
+    drawPortalEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
   }
 
@@ -685,6 +775,31 @@ export function createSolidBoardViewer(canvas, initialModel, {
       };
       return true;
     },
+    playPortalTransition(transition, portalColor = '#d8aaff') {
+      if (!transition || portalEffect) return Promise.resolve(false);
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      const mappedExit = mapPiecesToPanels([{
+        id: 'portal-camera',
+        position: transition.exit.position,
+        panelIndex: transition.exit.panelIndex
+      }])[0];
+      const exitWorld = barycentricPoint(faces[mappedExit.panelIndex], mappedExit.local);
+      cameraMotion = {
+        from: { rotationX, rotationY },
+        to: solidCameraAngles(exitWorld),
+        startedAt: performance.now(),
+        duration: reducedMotion ? 120 : 420
+      };
+      return new Promise(resolve => {
+        portalEffect = {
+          transition,
+          portalColor,
+          startedAt: performance.now(),
+          duration: reducedMotion ? 140 : 520,
+          resolve
+        };
+      });
+    },
     resetView() {
       cameraMotion = null;
       rotationX = -0.35;
@@ -717,6 +832,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
     destroy() {
       layerExchange?.resolve(false);
       layerExchange = null;
+      portalEffect?.resolve(false);
+      portalEffect = null;
       cancelAnimationFrame(animationFrame);
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('pointermove', pointerMove);

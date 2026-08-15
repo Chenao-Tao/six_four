@@ -11,6 +11,7 @@ import {
   applyMove,
   capturePositionEffect,
   captureMoveForClickedPiece,
+  clonePortalPairs,
   createCustomLayout,
   createCustomState,
   createInitialState,
@@ -19,21 +20,24 @@ import {
   keyOf,
   legalMoves,
   panelIndexForPoint,
+  panelPointForNumber,
+  panelPointNumber,
+  portalEndpointLocations,
   promotionTypeForMove,
   rotateBoardPanel,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=board-layer-exchange-3';
+} from './game.js?v=portal-editor-1';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=board-layer-exchange-3';
+} from './layout-storage.js?v=preset-playability-1';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels
-} from './solid-board.js?v=board-layer-exchange-3';
+} from './solid-board.js?v=portal-editor-1';
 import {
   assemblyPanelPreview,
   assemblyToLayout,
@@ -42,8 +46,16 @@ import {
   flipAssemblyPanel,
   placeAssemblyPanel,
   removeAssemblyPanel,
-  rotateAssemblyPanel
-} from './solid-assembly.js?v=board-layer-exchange-3';
+  rotateAssemblyPanel,
+  syncAssemblyPieces
+} from './solid-assembly.js?v=paired-layouts-5';
+import {
+  flatLayouts,
+  resolvePlayableLayout,
+  resolveSolidLayout,
+  solidLayoutCandidates,
+  solidLayouts
+} from './layout-library.js?v=pending-solid-1';
 
 const svg = document.getElementById('board');
 const turnBadge = document.getElementById('turnBadge');
@@ -63,6 +75,8 @@ const resetButton = document.getElementById('resetButton');
 const customizeButton = document.getElementById('customizeButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
+const flatLayoutLibrary = document.getElementById('flatLayoutLibrary');
+const solidLayoutLibrary = document.getElementById('solidLayoutLibrary');
 const editorStatus = document.getElementById('editorStatus');
 const switchEditorFaceButton = document.getElementById('switchEditorFaceButton');
 const clearEditorFaceButton = document.getElementById('clearEditorFaceButton');
@@ -72,6 +86,7 @@ const pieceEditorModal = document.getElementById('pieceEditorModal');
 const pieceEditorPoint = document.getElementById('pieceEditorPoint');
 const pieceModeButton = document.getElementById('pieceModeButton');
 const panelModeButton = document.getElementById('panelModeButton');
+const portalModeButton = document.getElementById('portalModeButton');
 const flatShapeButton = document.getElementById('flatShapeButton');
 const solidShapeButton = document.getElementById('solidShapeButton');
 const panelEditorActions = document.getElementById('panelEditorActions');
@@ -80,11 +95,18 @@ const rotateSelectedPanelButton = document.getElementById('rotateSelectedPanelBu
 const flipSelectedPanelButton = document.getElementById('flipSelectedPanelButton');
 const swapSelectedPanelButton = document.getElementById('swapSelectedPanelButton');
 const layoutNameInput = document.getElementById('layoutNameInput');
+const newFlatLayoutButton = document.getElementById('newFlatLayoutButton');
 const saveLayoutButton = document.getElementById('saveLayoutButton');
 const savedLayoutSelect = document.getElementById('savedLayoutSelect');
 const loadLayoutButton = document.getElementById('loadLayoutButton');
 const activateLayoutButton = document.getElementById('activateLayoutButton');
 const deleteLayoutButton = document.getElementById('deleteLayoutButton');
+const solidLayoutNameInput = document.getElementById('solidLayoutNameInput');
+const saveSolidLayoutButton = document.getElementById('saveSolidLayoutButton');
+const savedSolidLayoutSelect = document.getElementById('savedSolidLayoutSelect');
+const loadSolidLayoutButton = document.getElementById('loadSolidLayoutButton');
+const activateSolidLayoutButton = document.getElementById('activateSolidLayoutButton');
+const deleteSolidLayoutButton = document.getElementById('deleteSolidLayoutButton');
 const solidViewer = document.getElementById('solidViewer');
 const solidBoardCanvas = document.getElementById('solidBoardCanvas');
 const solidViewerStatus = document.getElementById('solidViewerStatus');
@@ -111,6 +133,7 @@ const solidSlotList = document.getElementById('solidSlotList');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const PORTAL_COLOR_PALETTE = ['#ffbe55', '#58d9ff', '#d889ff', '#7ee081', '#ff7b8b', '#b9a5ff'];
 let state = createInitialState();
 let selectedPieceId = null;
 let selectedMoves = new Map();
@@ -120,6 +143,8 @@ let autoPaused = false;
 let simulationPauseRequested = false;
 let simulationRunId = 0;
 let simulationPreview = null;
+let aiSearchWorker = null;
+let settleCancelledSearch = null;
 let animationLock = false;
 let simulationLock = false;
 let previewSide = null;
@@ -171,7 +196,8 @@ function cloneGameState(source) {
     boardPanelRotations: {
       front: [...source.boardPanelRotations.front],
       back: [...source.boardPanelRotations.back]
-    }
+    },
+    portalPairs: clonePortalPairs(source.portalPairs)
   };
 }
 
@@ -210,21 +236,12 @@ function layoutStorageLabel() {
 function applyLayoutLibrary(library, selectedName = '') {
   savedLayouts = library.layouts;
   activeLayoutName = library.activeLayoutName;
-  const activeLayout = savedLayouts.find(layout => layout.name === activeLayoutName);
+  const activeLayout = savedLayouts.find(layout =>
+    layout.name === activeLayoutName &&
+    (!library.activeBoardShape || layout.boardShape === library.activeBoardShape));
   activeBoardShape = activeLayout?.boardShape === 'solid' ? 'solid' : 'flat';
-  if (activeLayout?.isDefault) {
-    activeInitialState = createInitialState();
-  } else if (activeLayout) {
-    const result = createCustomState(
-      activeLayout.boardStates,
-      activeLayout.faceLabels,
-      activeLayout.panelRotations,
-      activeBoardShape
-    );
-    activeInitialState = result.error ? createInitialState() : result.state;
-  } else {
-    activeInitialState = createInitialState();
-  }
+  const result = resolvePlayableLayout(activeLayout, savedLayouts);
+  activeInitialState = result.error ? createInitialState() : result.state;
   activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName} · ` +
     `${activeBoardShape === 'solid' ? '立体棋盘' : '平面棋盘'} · 保存位置：${layoutStorageLabel()}`;
   refreshSavedLayoutOptions(selectedName || activeLayoutName);
@@ -269,28 +286,69 @@ async function initializeLayoutLibrary() {
 }
 
 function refreshSavedLayoutOptions(selectedName = '') {
+  const flatSavedLayouts = flatLayouts(savedLayouts);
   savedLayoutSelect.replaceChildren();
-  if (savedLayouts.length === 0) {
+  if (flatSavedLayouts.length === 0) {
     const option = document.createElement('option');
     option.value = '';
     option.textContent = '暂无已保存布局';
     savedLayoutSelect.appendChild(option);
   } else {
-    savedLayouts.forEach(layout => {
+    flatSavedLayouts.forEach(layout => {
       const option = document.createElement('option');
       option.value = layout.name;
       option.textContent = layout.name;
       savedLayoutSelect.appendChild(option);
     });
-    savedLayoutSelect.value = selectedName && savedLayouts.some(item => item.name === selectedName)
+    savedLayoutSelect.value = selectedName && flatSavedLayouts.some(item => item.name === selectedName)
       ? selectedName
-      : savedLayouts[0].name;
+      : flatSavedLayouts[0].name;
   }
-  const hasSelection = Boolean(savedLayoutSelect.value);
-  activateLayoutButton.disabled = !hasSelection;
-  const selectedLayout = savedLayouts.find(item => item.name === savedLayoutSelect.value);
-  loadLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.builtIn);
+  const selectedLayout = flatSavedLayouts.find(item => item.name === savedLayoutSelect.value);
+  const flatIsActive = Boolean(selectedLayout) &&
+    selectedLayout.name === activeLayoutName && activeBoardShape === 'flat';
+  activateLayoutButton.disabled = !selectedLayout;
+  activateLayoutButton.textContent = flatIsActive ? '覆盖并启用' : '启用';
+  activateLayoutButton.classList.toggle('active', flatIsActive);
+  loadLayoutButton.disabled = !selectedLayout;
   deleteLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.builtIn);
+  refreshSolidLayoutOptions(selectedName);
+}
+
+function replaceLayoutOptions(select, layouts, emptyLabel, selectedName = '') {
+  select.replaceChildren();
+  if (!layouts.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = emptyLabel;
+    select.appendChild(option);
+    return;
+  }
+  layouts.forEach(layout => {
+    const option = document.createElement('option');
+    option.value = layout.name;
+    option.textContent = layout.displayName ?? layout.name;
+    select.appendChild(option);
+  });
+  select.value = layouts.some(layout => layout.name === selectedName) ? selectedName : layouts[0].name;
+}
+
+function refreshSolidLayoutOptions(selectedName = '') {
+  const solidCandidates = solidLayoutCandidates(savedLayouts);
+  replaceLayoutOptions(savedSolidLayoutSelect, solidCandidates, '暂无可装配的立体布局', selectedName);
+  const selectedLayout = solidCandidates.find(layout => layout.name === savedSolidLayoutSelect.value);
+  if (customEditor?.boardShape === 'solid') {
+    solidLayoutNameInput.value = selectedLayout?.name ?? customEditor.sourceFlatLayoutName ?? '';
+  }
+  const solidIsActive = Boolean(selectedLayout) &&
+    !selectedLayout.pendingAssembly &&
+    selectedLayout.name === activeLayoutName && activeBoardShape === 'solid';
+  activateSolidLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.pendingAssembly);
+  activateSolidLayoutButton.textContent = solidIsActive ? '覆盖并启用' : '启用';
+  activateSolidLayoutButton.classList.toggle('active', solidIsActive);
+  loadSolidLayoutButton.disabled = !selectedLayout;
+  deleteSolidLayoutButton.disabled = !selectedLayout ||
+    Boolean(selectedLayout.pendingAssembly) || Boolean(selectedLayout.builtIn);
 }
 
 function toPixel(point) {
@@ -363,6 +421,8 @@ function drawStaticBoard() {
   });
   svg.appendChild(nodes);
   svg.appendChild(svgElement('g', { id: 'faceLabelLayer' }));
+  svg.appendChild(svgElement('g', { id: 'portalLayer' }));
+  svg.appendChild(svgElement('g', { id: 'portalEffectLayer' }));
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
@@ -435,8 +495,21 @@ function solidBoardModel() {
   const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
     const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
     const mapped = mapSolidPoint(move.target, move.panelIndex ?? captured?.panelIndex);
-    return { ...mapped, targetKey: move.mapKey ?? keyOf(move.target), captureId: move.captureId };
+    return {
+      ...mapped,
+      targetKey: move.mapKey ?? keyOf(move.target),
+      captureId: move.captureId,
+      usesPortal: Boolean(move.usesPortal),
+      portalColor: move.portalColor
+    };
   });
+  const portalTargets = customEditor ? [] : portalEndpointLocations(state)
+    .map(location => ({
+      ...mapSolidPoint(location.position, location.panelIndex),
+      portalId: location.portalId,
+      portalColor: location.portalColor,
+      dormant: location.layer !== (previewSide === null ? 'active' : 'dormant')
+    }));
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
     : null;
@@ -463,6 +536,7 @@ function solidBoardModel() {
     selectedPanel: customEditor ? solidSelectedPanel : null,
     selectedPieceId: customEditor ? null : selectedPieceId,
     moveTargets,
+    portalTargets,
     plannedMove
   };
 }
@@ -631,6 +705,7 @@ function refreshSolidBoard(message = '') {
     rotateSolidPanelButton.disabled = !selectedPanel;
     flipSolidPanelButton.disabled = !selectedPanel;
     removeSolidPanelButton.disabled = !selectedPanel || selectedPanel.installedSlot === null;
+    saveSolidLayoutButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
     saveSolidCustomButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
     renderSolidSlotPicker();
     renderSolidPanelTray();
@@ -808,6 +883,155 @@ function renderFaceLabels(side) {
   });
 }
 
+function renderPortals() {
+  const layer = document.getElementById('portalLayer');
+  layer.replaceChildren();
+  if (customEditor) {
+    customEditor.portalPairs.forEach(portal => {
+      portal.endpoints
+        .forEach(endpoint => {
+          const panelIndex = customEditor.faceLabels[customEditor.side].indexOf(endpoint.faceLabel);
+          if (panelIndex < 0) return;
+          const position = panelPointForNumber(
+            panelIndex,
+            endpoint.pointNumber,
+            customEditor.panelRotations[customEditor.side][panelIndex]
+          );
+          if (!position) return;
+          appendPortalMarker(layer, position, portal, false, true);
+        });
+    });
+    return;
+  }
+  const visibleLayer = previewSide === null ? 'active' : 'dormant';
+  portalEndpointLocations(state)
+    .forEach(location => {
+      appendPortalMarker(
+        layer,
+        location.position,
+        { id: location.portalId, color: location.portalColor },
+        location.layer !== visibleLayer,
+        false
+      );
+    });
+}
+
+function appendPortalMarker(layer, position, portal, dormant = false, editing = false) {
+  const pixel = toPixel(position);
+  const group = svgElement('g', {
+    class: `portal-marker ${dormant ? 'dormant' : 'active'} ${editing ? 'editing' : ''}`,
+    'data-portal-id': portal.id,
+    style: `--portal-color: ${portal.color}`
+  });
+  group.appendChild(svgElement('circle', { cx: pixel.x, cy: pixel.y, r: 28 }));
+  if (dormant) {
+    const label = svgElement('text', {
+      x: pixel.x,
+      y: pixel.y + 4,
+      'text-anchor': 'middle'
+    });
+    label.textContent = previewSide === null ? '背' : '内';
+    group.appendChild(label);
+  }
+  layer.appendChild(group);
+}
+
+function editorPortalEndpointAt(point) {
+  const panelIndex = panelIndexForPoint(point);
+  if (panelIndex === null) return null;
+  const pointNumber = panelPointNumber(
+    panelIndex,
+    point,
+    customEditor.panelRotations[customEditor.side][panelIndex]
+  );
+  if (pointNumber === null) return null;
+  return {
+    faceLabel: customEditor.faceLabels[customEditor.side][panelIndex],
+    pointNumber
+  };
+}
+
+function portalEndpointKey(endpoint) {
+  return `${endpoint.faceLabel}${endpoint.pointNumber}`;
+}
+
+function renderPortalEditorTargets() {
+  const layer = document.getElementById('editorTargetLayer');
+  if (!customEditor || customEditor.mode !== 'portals') return;
+  const endpointToPortal = new Map();
+  customEditor.portalPairs.forEach(portal => {
+    portal.endpoints.forEach(endpoint => endpointToPortal.set(portalEndpointKey(endpoint), portal));
+  });
+  BOARD_POINTS.forEach(point => {
+    const endpoint = editorPortalEndpointAt(point);
+    if (!endpoint) return;
+    const endpointKey = portalEndpointKey(endpoint);
+    const portal = endpointToPortal.get(endpointKey);
+    const pending = customEditor.pendingPortalEndpoint &&
+      portalEndpointKey(customEditor.pendingPortalEndpoint) === endpointKey;
+    const pixel = toPixel(point);
+    const target = svgElement('circle', {
+      class: `portal-editor-target ${portal ? 'occupied' : ''} ${pending ? 'pending' : ''}`,
+      cx: pixel.x,
+      cy: pixel.y,
+      r: 20,
+      'data-portal-endpoint': endpointKey,
+      tabindex: 0,
+      role: 'button',
+      'aria-label': portal ? `删除传送阵 ${portal.id}` : `选择传送阵端点 ${endpointKey}`
+    });
+    const chooseEndpoint = event => {
+      event.stopPropagation();
+      editPortalEndpoint(endpoint);
+    };
+    target.addEventListener('click', chooseEndpoint);
+    target.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') chooseEndpoint(event);
+    });
+    layer.appendChild(target);
+  });
+}
+
+function editPortalEndpoint(endpoint) {
+  if (!customEditor || customEditor.mode !== 'portals') return;
+  const endpointKey = portalEndpointKey(endpoint);
+  const existingIndex = customEditor.portalPairs.findIndex(portal =>
+    portal.endpoints.some(item => portalEndpointKey(item) === endpointKey)
+  );
+  if (existingIndex >= 0) {
+    const [removed] = customEditor.portalPairs.splice(existingIndex, 1);
+    customEditor.pendingPortalEndpoint = null;
+    boardHelp.textContent = `已删除成对传送阵“${removed.id}”。`;
+    render();
+    return;
+  }
+  if (!customEditor.pendingPortalEndpoint) {
+    customEditor.pendingPortalEndpoint = { ...endpoint };
+    boardHelp.textContent = `已选择 ${endpointKey}，请点击另一个空端点完成成对传送阵；再次点击可取消。`;
+    render();
+    return;
+  }
+  if (portalEndpointKey(customEditor.pendingPortalEndpoint) === endpointKey) {
+    customEditor.pendingPortalEndpoint = null;
+    boardHelp.textContent = '已取消待配对的传送阵端点。';
+    render();
+    return;
+  }
+  const first = customEditor.pendingPortalEndpoint;
+  const endpoints = [first, endpoint].sort((left, right) =>
+    portalEndpointKey(left).localeCompare(portalEndpointKey(right))
+  );
+  const color = PORTAL_COLOR_PALETTE[customEditor.portalPairs.length % PORTAL_COLOR_PALETTE.length];
+  customEditor.portalPairs.push({
+    id: endpoints.map(portalEndpointKey).join('-'),
+    color,
+    endpoints
+  });
+  customEditor.pendingPortalEndpoint = null;
+  boardHelp.textContent = `已创建 ${endpoints.map(portalEndpointKey).join(' ⇄ ')} 传送阵。`;
+  render();
+}
+
 function renderPanelTargets() {
   const layer = document.getElementById('panelTargetLayer');
   layer.replaceChildren();
@@ -855,6 +1079,22 @@ function renderPiece(piece) {
   });
   label.textContent = pieceSymbol(piece.type);
   group.appendChild(label);
+  if (piece.type === 'queen' && piece.portalTurns > 0) {
+    group.appendChild(svgElement('circle', {
+      class: 'portal-charge',
+      cx: 18,
+      cy: -18,
+      r: 10
+    }));
+    const charge = svgElement('text', {
+      class: 'portal-charge-label',
+      x: 18,
+      y: -14,
+      'text-anchor': 'middle'
+    });
+    charge.textContent = String(piece.portalTurns);
+    group.appendChild(charge);
+  }
   group.addEventListener('click', event => {
     event.stopPropagation();
     if (customEditor) {
@@ -880,6 +1120,7 @@ function renderPiece(piece) {
 function renderEditorTargets() {
   const layer = document.getElementById('editorTargetLayer');
   layer.replaceChildren();
+  renderPortalEditorTargets();
   if (!customEditor || customEditor.mode !== 'pieces') return;
   const occupiedKeys = new Set(displayedPieces().map(item => keyOf(item.position)));
   BOARD_POINTS.forEach(point => {
@@ -913,14 +1154,17 @@ function renderMoves() {
   targetLayer.replaceChildren();
   selectedMoves.forEach(move => {
     pathLayer.appendChild(svgElement('polyline', {
-      class: 'move-path',
-      points: pointList(move.path)
+      class: `move-path ${move.usesPortal ? 'portal' : ''}`,
+      points: pointList(move.path),
+      ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
     }));
     const pixel = toPixel(move.target);
     const target = svgElement('circle', {
-      class: `move-target ${move.captureId ? 'capture' : ''}`,
-      cx: pixel.x, cy: pixel.y, r: 16,
-      'data-target': keyOf(move.target)
+      class: `move-target ${move.captureId ? 'capture' : ''} ${move.usesPortal ? 'portal' : ''}`,
+      cx: pixel.x, cy: pixel.y, r: move.usesPortal ? 11 : 16,
+      'data-target': move.mapKey ?? keyOf(move.target),
+      'aria-label': move.usesPortal ? '传送移动' : move.captureId ? '吃子' : '移动',
+      ...(move.usesPortal ? { style: `--portal-color: ${move.portalColor}` } : {})
     });
     target.addEventListener('click', event => {
       event.stopPropagation();
@@ -941,6 +1185,7 @@ function render() {
   const pieceLayer = document.getElementById('pieceLayer');
   pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
   renderFaceLabels(boardSide);
+  renderPortals();
   renderEditorTargets();
   renderPanelTargets();
   if (previewing || editing) {
@@ -957,7 +1202,11 @@ function render() {
   const sideName = previewing ? '下层 · 对应拼图' : '上层 · 当前拼图';
   faceBadge.textContent = editing
     ? `自定义编辑 · ${boardSide === 'front' ? 'A 面' : 'B 面'} · ` +
-      (customEditor.mode === 'pieces' ? '点击交点设子' : '选择三角板拆装')
+      (customEditor.mode === 'pieces'
+        ? '点击交点设子'
+        : customEditor.mode === 'portals'
+          ? '成对设置传送阵'
+          : '选择三角板拆装')
     : previewing
       ? `背面预览 · ${sideName} · 禁止移动`
       : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
@@ -969,16 +1218,24 @@ function render() {
   previewButton.disabled = editing;
   customizeButton.disabled = editing;
   customEditorControls.classList.toggle('hidden', !editing);
+  const editingFlat = editing && customEditor.boardShape === 'flat';
+  const editingSolid = editing && customEditor.boardShape === 'solid';
+  flatLayoutLibrary.classList.toggle('hidden', !editingFlat);
+  solidLayoutLibrary.classList.toggle('hidden', !editingSolid);
   if (editing) {
     const pieceCount = customEditor.boardStates[boardSide].length;
     editorStatus.textContent = customEditor.mode === 'pieces'
       ? `棋子摆放 · ${boardSide === 'front' ? 'A' : 'B'} 面 · ${pieceCount} 枚棋子`
-      : `板块拆装 · ${boardSide === 'front' ? 'A' : 'B'} 面`;
+      : customEditor.mode === 'portals'
+        ? `传送阵 · ${customEditor.portalPairs.length} 对${customEditor.pendingPortalEndpoint ? ' · 待选第二端' : ''}`
+        : `板块拆装 · ${boardSide === 'front' ? 'A' : 'B'} 面`;
     switchEditorFaceButton.textContent = `切换到 ${boardSide === 'front' ? 'B' : 'A'} 面`;
     pieceModeButton.classList.toggle('active', customEditor.mode === 'pieces');
     panelModeButton.classList.toggle('active', customEditor.mode === 'panels');
+    portalModeButton.classList.toggle('active', customEditor.mode === 'portals');
     pieceModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'pieces'));
     panelModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'panels'));
+    portalModeButton.setAttribute('aria-pressed', String(customEditor.mode === 'portals'));
     flatShapeButton.classList.toggle('active', customEditor.boardShape === 'flat');
     solidShapeButton.classList.toggle('active', customEditor.boardShape === 'solid');
     flatShapeButton.setAttribute('aria-pressed', String(customEditor.boardShape === 'flat'));
@@ -1036,7 +1293,7 @@ function selectPiece(pieceId) {
   selectedMoves = legalMoves(state, pieceId);
   selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
     `${selectedMoves.size} 个合法落点`;
-  boardHelp.textContent = '青色为移动，红色为可以吃子的目标。';
+  boardHelp.textContent = '青色为移动，红色为吃子；有传送能力的后会显示3/2/1计数，彩色小圆为可穿越的传送路线。';
   render();
 }
 
@@ -1064,12 +1321,63 @@ async function animateElementPath(pieceId, path) {
   }
 }
 
-async function animateMove(pieceId, path, positionEffect, defenderId = null) {
+async function playFlatPortalTransition(transition, portalColor) {
+  if (!transition) return;
+  const effectLayer = document.getElementById('portalEffectLayer');
+  const entry = toPixel(transition.entry.position);
+  const exit = toPixel(transition.exit.position);
+  const path = svgElement('line', {
+    class: 'portal-transition-path',
+    x1: entry.x,
+    y1: entry.y,
+    x2: exit.x,
+    y2: exit.y,
+    style: `--portal-color: ${portalColor}`
+  });
+  const exitFlash = svgElement('circle', {
+    class: 'portal-transition-exit',
+    cx: exit.x,
+    cy: exit.y,
+    r: 31,
+    style: `--portal-color: ${portalColor}`
+  });
+  effectLayer.replaceChildren(path, exitFlash);
+  document.querySelectorAll(`[data-portal-id]`).forEach(marker =>
+    marker.classList.add('transitioning')
+  );
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  await new Promise(resolve => setTimeout(resolve, reducedMotion ? 120 : 480));
+  document.querySelectorAll('.portal-marker.transitioning').forEach(marker =>
+    marker.classList.remove('transitioning')
+  );
+  effectLayer.replaceChildren();
+}
+
+async function animateMove(
+  pieceId,
+  path,
+  positionEffect,
+  defenderId = null,
+  portalTransition = null,
+  portalColor = null
+) {
   const attackerPath = positionEffect === 'hold'
     ? [...path, ...path.slice(0, -1).reverse()]
     : path;
   animationLock = true;
-  if (positionEffect === 'swap' && defenderId) {
+  const entryIndex = portalTransition
+    ? attackerPath.findIndex(point => keyOf(point) === keyOf(portalTransition.entry.position))
+    : -1;
+  if (entryIndex >= 0) {
+    await animateElementPath(pieceId, attackerPath.slice(0, entryIndex + 1));
+    await playFlatPortalTransition(portalTransition, portalColor);
+    const continuation = animateElementPath(pieceId, attackerPath.slice(entryIndex));
+    if (positionEffect === 'swap' && defenderId) {
+      await Promise.all([continuation, animateElementPath(defenderId, [...path].reverse())]);
+    } else {
+      await continuation;
+    }
+  } else if (positionEffect === 'swap' && defenderId) {
     await Promise.all([
       animateElementPath(pieceId, attackerPath),
       animateElementPath(defenderId, [...path].reverse())
@@ -1101,13 +1409,31 @@ async function commitMove(pieceId, move, promote = false, decisionNote = '') {
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
   const mover = state.pieces.find(item => item.id === pieceId);
-  const positionEffect = captured
-    ? capturePositionEffect(mover.type, captured.type)
+  const capturedType = captured?.type ?? move.capturedType;
+  const positionEffect = capturedType
+    ? capturePositionEffect(mover.type, capturedType)
     : 'move';
-  if (!solidBoardViewer) await animateMove(pieceId, move.path, positionEffect, captured?.id);
+  if (!solidBoardViewer) {
+    await animateMove(
+      pieceId,
+      move.path,
+      positionEffect,
+      captured?.id,
+      move.portalTransition,
+      move.portalColor
+    );
+  } else if (move.portalTransition) {
+    animationLock = true;
+    try {
+      await solidBoardViewer.playPortalTransition(move.portalTransition, move.portalColor);
+    } finally {
+      animationLock = false;
+    }
+  }
   const result = applyMove(state, pieceId, {
     ...move.target,
-    ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {})
+    ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {}),
+    ...(move.mapKey ? { mapKey: move.mapKey } : {})
   }, promote);
   if (result.error) {
     boardHelp.textContent = result.error;
@@ -1183,10 +1509,56 @@ function stopAutoSimulation() {
   autoPaused = false;
   simulationPauseRequested = false;
   simulationRunId += 1;
+  cancelAiSearch();
   autoButton.classList.remove('active');
   autoButton.textContent = '连续模拟';
   solidAutoButton.classList.remove('active');
   solidAutoButton.textContent = '连续模拟';
+}
+
+function cancelAiSearch() {
+  aiSearchWorker?.terminate();
+  aiSearchWorker = null;
+  settleCancelledSearch?.(null);
+  settleCancelledSearch = null;
+}
+
+function searchWithWorker(searchId, searchState, onProgress) {
+  cancelAiSearch();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(
+      new URL('./ai-worker.js?v=ai-search-1', import.meta.url),
+      { type: 'module' }
+    );
+    aiSearchWorker = worker;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      if (aiSearchWorker === worker) aiSearchWorker = null;
+      if (settleCancelledSearch === cancel) settleCancelledSearch = null;
+      callback(value);
+    };
+    const cancel = value => settle(resolve, value);
+    settleCancelledSearch = cancel;
+    worker.addEventListener('message', event => {
+      const message = event.data;
+      if (message?.searchId !== searchId) return;
+      if (message.type === 'progress') onProgress(message.result);
+      else if (message.type === 'complete') settle(resolve, message.result);
+      else if (message.type === 'error') settle(reject, new Error(message.message));
+    });
+    worker.addEventListener('error', event => {
+      settle(reject, new Error(event.message || 'AI Worker 启动失败'));
+    });
+    worker.postMessage({
+      type: 'search',
+      searchId,
+      state: searchState,
+      options: { timeLimitMs: 3000, maxDepth: 8, quiescenceDepth: 4 }
+    });
+  });
 }
 
 function simulationActionLabel(action, mover, prefix = '即将执行') {
@@ -1225,6 +1597,7 @@ function toggleAutoSimulation() {
     autoPaused = true;
     simulationPauseRequested = true;
     simulationRunId += 1;
+    cancelAiSearch();
     setAutoSimulationButtonState('继续模拟', true);
     return;
   }
@@ -1306,6 +1679,8 @@ function enterCustomEditor() {
     boardShape: 'flat',
     selectedPanel: null,
     swapPending: false,
+    pendingPortalEndpoint: null,
+    portalPairs: clonePortalPairs(state.portalPairs),
     boardStates: { front: [], back: [] },
     faceLabels: {
       front: [...(state.boardFaceLabels?.front ?? BOARD_FACE_LABELS.front)],
@@ -1317,6 +1692,35 @@ function enterCustomEditor() {
     }
   };
   boardHelp.textContent = '已进入空白棋盘编辑：点击交点设置棋子，A、B 两面分别编辑。';
+  render();
+}
+
+function createNewFlatLayout() {
+  if (!customEditor || customEditor.boardShape !== 'flat') return;
+  closePieceEditor();
+  customEditor = {
+    side: 'front',
+    mode: 'pieces',
+    boardShape: 'flat',
+    selectedPanel: null,
+    swapPending: false,
+    pendingPortalEndpoint: null,
+    portalPairs: clonePortalPairs(),
+    boardStates: { front: [], back: [] },
+    faceLabels: {
+      front: [...BOARD_FACE_LABELS.front],
+      back: [...BOARD_FACE_LABELS.back]
+    },
+    panelRotations: {
+      front: [...BOARD_PANEL_ROTATIONS.front],
+      back: [...BOARD_PANEL_ROTATIONS.back]
+    }
+  };
+  editorPoint = null;
+  draftPieceSequence = 0;
+  layoutNameInput.value = nextCustomLayoutName();
+  solidLayoutNameInput.value = '';
+  boardHelp.textContent = '已新建空白平面布局，并加入两对默认传送阵。';
   render();
 }
 
@@ -1355,9 +1759,16 @@ function cancelCustomBoard() {
 
 async function saveCustomBoard() {
   if (!customEditor) return;
-  const enteredName = layoutNameInput.value.trim();
+  if (customEditor.pendingPortalEndpoint) {
+    boardHelp.textContent = '传送阵必须成对：请完成第二个端点，或再次点击待选端点取消。';
+    return;
+  }
+  const enteredName = customEditor.boardShape === 'solid'
+    ? solidLayoutNameInput.value.trim()
+    : layoutNameInput.value.trim();
   const name = !enteredName || enteredName === '默认布局' ? nextCustomLayoutName() : enteredName;
-  layoutNameInput.value = name;
+  if (customEditor.boardShape === 'solid') solidLayoutNameInput.value = name;
+  else layoutNameInput.value = name;
   const assembled = customEditor.boardShape === 'solid'
     ? assemblyToLayout(customEditor.solidAssembly)
     : customEditor;
@@ -1371,19 +1782,27 @@ async function saveCustomBoard() {
     assembled.boardStates,
     assembled.faceLabels,
     assembled.panelRotations,
-    customEditor.boardShape
+    customEditor.boardShape,
+    customEditor.portalPairs
   );
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
     selectedInfo.textContent = result.error;
     return;
   }
-  const snapshot = layoutSnapshotFromEditor(name, {
-    boardShape: customEditor.boardShape,
-    boardStates: result.state.boardStates,
-    faceLabels: result.state.boardFaceLabels,
-    panelRotations: result.state.boardPanelRotations
-  });
+  const snapshot = customEditor.boardShape === 'solid'
+    ? solidLayoutSnapshot(name, assembled)
+    : layoutSnapshotFromEditor(name, {
+        boardShape: 'flat',
+        boardStates: result.state.boardStates,
+        faceLabels: result.state.boardFaceLabels,
+        panelRotations: result.state.boardPanelRotations,
+        portalPairs: result.state.portalPairs
+      });
+  if (snapshot.error) {
+    boardHelp.textContent = `无法保存：${snapshot.error}`;
+    return;
+  }
   try {
     const library = await requestLayoutLibrary('/api/layouts', {
       method: 'POST',
@@ -1418,6 +1837,25 @@ function layoutSnapshotFromEditor(name, layout = customEditor) {
     panelRotations: {
       front: [...layout.panelRotations.front],
       back: [...layout.panelRotations.back]
+    },
+    portalPairs: clonePortalPairs(layout.portalPairs)
+  };
+}
+
+function solidLayoutSnapshot(name, assembled = assemblyToLayout(customEditor.solidAssembly)) {
+  const sourceLayout = flatLayouts(savedLayouts).find(layout => layout.name === name);
+  if (!sourceLayout) return { error: `请先保存同名平面方案“${name}”` };
+  return {
+    name,
+    boardShape: 'solid',
+    sourceFlatLayoutName: name,
+    faceLabels: {
+      front: [...assembled.faceLabels.front],
+      back: [...assembled.faceLabels.back]
+    },
+    panelRotations: {
+      front: [...assembled.panelRotations.front],
+      back: [...assembled.panelRotations.back]
     }
   };
 }
@@ -1430,36 +1868,40 @@ function nextCustomLayoutName() {
 
 async function saveLayoutToLibrary() {
   if (!customEditor) return;
+  if (customEditor.pendingPortalEndpoint) {
+    boardHelp.textContent = '传送阵必须成对：请先完成或取消待配对端点。';
+    return;
+  }
   const name = layoutNameInput.value.trim();
   if (!name) {
     boardHelp.textContent = '请输入布局名称后再保存。';
     return;
   }
-  const assembled = customEditor.boardShape === 'solid'
-    ? assemblyToLayout(customEditor.solidAssembly)
-    : customEditor;
-  if (assembled.error) {
-    boardHelp.textContent = `布局不能保存：${assembled.error}`;
-    return;
-  }
   const validation = createCustomLayout(
-    assembled.boardStates,
-    assembled.faceLabels,
-    assembled.panelRotations,
-    customEditor.boardShape
+    customEditor.boardStates,
+    customEditor.faceLabels,
+    customEditor.panelRotations,
+    'flat',
+    customEditor.portalPairs
   );
   if (validation.error) {
     boardHelp.textContent = `布局不能保存：${validation.error}`;
     return;
   }
-  const snapshot = layoutSnapshotFromEditor(name, { ...validation, boardShape: customEditor.boardShape });
-  const existed = savedLayouts.some(item => item.name === name);
+  const snapshot = layoutSnapshotFromEditor(name, { ...validation, boardShape: 'flat' });
+  const existed = savedLayouts.some(item => item.name === name && item.boardShape !== 'solid');
   try {
     const library = await requestLayoutLibrary('/api/layouts', {
       method: 'POST',
       body: JSON.stringify({ layout: snapshot, activate: false })
     });
     applyLayoutLibrary(library, name);
+    customEditor.sourceFlatLayoutName = name;
+    solidLayoutNameInput.value = name;
+    if (customEditor.solidAssembly) {
+      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, snapshot);
+      customEditor.solidAssembly = synchronized.assembly;
+    }
     boardHelp.textContent = existed
       ? `已覆盖${layoutStorageLabel()}中的布局“${name}”。`
       : `已保存布局“${name}”到${layoutStorageLabel()}。`;
@@ -1468,9 +1910,38 @@ async function saveLayoutToLibrary() {
   }
 }
 
+async function saveSolidLayoutToLibrary() {
+  if (!customEditor?.solidAssembly) return;
+  const name = customEditor.sourceFlatLayoutName || solidLayoutNameInput.value.trim();
+  if (!name) {
+    boardHelp.textContent = '请先载入或保存同名平面方案。';
+    return;
+  }
+  const assembled = assemblyToLayout(customEditor.solidAssembly);
+  if (assembled.error) {
+    boardHelp.textContent = `立体布局不能保存：${assembled.error}`;
+    return;
+  }
+  const snapshot = solidLayoutSnapshot(name, assembled);
+  if (snapshot.error) {
+    boardHelp.textContent = `立体布局不能保存：${snapshot.error}`;
+    return;
+  }
+  try {
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: false })
+    });
+    applyLayoutLibrary(library, name);
+    boardHelp.textContent = `已保存立体布局“${name}”；棋子来自平面布局“${snapshot.sourceFlatLayoutName}”。`;
+  } catch (error) {
+    boardHelp.textContent = `立体布局不能保存：${error.message}`;
+  }
+}
+
 function loadLayoutFromLibrary() {
   if (!customEditor || !savedLayoutSelect.value) return;
-  const layout = savedLayouts.find(item => item.name === savedLayoutSelect.value);
+  const layout = flatLayouts(savedLayouts).find(item => item.name === savedLayoutSelect.value);
   if (!layout) {
     boardHelp.textContent = '选择的布局存档不存在。';
     return;
@@ -1479,12 +1950,14 @@ function loadLayoutFromLibrary() {
     layout.boardStates,
     layout.faceLabels,
     layout.panelRotations,
-    layout.boardShape
+    layout.boardShape,
+    layout.portalPairs
   );
   if (validation.error) {
     boardHelp.textContent = `布局存档无效：${validation.error}`;
     return;
   }
+  const previousPairName = customEditor.sourceFlatLayoutName;
   customEditor.boardStates = clonePiecesByFace(validation.boardStates);
   customEditor.faceLabels = {
     front: [...validation.faceLabels.front],
@@ -1494,70 +1967,171 @@ function loadLayoutFromLibrary() {
     front: [...validation.panelRotations.front],
     back: [...validation.panelRotations.back]
   };
-  customEditor.boardShape = layout.boardShape === 'solid' ? 'solid' : 'flat';
-  customEditor.solidAssembly = layout.boardShape === 'solid'
-    ? createSolidAssembly({
-        boardStates: validation.boardStates,
-        faceLabels: validation.faceLabels,
-        panelRotations: validation.panelRotations
-      }, { installed: true })
-    : null;
+  customEditor.portalPairs = clonePortalPairs(validation.portalPairs);
+  customEditor.pendingPortalEndpoint = null;
+  customEditor.boardShape = 'flat';
+  if (previousPairName && previousPairName !== layout.name) customEditor.solidAssembly = null;
+  customEditor.sourceFlatLayoutName = layout.name;
   customEditor.side = 'front';
   customEditor.selectedPanel = null;
   customEditor.swapPending = false;
   layoutNameInput.value = layout.name;
+  solidLayoutNameInput.value = layout.name;
   boardHelp.textContent = `已载入布局“${layout.name}”，可继续编辑或保存并开局。`;
   render();
-  if (customEditor.boardShape === 'solid') openSolidBoard();
 }
 
-async function activateLayoutFromLibrary() {
-  if (!customEditor || !savedLayoutSelect.value) return;
-  const name = savedLayoutSelect.value;
+function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
+  if (!customEditor || !name) return;
+  const layout = solidLayoutCandidates(savedLayouts).find(item => item.name === name);
+  if (!layout) {
+    boardHelp.textContent = '选择的立体布局入口不存在。';
+    return;
+  }
+  if (!layout.pendingAssembly) {
+    const resolved = resolveSolidLayout(layout, savedLayouts);
+    if (resolved.error) {
+      boardHelp.textContent = `立体布局存档无效：${resolved.error}`;
+      return;
+    }
+  }
+  const sourceLayout = flatLayouts(savedLayouts)
+    .find(item => item.name === (layout.sourceFlatLayoutName ?? layout.name));
+  const sourceValidation = sourceLayout && createCustomLayout(
+    sourceLayout.boardStates,
+    sourceLayout.faceLabels,
+    sourceLayout.panelRotations,
+    'flat',
+    sourceLayout.portalPairs
+  );
+  if (!sourceLayout || sourceValidation.error) {
+    boardHelp.textContent = `同名平面方案无效：${sourceValidation?.error ?? '不存在'}`;
+    return;
+  }
+  customEditor.boardStates = clonePiecesByFace(sourceValidation.boardStates);
+  customEditor.faceLabels = {
+    front: [...sourceValidation.faceLabels.front],
+    back: [...sourceValidation.faceLabels.back]
+  };
+  customEditor.panelRotations = {
+    front: [...sourceValidation.panelRotations.front],
+    back: [...sourceValidation.panelRotations.back]
+  };
+  customEditor.portalPairs = clonePortalPairs(sourceValidation.portalPairs);
+  customEditor.pendingPortalEndpoint = null;
+  customEditor.boardShape = 'solid';
+  customEditor.sourceFlatLayoutName = sourceLayout.name;
+  layoutNameInput.value = sourceLayout.name;
+  solidLayoutNameInput.value = sourceLayout.name;
+  customEditor.solidAssembly = layout.pendingAssembly
+    ? createSolidAssembly(sourceLayout)
+    : createSolidAssembly(sourceLayout, { installed: true, arrangement: layout });
+  if (solidBoardViewer) closeSolidBoard();
+  openSolidBoard();
+  const message = layout.pendingAssembly
+    ? `方案“${layout.name}”当前为待组装状态；完成六块板安装后才能保存、启用或开局。`
+    : `已载入方案“${layout.name}”的立体结构，棋子同步自同名平面结构。`;
+  boardHelp.textContent = message;
+  solidViewerStatus.textContent = message;
+}
+
+async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardShape = 'flat') {
+  if (!customEditor || !name) return;
+  if (customEditor.boardShape !== boardShape) {
+    boardHelp.textContent = '当前编辑形态与所选布局形态不一致。';
+    return;
+  }
+  let snapshot;
+  if (boardShape === 'solid') {
+    if (!customEditor.solidAssembly) {
+      boardHelp.textContent = '请先载入或完成立体装配。';
+      return;
+    }
+    const assembled = assemblyToLayout(customEditor.solidAssembly);
+    if (assembled.error) {
+      boardHelp.textContent = `无法启用立体布局：${assembled.error}`;
+      solidViewerStatus.textContent = assembled.error;
+      return;
+    }
+    snapshot = solidLayoutSnapshot(name, assembled);
+  } else {
+    const validation = createCustomState(
+      customEditor.boardStates,
+      customEditor.faceLabels,
+      customEditor.panelRotations,
+      'flat',
+      customEditor.portalPairs
+    );
+    if (validation.error) {
+      boardHelp.textContent = `无法启用平面布局：${validation.error}`;
+      return;
+    }
+    snapshot = layoutSnapshotFromEditor(name, {
+      boardShape: 'flat',
+      boardStates: validation.state.boardStates,
+      faceLabels: validation.state.boardFaceLabels,
+      panelRotations: validation.state.boardPanelRotations,
+      portalPairs: validation.state.portalPairs
+    });
+  }
+  if (snapshot.error) {
+    boardHelp.textContent = `无法启用布局：${snapshot.error}`;
+    return;
+  }
   try {
-    const library = await requestLayoutLibrary('/api/layouts/active', {
-      method: 'PUT',
-      body: JSON.stringify({ name })
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: true })
     });
     applyLayoutLibrary(library, name);
-    state = cloneGameState(activeInitialState);
-    customEditor = null;
-    previewSide = null;
-    selectedPieceId = null;
-    selectedMoves = new Map();
-    closePieceEditor();
-    boardHelp.textContent = `已启用布局“${name}”并开局；以后重新开局也从该布局开始。`;
-    render();
-    openActiveBoardShape();
+    const button = boardShape === 'solid' ? activateSolidLayoutButton : activateLayoutButton;
+    button.textContent = '已覆盖并启用';
+    button.classList.add('active');
+    boardHelp.textContent = `已覆盖并启用布局“${name}”；当前棋局未改变，下次重新开局时生效。`;
+    if (boardShape === 'solid') solidViewerStatus.textContent = boardHelp.textContent;
   } catch (error) {
     boardHelp.textContent = `无法启用布局：${error.message}`;
   }
 }
 
-async function deleteLayoutFromLibrary() {
-  if (!customEditor || !savedLayoutSelect.value) return;
-  const name = savedLayoutSelect.value;
+function activateSolidLayoutFromLibrary() {
+  return activateLayoutFromLibrary(savedSolidLayoutSelect.value, 'solid');
+}
+
+async function deleteLayoutFromLibrary(name = savedLayoutSelect.value, boardShape = 'flat') {
+  if (!customEditor || !name) return;
   try {
-    const library = await requestLayoutLibrary(`/api/layouts/${encodeURIComponent(name)}`, {
+    const library = await requestLayoutLibrary(
+      `/api/layouts/${encodeURIComponent(name)}?boardShape=${boardShape}`,
+      {
       method: 'DELETE'
-    });
+      }
+    );
     applyLayoutLibrary(library);
-    if (layoutNameInput.value.trim() === name) layoutNameInput.value = '';
+    const nameInput = boardShape === 'solid' ? solidLayoutNameInput : layoutNameInput;
+    if (nameInput.value.trim() === name) nameInput.value = '';
     boardHelp.textContent = `已从${layoutStorageLabel()}删除布局“${name}”。`;
   } catch (error) {
     boardHelp.textContent = `无法删除布局：${error.message}`;
   }
 }
 
+function deleteSolidLayoutFromLibrary() {
+  return deleteLayoutFromLibrary(savedSolidLayoutSelect.value, 'solid');
+}
+
 function setEditorMode(mode) {
-  if (!customEditor || !['pieces', 'panels'].includes(mode)) return;
+  if (!customEditor || !['pieces', 'panels', 'portals'].includes(mode)) return;
   closePieceEditor();
+  if (mode !== 'portals') customEditor.pendingPortalEndpoint = null;
   customEditor.mode = mode;
   customEditor.selectedPanel = null;
   customEditor.swapPending = false;
   boardHelp.textContent = mode === 'pieces'
     ? '棋子摆放模式：点击交点设置或替换棋子。'
-    : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
+    : mode === 'portals'
+      ? '传送阵模式：依次点击两个空端点成对创建；点击已有端点会删除整对。'
+      : '板块拆装模式：点击一块三角板，然后选择翻面或交换。';
   render();
 }
 
@@ -1566,15 +2140,47 @@ function setBoardShape(boardShape) {
   const shapeChanged = customEditor.boardShape !== boardShape;
   customEditor.boardShape = boardShape;
   if (boardShape === 'solid') {
-    if (shapeChanged || !customEditor.solidAssembly) {
-      customEditor.solidAssembly = createSolidAssembly(customEditor);
+    const enteredName = layoutNameInput.value.trim();
+    const selectedFlatName = savedLayoutSelect.value;
+    const selectedSolidName = savedSolidLayoutSelect.value;
+    const schemeName = enteredName || selectedFlatName || selectedSolidName;
+    const savedSource = flatLayouts(savedLayouts).find(layout => layout.name === schemeName);
+    if (!schemeName || (!enteredName && !savedSource)) {
+      boardHelp.textContent = '请先载入或保存一个平面方案，再编辑其同名立体结构。';
+      customEditor.boardShape = 'flat';
+      render();
+      return;
     }
+    const sourceLayout = enteredName
+      ? layoutSnapshotFromEditor(schemeName, { ...customEditor, boardShape: 'flat' })
+      : savedSource;
+    const pairedSolid = solidLayouts(savedLayouts).find(layout => layout.name === schemeName);
+    let synchronizationError = null;
+    if (customEditor.solidAssembly && customEditor.sourceFlatLayoutName === schemeName) {
+      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, sourceLayout);
+      customEditor.solidAssembly = synchronized.assembly;
+      synchronizationError = synchronized.error ?? null;
+    } else {
+      customEditor.solidAssembly = createSolidAssembly(
+        sourceLayout,
+        pairedSolid ? { installed: true, arrangement: pairedSolid } : undefined
+      );
+    }
+    customEditor.sourceFlatLayoutName = schemeName;
+    solidLayoutNameInput.value = schemeName;
+    refreshSolidLayoutOptions(schemeName);
+    solidLayoutNameInput.value = schemeName;
     openSolidBoard();
+    if (synchronizationError) {
+      const message = `棋子已同步，但当前立体结构存在冲突：${synchronizationError}`;
+      boardHelp.textContent = message;
+      solidViewerStatus.textContent = message;
+    }
     return;
   }
-  customEditor.solidAssembly = null;
   if (solidBoardViewer) closeSolidBoard();
-  boardHelp.textContent = '当前布局将保存为平面棋盘。';
+  if (customEditor.sourceFlatLayoutName) layoutNameInput.value = customEditor.sourceFlatLayoutName;
+  boardHelp.textContent = '已切换到同名平面结构；棋子修改会同步到立体结构。';
   render();
 }
 
@@ -1669,7 +2275,6 @@ function beginPanelSwap() {
 
 function resetGame() {
   if (customEditor) return;
-  const wasSolid = Boolean(solidBoardViewer);
   stopAutoSimulation();
   state = cloneGameState(activeInitialState);
   previewSide = null;
@@ -1678,9 +2283,9 @@ function resetGame() {
   simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
-  if (wasSolid) closeSolidBoard();
   boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
+  openActiveBoardShape();
 }
 
 async function toggleFacePreview() {
@@ -1721,17 +2326,27 @@ async function simulateStep() {
   simulationLock = true;
   try {
     let action = null;
-    for (const step of stepwiseGameSearch(state, 3)) {
+    const showSearchStep = step => {
       if (simulationPauseRequested || runId !== simulationRunId) return;
       action = step;
       const stepMover = state.pieces.find(item => item.id === step.pieceId);
-      const candidateLabel = previewSimulationAction(step, stepMover, `第 ${step.searchDepth} 层候选操作`);
+      const depthLabel = step.completed !== false
+        ? `已完成第 ${step.searchDepth} 层候选操作`
+        : '搜索预算耗尽后的安全候选操作';
+      const candidateLabel = previewSimulationAction(step, stepMover, depthLabel);
       selectedInfo.textContent = `${candidateLabel}；` +
         `${PIECE_NAMES[stepMover.type]}${step.move.captureId ? '攻击' : '移动'}，` +
-        `评估 ${step.score}，搜索 ${step.searchedNodes} 节点，剪枝 ${step.prunedBranches} 次`;
+        `评估 ${step.score}，常规 ${step.searchedNodes} 节点，` +
+        `静态 ${step.quiescenceNodes ?? 0} 节点，缓存命中 ${step.cacheHits ?? 0} 次`;
       solidBoardViewer?.followPiece(step.pieceId);
       render();
-      await new Promise(resolve => setTimeout(resolve, 360));
+    };
+    try {
+      action = await searchWithWorker(runId, state, showSearchStep);
+    } catch (error) {
+      if (simulationPauseRequested || runId !== simulationRunId) return;
+      boardHelp.textContent = `后台搜索不可用，已回退同步三层搜索：${error.message}`;
+      for (const step of stepwiseGameSearch(state, 3)) showSearchStep(step);
     }
     if (simulationPauseRequested || runId !== simulationRunId) return;
     if (!action) {
@@ -1749,7 +2364,7 @@ async function simulateStep() {
     const repetitionNote = action.repetitionCount > 0
       ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
       : '，已避开近期重复局面';
-    selectedInfo.textContent = `${operationLabel}；分步博弈最终选择（${action.searchDepth} 层）：` +
+    selectedInfo.textContent = `${operationLabel}；限时博弈最终选择（完整 ${action.searchDepth} 层）：` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     if (solidBoardViewer) solidViewerStatus.textContent = operationLabel;
     solidBoardViewer?.followPoint(
@@ -1759,12 +2374,15 @@ async function simulateStep() {
     render();
     await new Promise(resolve => setTimeout(resolve, 720));
     if (simulationPauseRequested || runId !== simulationRunId) return;
-    const decisionNote = `分步博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个节点，` +
-      `剪枝 ${action.prunedBranches} 次，执行评估值 ${action.score} 的动作。`;
+    const decisionNote = `限时博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个常规节点和 ` +
+      `${action.quiescenceNodes ?? 0} 个静态节点，缓存命中 ${action.cacheHits ?? 0} 次，` +
+      `执行评估值 ${action.score} 的动作。`;
     await commitMove(action.pieceId, action.move, action.promote, decisionNote);
     if (state.winner && autoTimer) stopAutoSimulation();
   } finally {
+    if (runId === simulationRunId) cancelAiSearch();
     simulationLock = false;
+    render();
   }
 }
 
@@ -1773,8 +2391,10 @@ previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
 solidCustomizeButton.addEventListener('click', () => {
+  const layoutName = activeLayoutName;
   closeSolidBoard();
   enterCustomEditor();
+  loadSolidLayoutFromLibrary(layoutName);
 });
 rotateSolidPanelButton.addEventListener('click', rotateSolidPanel);
 flipSolidPanelButton.addEventListener('click', flipSolidPanel);
@@ -1791,17 +2411,26 @@ saveCustomButton.addEventListener('click', saveCustomBoard);
 cancelCustomButton.addEventListener('click', cancelCustomBoard);
 pieceModeButton.addEventListener('click', () => setEditorMode('pieces'));
 panelModeButton.addEventListener('click', () => setEditorMode('panels'));
+portalModeButton.addEventListener('click', () => setEditorMode('portals'));
 flatShapeButton.addEventListener('click', () => setBoardShape('flat'));
 solidShapeButton.addEventListener('click', () => setBoardShape('solid'));
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
 rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);
+newFlatLayoutButton.addEventListener('click', createNewFlatLayout);
 saveLayoutButton.addEventListener('click', saveLayoutToLibrary);
+saveSolidLayoutButton.addEventListener('click', saveSolidLayoutToLibrary);
 loadLayoutButton.addEventListener('click', loadLayoutFromLibrary);
-activateLayoutButton.addEventListener('click', activateLayoutFromLibrary);
-deleteLayoutButton.addEventListener('click', deleteLayoutFromLibrary);
+loadSolidLayoutButton.addEventListener('click', () => loadSolidLayoutFromLibrary());
+activateLayoutButton.addEventListener('click', () => activateLayoutFromLibrary());
+activateSolidLayoutButton.addEventListener('click', activateSolidLayoutFromLibrary);
+deleteLayoutButton.addEventListener('click', () => deleteLayoutFromLibrary());
+deleteSolidLayoutButton.addEventListener('click', deleteSolidLayoutFromLibrary);
 savedLayoutSelect.addEventListener('change', () => {
   refreshSavedLayoutOptions(savedLayoutSelect.value);
+});
+savedSolidLayoutSelect.addEventListener('change', () => {
+  refreshSolidLayoutOptions(savedSolidLayoutSelect.value);
 });
 pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
   button.addEventListener('click', () => setEditorPiece(button.dataset.editorSide, button.dataset.editorType));

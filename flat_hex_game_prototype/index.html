@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>六三角形棋盘 · 算法原型</title>
-  <link rel="stylesheet" href="styles.css?v=board-layer-exchange-3">
+  <link rel="stylesheet" href="styles.css?v=portal-editor-1">
 </head>
 <body>
   <main class="app-shell">
@@ -75,7 +75,7 @@
           <div class="editor-controls hidden" id="customEditorControls">
             <div class="editor-status" id="editorStatus">正在编辑 A 面</div>
             <div class="board-shape-control">
-              <span>保存形态</span>
+              <span>编辑结构</span>
               <div class="editor-modes" role="group" aria-label="棋盘保存形态">
                 <button id="flatShapeButton" class="active" aria-pressed="true">平面棋盘</button>
                 <button id="solidShapeButton" aria-pressed="false">立体棋盘</button>
@@ -84,6 +84,7 @@
             <div class="editor-modes" role="group" aria-label="编辑工具">
               <button id="pieceModeButton" class="active" aria-pressed="true">棋子摆放</button>
               <button id="panelModeButton" aria-pressed="false">板块拆装</button>
+              <button id="portalModeButton" aria-pressed="false">传送阵</button>
             </div>
             <div class="panel-editor-actions hidden" id="panelEditorActions">
               <div class="panel-selection" id="panelSelection">请选择一块三角板</div>
@@ -93,19 +94,35 @@
                 <button id="swapSelectedPanelButton" disabled>与另一块交换</button>
               </div>
             </div>
-            <div class="layout-library">
-              <label for="layoutNameInput">布局存档</label>
+            <div class="layout-library" id="flatLayoutLibrary">
+              <label for="layoutNameInput">平面布局存档（包含棋子）</label>
               <div class="layout-save-row">
                 <input id="layoutNameInput" maxlength="40" placeholder="输入布局名称">
-                <button id="saveLayoutButton" title="可以保存尚未摆完棋子的编辑进度">保存布局</button>
+                <button id="newFlatLayoutButton">新建布局</button>
+                <button id="saveLayoutButton" title="可以保存尚未摆完棋子的编辑进度">保存平面布局</button>
               </div>
               <div class="layout-save-row">
                 <select id="savedLayoutSelect" aria-label="已保存布局">
                   <option value="">暂无已保存布局</option>
                 </select>
                 <button id="loadLayoutButton" disabled>载入编辑</button>
-                <button id="activateLayoutButton" disabled>启用并开局</button>
+                <button id="activateLayoutButton" disabled>启用</button>
                 <button id="deleteLayoutButton" disabled>删除</button>
+              </div>
+            </div>
+            <div class="layout-library" id="solidLayoutLibrary">
+              <label for="solidLayoutNameInput">立体装配结构（每个平面方案自动生成待组装入口）</label>
+              <div class="layout-save-row">
+                <input id="solidLayoutNameInput" maxlength="40" placeholder="请先载入同名平面方案" readonly>
+                <button id="saveSolidLayoutButton">保存立体布局</button>
+              </div>
+              <div class="layout-save-row">
+                <select id="savedSolidLayoutSelect" aria-label="立体布局与待组装入口">
+                  <option value="">暂无可装配的立体布局</option>
+                </select>
+                <button id="loadSolidLayoutButton" disabled>载入装配</button>
+                <button id="activateSolidLayoutButton" disabled>启用</button>
+                <button id="deleteSolidLayoutButton" disabled>删除</button>
               </div>
             </div>
             <div class="buttons">
@@ -125,12 +142,14 @@
             <li><b>象</b>：每回合只移动一个菱形长对角线的长度。</li>
             <li><b>兵</b>：沿任意相邻线路移动1格。</li>
             <li><b>吃子</b>：兵吃兵/王、象吃兵、后吃象、王吃后；吃王获胜。</li>
-            <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象留在原位；兵吃兵/王后占据目标；王吃后双方原位不变。</li>
+            <li><b>吃子位置</b>：后吃象时双方换位且象降兵；象吃兵时兵消灭、象占据目标；兵吃兵/王后占据目标；王吃后双方原位不变。降级也属于成功吃子。</li>
+            <li><b>传送阵</b>：彩色“传”标记为实体板上的固定端点：1A-5 ↔ 4B-5、3A-5 ↔ 6B-5；同一对传送门颜色相同，不同对颜色不同。</li>
+            <li><b>传送能力</b>：后吃象成功后获得3回合传送能力，后身上显示3、2、1；之后每当该后完成一次走棋消耗1回合，吃象会重新刷新为3。能力有效时后可在三步中穿过一组传送门，穿越消耗1步，不再要求传送后必须吃子；象和兵不能使用传送阵。</li>
             <li><b>升级选择</b>：兵吃兵可选升象或保持；象吃兵可选升后或保持，人工操作会询问。</li>
-            <li><b>分步博弈</b>：依次展示直接收益、对手最优回应和己方反制，再执行第3层结论；同时使用 Alpha-Beta 剪枝并避开近期重复局面。</li>
+            <li><b>限时博弈</b>：后台搜索在3秒内迭代加深，执行最后一个完整深度的结论；同时使用 Alpha-Beta 剪枝、置换表、吃子静态延伸并优先避开近期重复局面。</li>
             <li><b>双层棋盘</b>：当前上层才可操作；“预览背面”不改变棋局且禁止移动。成功吃子后棋盘不旋转，当前棋盘与棋子整体下沉，正下方对应的棋盘与棋子整体上浮，两层交换位置。</li>
             <li><b>板块拆装</b>：三角板旋转120°时板上的棋子跟随旋转；也可单独翻面或选择两块板交换位置，另一面同步更新。</li>
-            <li><b>布局存储</b>：本地服务保存到项目 JSON 文件；静态部署时自动保存在当前浏览器。“启用并开局”或“保存并开局”会设为重开的起始布局。开局布局要求 A、B 两面合计只有一枚白王和一枚黑王。</li>
+            <li><b>布局存储</b>：本地服务保存到项目文件，静态部署时自动保存在当前浏览器。每个方案按同一名称保存平面、立体两种独立结构；平面结构保存三角板与棋子位置，立体结构只保存装配方式，并实时读取同名平面棋子。切换棋盘形态时只显示当前形态的存档区。“载入编辑/载入装配”载入当前结构；“启用”覆盖当前结构并设为重开起点，但不改变当前棋局。</li>
           </ul>
         </section>
         <section class="card history-card">
@@ -176,6 +195,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=board-layer-exchange-3"></script>
+  <script type="module" src="app.js?v=new-flat-layout-1"></script>
 </body>
 </html>

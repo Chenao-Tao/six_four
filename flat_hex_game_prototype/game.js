@@ -80,6 +80,76 @@ export const BOARD_PANEL_ROTATIONS = {
   back: [0, 0, 0, 0, 0, 0]
 };
 
+export const PORTAL_PAIRS = [
+  {
+    id: '1A5-4B5',
+    color: '#ffbe55',
+    endpoints: [
+      { faceLabel: '1A', pointNumber: 5 },
+      { faceLabel: '4B', pointNumber: 5 }
+    ]
+  },
+  {
+    id: '3A5-6B5',
+    color: '#58d9ff',
+    endpoints: [
+      { faceLabel: '3A', pointNumber: 5 },
+      { faceLabel: '6B', pointNumber: 5 }
+    ]
+  }
+];
+
+export function clonePortalPairs(portalPairs = PORTAL_PAIRS) {
+  return portalPairs.map(portal => ({
+    id: portal.id,
+    color: portal.color,
+    endpoints: portal.endpoints.map(endpoint => ({ ...endpoint }))
+  }));
+}
+
+export function normalizePortalPairs(portalPairs, faceLabels = BOARD_FACE_LABELS) {
+  const source = portalPairs === undefined ? PORTAL_PAIRS : portalPairs;
+  if (!Array.isArray(source)) return { error: '传送阵数据必须是数组' };
+  const validFaceLabels = new Set([...faceLabels.front, ...faceLabels.back]);
+  const usedEndpoints = new Set();
+  const normalized = [];
+  for (const [pairIndex, portal] of source.entries()) {
+    if (!Array.isArray(portal?.endpoints) || portal.endpoints.length !== 2) {
+      return { error: `第 ${pairIndex + 1} 对传送阵必须包含两个端点` };
+    }
+    if (typeof portal.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(portal.color)) {
+      return { error: `第 ${pairIndex + 1} 对传送阵颜色无效` };
+    }
+    const endpoints = [];
+    for (const endpoint of portal.endpoints) {
+      if (!validFaceLabels.has(endpoint?.faceLabel) ||
+          !Number.isInteger(endpoint?.pointNumber) ||
+          endpoint.pointNumber < 1 || endpoint.pointNumber > 15) {
+        return { error: `第 ${pairIndex + 1} 对传送阵端点无效` };
+      }
+      const endpointKey = `${endpoint.faceLabel}${endpoint.pointNumber}`;
+      if (usedEndpoints.has(endpointKey)) {
+        return { error: `端点 ${endpointKey} 只能属于一对传送阵` };
+      }
+      usedEndpoints.add(endpointKey);
+      endpoints.push({
+        faceLabel: endpoint.faceLabel,
+        pointNumber: endpoint.pointNumber
+      });
+    }
+    const generatedId = endpoints
+      .map(endpoint => `${endpoint.faceLabel}${endpoint.pointNumber}`)
+      .sort()
+      .join('-');
+    normalized.push({
+      id: typeof portal.id === 'string' && portal.id.trim() ? portal.id.trim() : generatedId,
+      color: portal.color.toLowerCase(),
+      endpoints
+    });
+  }
+  return { portalPairs: normalized };
+}
+
 function cloneFaceLabels(faceLabels = BOARD_FACE_LABELS) {
   return {
     front: [...faceLabels.front],
@@ -307,7 +377,11 @@ function physicalBackPanelValues(values, transform = value => value) {
   return VERTICAL_MIRROR_PANEL_INDICES.map(sourceIndex => transform(values[sourceIndex]));
 }
 
-function exchangeFlatBoardLayers(state, nextCurrentPieces) {
+function exchangeFlatBoardLayers(
+  state,
+  nextCurrentPieces,
+  nextOppositePieces = null
+) {
   const currentSide = state.boardSide;
   const oppositeSide = currentSide === 'back' ? 'front' : 'back';
   const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
@@ -316,7 +390,9 @@ function exchangeFlatBoardLayers(state, nextCurrentPieces) {
   return {
     boardStates: {
       ...state.boardStates,
-      [currentSide]: physicalBackPieces(state.boardStates[oppositeSide]),
+      [currentSide]: physicalBackPieces(
+        nextOppositePieces ?? state.boardStates[oppositeSide]
+      ),
       [oppositeSide]: physicalBackPieces(nextCurrentPieces)
     },
     boardFaceLabels: {
@@ -408,6 +484,39 @@ function rotatePointOnPanel(point, panelIndex, clockwise = true) {
     q: Math.round(nextFirst * firstCorner.q + nextSecond * secondCorner.q),
     r: Math.round(nextFirst * firstCorner.r + nextSecond * secondCorner.r)
   };
+}
+
+export function panelPointForNumber(panelIndex, pointNumber, rotation = 0) {
+  if (!validatePanelIndex(panelIndex) || !Number.isInteger(pointNumber) ||
+      pointNumber < 1 || pointNumber > 15 || ![0, 120, 240].includes(rotation)) {
+    return null;
+  }
+  let row = 0;
+  let firstNumberInRow = 1;
+  while (pointNumber >= firstNumberInRow + row + 1) {
+    firstNumberInRow += row + 1;
+    row += 1;
+  }
+  const column = pointNumber - firstNumberInRow;
+  let point = pointFromPanelCoordinates({
+    first: (row - column) / BOARD_RADIUS,
+    second: column / BOARD_RADIUS
+  }, panelIndex);
+  for (let turn = 0; turn < rotation / 120; turn += 1) {
+    point = rotatePointOnPanel(point, panelIndex, true);
+  }
+  return point;
+}
+
+export function panelPointNumber(panelIndex, position, rotation = 0) {
+  if (!validatePanelIndex(panelIndex) || !position || ![0, 120, 240].includes(rotation)) return null;
+  const targetKey = keyOf(position);
+  for (let pointNumber = 1; pointNumber <= 15; pointNumber += 1) {
+    if (keyOf(panelPointForNumber(panelIndex, pointNumber, rotation)) === targetKey) {
+      return pointNumber;
+    }
+  }
+  return null;
 }
 
 function rotatePiecesOnPanel(pieces, panelIndex, clockwise = true) {
@@ -621,6 +730,7 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
     boardStates,
     boardFaceLabels: cloneFaceLabels(),
     boardPanelRotations: clonePanelRotations(),
+    portalPairs: clonePortalPairs(),
     pieces: boardStates.front,
     ...extra
   };
@@ -632,7 +742,7 @@ export function positionSignature(state) {
       const positionKey = state.boardShape === 'solid'
         ? solidPointKey(item.position, piecePanelIndex(item))
         : keyOf(item.position);
-      return `${item.id}:${item.side}:${item.type}:${positionKey}`;
+      return `${item.id}:${item.side}:${item.type}:${item.portalTurns ?? 0}:${positionKey}`;
     })
     .join('|');
   const position = state.solidLayers
@@ -641,7 +751,12 @@ export function positionSignature(state) {
     ? `front[${serializePieces(state.boardStates.front)}]:back[${serializePieces(state.boardStates.back)}]`
     : serializePieces(state.pieces);
   const faceSides = state.solidFaceSides?.join('') ?? state.boardSide ?? 'single';
-  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${position}`;
+  const portals = (state.portalPairs ?? PORTAL_PAIRS)
+    .map(portal => `${portal.id}:${portal.endpoints
+      .map(endpoint => `${endpoint.faceLabel}${endpoint.pointNumber}`)
+      .join('>')}`)
+    .join('|');
+  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${portals}:${position}`;
 }
 
 function withInitialPositionHistory(state) {
@@ -699,7 +814,14 @@ function normalizeCustomFace(face, pieces, boardShape) {
   return { pieces: normalized, kingCounts };
 }
 
-function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKings, boardShape) {
+function normalizeCustomBoard(
+  boardStates,
+  faceLabels,
+  panelRotations,
+  requireKings,
+  boardShape,
+  portalPairs
+) {
   const migrated = migrateLegacyHorizontalMirrorLayout(boardStates, faceLabels, panelRotations);
   const front = normalizeCustomFace('front', migrated.boardStates?.front, boardShape);
   if (front.error) return { error: front.error };
@@ -717,10 +839,13 @@ function normalizeCustomBoard(boardStates, faceLabels, panelRotations, requireKi
   if (faceLabelsError) return { error: faceLabelsError };
   const rotationsError = validatePanelRotations(migrated.panelRotations);
   if (rotationsError) return { error: rotationsError };
+  const normalizedPortals = normalizePortalPairs(portalPairs, migrated.faceLabels);
+  if (normalizedPortals.error) return normalizedPortals;
   return {
     boardStates: { front: front.pieces, back: back.pieces },
     faceLabels: cloneFaceLabels(migrated.faceLabels),
-    panelRotations: clonePanelRotations(migrated.panelRotations)
+    panelRotations: clonePanelRotations(migrated.panelRotations),
+    portalPairs: normalizedPortals.portalPairs
   };
 }
 
@@ -728,17 +853,26 @@ export function createCustomLayout(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
-  boardShape = 'flat'
+  boardShape = 'flat',
+  portalPairs = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
-  return normalizeCustomBoard(boardStates, faceLabels, panelRotations, false, normalizedBoardShape);
+  return normalizeCustomBoard(
+    boardStates,
+    faceLabels,
+    panelRotations,
+    false,
+    normalizedBoardShape,
+    portalPairs
+  );
 }
 
 export function createCustomState(
   boardStates,
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
-  boardShape = 'flat'
+  boardShape = 'flat',
+  portalPairs = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
   const layout = normalizeCustomBoard(
@@ -746,7 +880,8 @@ export function createCustomState(
     faceLabels,
     panelRotations,
     true,
-    normalizedBoardShape
+    normalizedBoardShape,
+    portalPairs
   );
   if (layout.error) return { error: layout.error };
   const solidExtra = normalizedBoardShape === 'solid'
@@ -766,6 +901,7 @@ export function createCustomState(
         boardShape: normalizedBoardShape,
         boardFaceLabels: layout.faceLabels,
         boardPanelRotations: layout.panelRotations,
+        portalPairs: layout.portalPairs,
         history: ['自定义棋盘已保存：白方先行'],
         ...solidExtra
       }
@@ -798,6 +934,130 @@ function boardPointKey(state, position, panelIndex) {
   return state.boardShape === 'solid'
     ? solidPointKey(position, panelIndex)
     : keyOf(position);
+}
+
+function layerPieces(state, layer) {
+  if (state.solidLayers) {
+    return layer === 'active' ? state.solidLayers.outer : state.solidLayers.inner;
+  }
+  if (state.boardStates) {
+    const activeSide = state.boardSide ?? 'front';
+    const side = layer === 'active'
+      ? activeSide
+      : activeSide === 'front' ? 'back' : 'front';
+    return state.boardStates[side] ?? [];
+  }
+  return layer === 'active' ? state.pieces : [];
+}
+
+function physicalFaceLocation(state, faceLabel, pointNumber, layer) {
+  const faceLabels = state.boardFaceLabels ?? BOARD_FACE_LABELS;
+  const rotations = state.boardPanelRotations ?? BOARD_PANEL_ROTATIONS;
+  if (!state.solidLayers) {
+    const activeSide = state.boardSide ?? 'front';
+    const side = layer === 'active'
+      ? activeSide
+      : activeSide === 'front' ? 'back' : 'front';
+    const panelIndex = faceLabels[side].indexOf(faceLabel);
+    if (!validatePanelIndex(panelIndex)) return null;
+    const position = panelPointForNumber(
+      panelIndex,
+      pointNumber,
+      rotations[side][panelIndex]
+    );
+    return position ? {
+      faceLabel,
+      pointNumber,
+      layer,
+      position,
+      panelIndex,
+      pointKey: boardPointKey(state, position, panelIndex)
+    } : null;
+  }
+
+  const faceSides = state.solidFaceSides ?? Array(6).fill('front');
+  for (let slot = 0; slot < 6; slot += 1) {
+    const outerSide = faceSides[slot];
+    const wantedSide = layer === 'active'
+      ? outerSide
+      : outerSide === 'front' ? 'back' : 'front';
+    const sourceIndex = wantedSide === 'front' ? slot : verticalMirrorPanelIndex(slot);
+    if (faceLabels[wantedSide][sourceIndex] !== faceLabel) continue;
+    const sourcePoint = panelPointForNumber(
+      sourceIndex,
+      pointNumber,
+      rotations[wantedSide][sourceIndex]
+    );
+    const position = wantedSide === 'front'
+      ? sourcePoint
+      : pointFromPanelCoordinates(panelCoordinates(sourcePoint, sourceIndex), slot, true);
+    return {
+      faceLabel,
+      pointNumber,
+      layer,
+      position,
+      panelIndex: slot,
+      pointKey: boardPointKey(state, position, slot)
+    };
+  }
+  return null;
+}
+
+export function portalEndpointLocations(state) {
+  if (!state.boardStates && !state.solidLayers) return [];
+  const locations = [];
+  for (const portal of state.portalPairs ?? PORTAL_PAIRS) {
+    for (const [endpointIndex, endpoint] of portal.endpoints.entries()) {
+      for (const layer of ['active', 'dormant']) {
+        const location = physicalFaceLocation(
+          state,
+          endpoint.faceLabel,
+          endpoint.pointNumber,
+          layer
+        );
+        if (location) locations.push({
+          ...location,
+          portalId: portal.id,
+          portalColor: portal.color,
+          endpointIndex
+        });
+      }
+    }
+  }
+  return locations;
+}
+
+function portalTransitions(state, layer, pointKey) {
+  const locations = portalEndpointLocations(state);
+  return locations.flatMap(source => {
+    if (source.layer !== layer || source.pointKey !== pointKey) return [];
+    const targetIndex = source.endpointIndex === 0 ? 1 : 0;
+    const target = locations.find(candidate =>
+      candidate.portalId === source.portalId && candidate.endpointIndex === targetIndex);
+    return target ? [{ source, target }] : [];
+  });
+}
+
+function layerOccupants(state, layer) {
+  return new Map(layerPieces(state, layer).map(item => [
+    boardPointKey(state, item.position, piecePanelIndex(item)),
+    item
+  ]));
+}
+
+function stepTransitions(state, position, panelIndex, movement = 'step') {
+  if (state.boardShape === 'solid') {
+    const pointKey = boardPointKey(state, position, panelIndex);
+    return (solidSurfaceGraph().get(pointKey)?.[movement] ?? []).map(item => ({ ...item }));
+  }
+  const directions = movement === 'bishop' ? BISHOP_DIRECTIONS : DIRECTIONS;
+  return directions.map(direction => add(position, direction))
+    .filter(isOnBoard)
+    .map(target => ({
+      position: target,
+      panelIndex: movePanelIndex({ position, panelIndex }, target),
+      pointKey: boardPointKey(state, target, movePanelIndex({ position, panelIndex }, target))
+    }));
 }
 
 function movePanelIndex(pieceToMove, target, preferredPanelIndex = null) {
@@ -992,6 +1252,193 @@ function solidQueenMoves(state, pieceToMove, occupied) {
   return moves;
 }
 
+function addPortalMove(moves, target, route, captured = null) {
+  const routeKey = route.pathSteps.map(step =>
+    `${step.layer}:${step.panelIndex}:${keyOf(step.position)}`).join('>');
+  const mapKey = `portal:${route.portalId}:${routeKey}`;
+  if (moves.has(mapKey)) return;
+  moves.set(mapKey, {
+    target: { ...target.position },
+    panelIndex: target.panelIndex,
+    pointKey: target.pointKey,
+    path: route.pathSteps.map(step => ({ ...step.position })),
+    pathSteps: route.pathSteps,
+    mapKey,
+    portalId: route.portalId,
+    portalColor: route.portalColor,
+    portalTransition: route.portalTransition
+      ? {
+          entry: {
+            ...route.portalTransition.entry,
+            position: { ...route.portalTransition.entry.position }
+          },
+          exit: {
+            ...route.portalTransition.exit,
+            position: { ...route.portalTransition.exit.position }
+          }
+        }
+      : null,
+    usesPortal: true,
+    targetLayer: target.layer,
+    captureLayer: target.layer,
+    captureId: captured?.id ?? null,
+    capturedType: captured?.type ?? null,
+    capturesKing: captured?.type === 'king'
+  });
+}
+
+function chargedQueenMoves(state, pieceToMove) {
+  const moves = new Map();
+  const startPanel = piecePanelIndex(pieceToMove);
+  const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
+  const occupantsByLayer = {
+    active: layerOccupants(state, 'active'),
+    dormant: layerOccupants(state, 'dormant')
+  };
+  const queue = [{
+    layer: 'active',
+    position: pieceToMove.position,
+    panelIndex: startPanel,
+    pointKey: startPointKey,
+    usedPortal: false,
+    portalId: null,
+    portalColor: null,
+    portalTransition: null,
+    pathSteps: [{
+      layer: 'active',
+      position: { ...pieceToMove.position },
+      panelIndex: startPanel,
+      pointKey: startPointKey
+    }],
+    visited: new Set([`active:${startPointKey}`])
+  }];
+
+  while (queue.length) {
+    const current = queue.shift();
+    const depth = current.pathSteps.length - 1;
+    if (depth >= 3) continue;
+    const nextDepth = depth + 1;
+    const consider = (target, portal = null) => {
+      const visitKey = `${target.layer}:${target.pointKey}`;
+      if (current.visited.has(visitKey)) return;
+      const occupant = occupantsByLayer[target.layer].get(target.pointKey);
+      const usedPortal = current.usedPortal || Boolean(portal);
+      const portalId = portal?.portalId ?? current.portalId;
+      const portalColor = portal?.portalColor ?? current.portalColor;
+      const portalTransition = portal
+        ? {
+            entry: {
+              layer: current.layer,
+              position: { ...current.position },
+              panelIndex: current.panelIndex,
+              pointKey: current.pointKey
+            },
+            exit: {
+              layer: target.layer,
+              position: { ...target.position },
+              panelIndex: target.panelIndex,
+              pointKey: target.pointKey
+            }
+          }
+        : current.portalTransition;
+      const pathSteps = [...current.pathSteps, {
+        layer: target.layer,
+        position: { ...target.position },
+        panelIndex: target.panelIndex,
+        pointKey: target.pointKey,
+        ...(portal ? { portalEntry: true } : {})
+      }];
+      if (occupant) {
+        if (nextDepth === 3 && usedPortal &&
+            occupant.side !== pieceToMove.side &&
+            canCapture(pieceToMove.type, occupant.type)) {
+          addPortalMove(moves, target, {
+            portalId,
+            portalColor,
+            portalTransition,
+            pathSteps
+          }, occupant);
+        } else if (nextDepth === 3 && !usedPortal &&
+            occupant.side !== pieceToMove.side &&
+            canCapture(pieceToMove.type, occupant.type)) {
+          addMove(
+            state,
+            moves,
+            pieceToMove,
+            target.position,
+            pathSteps.map(step => ({ ...step.position })),
+            occupantsByLayer.active,
+            target.panelIndex,
+            target.pointKey
+          );
+        }
+        return;
+      }
+      if (nextDepth === 3) {
+        if (usedPortal) {
+          addPortalMove(moves, target, {
+            portalId,
+            portalColor,
+            portalTransition,
+            pathSteps
+          });
+        } else if (!portalTransitions(state, target.layer, target.pointKey).length) {
+          addMove(
+            state,
+            moves,
+            pieceToMove,
+            target.position,
+            pathSteps.map(step => ({ ...step.position })),
+            occupantsByLayer.active,
+            target.panelIndex,
+            target.pointKey
+          );
+        }
+        return;
+      }
+      queue.push({
+        ...target,
+        usedPortal,
+        portalId,
+        portalColor,
+        portalTransition,
+        pathSteps,
+        visited: new Set([...current.visited, visitKey])
+      });
+    };
+
+    const portals = current.usedPortal
+      ? []
+      : portalTransitions(state, current.layer, current.pointKey);
+    if (portals.length) {
+      for (const transition of portals) {
+        consider(transition.target, {
+          portalId: transition.source.portalId,
+          portalColor: transition.source.portalColor
+        });
+      }
+      continue;
+    }
+    for (const transition of stepTransitions(
+      state,
+      current.position,
+      current.panelIndex,
+      'step'
+    )) {
+      consider({ ...transition, layer: current.layer });
+    }
+  }
+  return moves;
+}
+
+function addPortalMoves(state, pieceToMove, moves) {
+  if (!state.boardStates && !state.solidLayers) return moves;
+  if (pieceToMove.type === 'queen' && pieceToMove.portalTurns > 0) {
+    return chargedQueenMoves(state, pieceToMove);
+  }
+  return moves;
+}
+
 function pointsEqual(left, right) {
   return left.q === right.q && left.r === right.r;
 }
@@ -1076,14 +1523,21 @@ export function legalMoves(state, pieceId) {
   const pieceToMove = state.pieces.find(item => item.id === pieceId);
   if (!pieceToMove || pieceToMove.side !== state.turn) return new Map();
   const occupied = occupants(state);
-  if (pieceToMove.type === 'pawn') return pawnMoves(state, pieceToMove, occupied);
-  if (pieceToMove.type === 'bishop') return bishopMoves(state, pieceToMove, occupied);
-  if (pieceToMove.type === 'queen') return queenMoves(state, pieceToMove, occupied);
+  if (pieceToMove.type === 'pawn') {
+    return addPortalMoves(state, pieceToMove, pawnMoves(state, pieceToMove, occupied));
+  }
+  if (pieceToMove.type === 'bishop') {
+    return addPortalMoves(state, pieceToMove, bishopMoves(state, pieceToMove, occupied));
+  }
+  if (pieceToMove.type === 'queen') {
+    return addPortalMoves(state, pieceToMove, queenMoves(state, pieceToMove, occupied));
+  }
   return kingMoves(state, pieceToMove, occupied);
 }
 
 export function captureMoveForClickedPiece(state, attackerId, defenderId) {
-  const defender = state.pieces.find(item => item.id === defenderId);
+  const defender = [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+    .find(item => item.id === defenderId);
   if (!defender) return null;
   return [...legalMoves(state, attackerId).values()]
     .find(move => move.captureId === defenderId) ?? null;
@@ -1092,7 +1546,8 @@ export function captureMoveForClickedPiece(state, attackerId, defenderId) {
 export function promotionTypeForMove(state, pieceId, move) {
   if (!move?.captureId) return null;
   const movingPiece = state.pieces.find(item => item.id === pieceId);
-  const captured = state.pieces.find(item => item.id === move.captureId);
+  const captured = [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+    .find(item => item.id === move.captureId);
   if (captured?.type !== 'pawn') return null;
   if (movingPiece?.type === 'pawn') return 'bishop';
   if (movingPiece?.type === 'bishop') return 'queen';
@@ -1102,12 +1557,13 @@ export function promotionTypeForMove(state, pieceId, move) {
 export function capturePositionEffect(attackerType, defenderType) {
   if (attackerType === 'queen' && defenderType === 'bishop') return 'swap';
   if (attackerType === 'pawn' && ['pawn', 'king'].includes(defenderType)) return 'occupy';
+  if (attackerType === 'bishop' && defenderType === 'pawn') return 'occupy';
   return 'hold';
 }
 
-function exchangeSolidLayers(state, nextOuterPieces) {
+function exchangeSolidLayers(nextOuterPieces, nextInnerPieces) {
   return {
-    outer: (state.solidLayers?.inner ?? []).map(item => ({
+    outer: nextInnerPieces.map(item => ({
       ...item,
       position: { ...item.position }
     })),
@@ -1119,6 +1575,7 @@ function exchangeSolidLayers(state, nextOuterPieces) {
 }
 
 function moveForTarget(moves, target) {
+  if (target?.mapKey) return moves.get(target.mapKey) ?? null;
   if (validatePanelIndex(target?.panelIndex)) {
     const exact = [...moves.values()].find(move =>
       move.panelIndex === target.panelIndex && pointsEqual(move.target, target));
@@ -1133,7 +1590,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   if (!move) return { state, error: '非法移动' };
   const movingPiece = state.pieces.find(item => item.id === pieceId);
   const captured = move.captureId
-    ? state.pieces.find(item => item.id === move.captureId)
+    ? [...layerPieces(state, 'active'), ...layerPieces(state, 'dormant')]
+        .find(item => item.id === move.captureId)
     : null;
   const promotionType = promotionTypeForMove(state, pieceId, move);
   const promotedType = promote && promotionType ? promotionType : movingPiece.type;
@@ -1146,34 +1604,52 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const positionEffect = captured
     ? capturePositionEffect(movingPiece.type, captured.type)
     : 'move';
-  const nextPieces = state.pieces.flatMap(item => {
-    if (item.id === pieceId) {
-      return [{
-        ...item,
-        type: promotedType,
-        position: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? { ...move.target }
-          : { ...item.position },
-        panelIndex: ['move', 'occupy', 'swap'].includes(positionEffect)
-          ? move.panelIndex ?? panelIndexForPoint(target)
-          : piecePanelIndex(item)
-      }];
-    }
-    if (item.id !== move.captureId) return [item];
-    if (!capturedType) return [];
-    return [{
-      ...item,
+  const targetLayer = move.targetLayer ?? 'active';
+  const captureLayer = move.captureLayer ?? 'active';
+  let nextActivePieces = layerPieces(state, 'active').filter(item => item.id !== pieceId);
+  let nextDormantPieces = layerPieces(state, 'dormant').filter(item => item.id !== pieceId);
+  const removeCaptured = pieces => pieces.filter(item => item.id !== move.captureId);
+  if (captured) {
+    if (captureLayer === 'active') nextActivePieces = removeCaptured(nextActivePieces);
+    else nextDormantPieces = removeCaptured(nextDormantPieces);
+  }
+  const attackerMoves = ['move', 'occupy', 'swap'].includes(positionEffect);
+  const nextMovingPiece = {
+    ...movingPiece,
+    type: promotedType,
+    position: attackerMoves ? { ...move.target } : { ...movingPiece.position },
+    panelIndex: attackerMoves
+      ? move.panelIndex ?? panelIndexForPoint(move.target)
+      : piecePanelIndex(movingPiece)
+  };
+  if (movingPiece.type === 'queen') {
+    const nextPortalTurns = captured?.type === 'bishop'
+      ? 3
+      : Math.max(0, (movingPiece.portalTurns ?? 0) - 1);
+    if (nextPortalTurns > 0) nextMovingPiece.portalTurns = nextPortalTurns;
+    else delete nextMovingPiece.portalTurns;
+  }
+  if (attackerMoves && targetLayer === 'dormant') nextDormantPieces.push(nextMovingPiece);
+  else nextActivePieces.push(nextMovingPiece);
+  if (capturedType) {
+    const nextCapturedPiece = {
+      ...captured,
       type: capturedType,
       position: positionEffect === 'swap'
         ? { ...movingPiece.position }
-        : { ...item.position },
+        : { ...captured.position },
       panelIndex: positionEffect === 'swap'
-        ? state.boardShape === 'solid'
-          ? piecePanelIndex(movingPiece)
-          : panelIndexForPoint(movingPiece.position)
-        : piecePanelIndex(item)
-    }];
-  });
+        ? piecePanelIndex(movingPiece)
+        : piecePanelIndex(captured)
+    };
+    if (nextCapturedPiece.type !== 'queen') delete nextCapturedPiece.portalTurns;
+    if (positionEffect === 'swap' || captureLayer === 'active') {
+      nextActivePieces.push(nextCapturedPiece);
+    } else {
+      nextDormantPieces.push(nextCapturedPiece);
+    }
+  }
+  const nextPieces = nextActivePieces;
   const captureResult = captured
     ? capturedType
       ? positionEffect === 'swap'
@@ -1181,6 +1657,13 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
         : `，${PIECE_NAMES[captured.type]}在原位降级为${PIECE_NAMES[capturedType]}`
       : `，${PIECE_NAMES[captured.type]}移出棋盘`
     : '';
+  const portalAbilityResult = movingPiece.type === 'queen' && captured?.type === 'bishop'
+    ? '，后获得3回合传送能力'
+    : movingPiece.type === 'queen' && movingPiece.portalTurns > 0
+      ? nextMovingPiece.portalTurns
+        ? `，传送能力剩余${nextMovingPiece.portalTurns}回合`
+        : '，传送能力已结束'
+      : '';
   const description = `${movingPiece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[movingPiece.type]} ` +
     (captured
       ? `在 ${keyOf(movingPiece.position)} 攻击 ${keyOf(target)}，吃${PIECE_NAMES[captured.type]}`
@@ -1188,7 +1671,8 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     captureResult +
     (capturedIsEliminated && positionEffect === 'occupy' ? '，攻击者占据目标点' : '') +
     (capturedIsEliminated && positionEffect === 'hold' ? '，攻击者留在原位' : '') +
-    (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '');
+    (promotedType !== movingPiece.type ? `，攻击者升级为${PIECE_NAMES[promotedType]}` : '') +
+    portalAbilityResult;
   const nextTurn = state.turn === 'white' ? 'black' : 'white';
   const nextWinner = move.capturesKing ? movingPiece.side : null;
   const shouldExchangeLayers = Boolean(captured && (state.boardStates || state.solidLayers));
@@ -1198,11 +1682,11 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
-      ? exchangeSolidLayers(state, nextPieces)
-      : { ...state.solidLayers, outer: nextPieces }
+      ? exchangeSolidLayers(nextActivePieces, nextDormantPieces)
+      : { ...state.solidLayers, outer: nextActivePieces, inner: nextDormantPieces }
     : undefined;
   const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers
-    ? exchangeFlatBoardLayers(state, nextPieces)
+    ? exchangeFlatBoardLayers(state, nextActivePieces, nextDormantPieces)
     : null;
   const boardStates = state.boardStates
     ? shouldExchangeLayers
@@ -1212,7 +1696,16 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             back: physicalBackPieces(solidLayers.inner)
           }
         : flatLayerExchange.boardStates
-      : { ...state.boardStates, [state.boardSide]: nextPieces }
+      : solidLayers
+        ? {
+            front: solidLayers.outer,
+            back: physicalBackPieces(solidLayers.inner)
+          }
+        : {
+            ...state.boardStates,
+            [state.boardSide]: nextActivePieces,
+            [state.boardSide === 'front' ? 'back' : 'front']: nextDormantPieces
+          }
     : undefined;
   const layerExchangeResult = shouldExchangeLayers
     ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
@@ -1278,34 +1771,109 @@ function actionVariants(state) {
   });
 }
 
-const PIECE_VALUES = { king: 10000, queen: 12, bishop: 4, pawn: 1 };
-function evaluateState(state, perspective) {
-  if (state.winner) return state.winner === perspective ? 1000000 : -1000000;
-  return state.pieces.reduce((score, item) => {
-    const value = PIECE_VALUES[item.type];
+const MATE_SCORE = 1000000;
+const PIECE_VALUES = { queen: 1200, bishop: 400, pawn: 100 };
+const DORMANT_LAYER_WEIGHT = 0.6;
+const MOBILITY_WEIGHT = 2;
+const MAX_MOBILITY_SCORE = 80;
+
+function materialScore(pieces, perspective) {
+  return pieces.reduce((score, item) => {
+    const value = PIECE_VALUES[item.type] ?? 0;
     return score + (item.side === perspective ? value : -value);
-  }, 0) * 100;
+  }, 0);
+}
+
+function portalAbilityScore(pieces, perspective) {
+  return pieces.reduce((score, item) => {
+    if (item.type !== 'queen' || !Number.isFinite(item.portalTurns)) return score;
+    const value = Math.min(3, Math.max(0, item.portalTurns)) * 6;
+    return score + (item.side === perspective ? value : -value);
+  }, 0);
+}
+
+function stateLayers(state) {
+  if (state.solidLayers) {
+    return { active: state.solidLayers.outer, dormant: state.solidLayers.inner };
+  }
+  if (state.boardStates) {
+    const activeSide = state.boardSide ?? 'front';
+    const dormantSide = activeSide === 'front' ? 'back' : 'front';
+    return {
+      active: state.boardStates[activeSide] ?? state.pieces,
+      dormant: state.boardStates[dormantSide] ?? []
+    };
+  }
+  return { active: state.pieces, dormant: [] };
+}
+
+function mobilityForSide(state, side) {
+  if (state.winner) return 0;
+  const sideState = state.turn === side ? state : { ...state, turn: side };
+  let mobility = 0;
+  for (const item of state.pieces) {
+    if (item.side !== side) continue;
+    mobility += legalMoves(sideState, item.id).size;
+    if (mobility >= MAX_MOBILITY_SCORE / MOBILITY_WEIGHT) {
+      return MAX_MOBILITY_SCORE / MOBILITY_WEIGHT;
+    }
+  }
+  return mobility;
+}
+
+export function evaluateGameState(state, perspective, ply = 0) {
+  if (state.winner) {
+    return state.winner === perspective ? MATE_SCORE - ply : -MATE_SCORE + ply;
+  }
+  const { active, dormant } = stateLayers(state);
+  const activeMaterial = materialScore(active, perspective);
+  const dormantMaterial = materialScore(dormant, perspective) * DORMANT_LAYER_WEIGHT;
+  const abilityValue = portalAbilityScore([...active, ...dormant], perspective);
+  const opponent = perspective === 'white' ? 'black' : 'white';
+  const mobilityDifference = mobilityForSide(state, perspective) - mobilityForSide(state, opponent);
+  const mobilityScore = Math.max(
+    -MAX_MOBILITY_SCORE,
+    Math.min(MAX_MOBILITY_SCORE, mobilityDifference * MOBILITY_WEIGHT)
+  );
+  return Math.round(activeMaterial + dormantMaterial + abilityValue + mobilityScore);
 }
 
 function actionOrder(action) {
+  const crossLayerPortal = action.move.usesPortal &&
+    action.move.portalTransition?.entry.layer !== action.move.portalTransition?.exit.layer;
   return (action.move.capturesKing ? 100000 : 0) +
-    (action.move.captureId ? 1000 : 0) +
-    (action.promote ? 100 : 0);
+    (action.move.captureId ? 10000 : 0) +
+    (action.promote ? 1000 : 0) +
+    (crossLayerPortal ? 200 : 0) +
+    (action.move.usesPortal ? 100 : 0);
 }
 
 function actionTarget(action) {
   return {
     ...action.move.target,
-    ...(validatePanelIndex(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {})
+    ...(validatePanelIndex(action.move.panelIndex) ? { panelIndex: action.move.panelIndex } : {}),
+    ...(action.move.mapKey ? { mapKey: action.move.mapKey } : {})
   };
+}
+
+function actionKey(action) {
+  const panel = validatePanelIndex(action.move.panelIndex) ? action.move.panelIndex : '-';
+  const route = action.move.pathSteps?.map(step =>
+    `${step.layer}:${step.panelIndex}:${step.pointKey ?? keyOf(step.position)}`).join('>') ??
+    action.move.path?.map(keyOf).join('>') ?? '';
+  const transition = action.move.portalTransition
+    ? `${action.move.portalTransition.entry.layer}:${action.move.portalTransition.entry.pointKey}>` +
+      `${action.move.portalTransition.exit.layer}:${action.move.portalTransition.exit.pointKey}`
+    : '-';
+  return `${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${transition}:${route}:${action.promote}`;
 }
 
 function orderedActions(state) {
   return actionVariants(state).sort((left, right) => {
     const priority = actionOrder(right) - actionOrder(left);
     if (priority) return priority;
-    const leftKey = `${left.pieceId}:${keyOf(left.move.target)}:${left.promote}`;
-    const rightKey = `${right.pieceId}:${keyOf(right.move.target)}:${right.promote}`;
+    const leftKey = `${left.pieceId}:${left.move.mapKey ?? keyOf(left.move.target)}:${left.promote}`;
+    const rightKey = `${right.pieceId}:${right.move.mapKey ?? keyOf(right.move.target)}:${right.promote}`;
     return leftKey.localeCompare(rightKey);
   });
 }
@@ -1317,7 +1885,7 @@ function priorRepetitionCount(state) {
 }
 
 function repetitionAwareActions(state) {
-  const candidates = orderedActions(state).map(action => {
+  return orderedActions(state).map(action => {
     const result = applyMove(
       state,
       action.pieceId,
@@ -1326,21 +1894,125 @@ function repetitionAwareActions(state) {
       false
     );
     return { action, result, repetitionCount: priorRepetitionCount(result.state) };
-  });
-  if (!candidates.length) return candidates;
-  const lowestRepetition = Math.min(...candidates.map(item => item.repetitionCount));
-  return candidates.filter(item => item.repetitionCount === lowestRepetition);
+  }).sort((left, right) => left.repetitionCount - right.repetitionCount);
 }
 
-function minimax(state, depth, alpha, beta, perspective, metrics) {
-  metrics.searchedNodes += 1;
-  if (depth === 0 || state.winner) return evaluateState(state, perspective);
-  const candidates = repetitionAwareActions(state);
-  if (!candidates.length) return evaluateState(state, perspective);
+class SearchLimitReached extends Error {}
+
+function monotonicNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function createSearchContext(options = {}) {
+  const now = options.now ?? monotonicNow;
+  const startedAt = now();
+  const timeLimitMs = Number.isFinite(options.timeLimitMs)
+    ? Math.max(0, options.timeLimitMs)
+    : Infinity;
+  return {
+    now,
+    startedAt,
+    deadline: startedAt + timeLimitMs,
+    maxNodes: Number.isFinite(options.maxNodes) ? Math.max(1, options.maxNodes) : Infinity,
+    quiescenceDepth: Math.max(0, Math.floor(options.quiescenceDepth ?? 0)),
+    tableLimit: Math.max(0, Math.floor(options.transpositionTableSize ?? 50000)),
+    transpositionTable: new Map(),
+    evaluationCache: new Map(),
+    totalNodes: 0,
+    metrics: null
+  };
+}
+
+function checkSearchLimit(context) {
+  context.totalNodes += 1;
+  if (context.totalNodes > context.maxNodes) throw new SearchLimitReached();
+  if (context.totalNodes % 128 === 0 && context.now() >= context.deadline) {
+    throw new SearchLimitReached();
+  }
+}
+
+function cachedEvaluation(state, perspective, ply, context) {
+  const cacheKey = `${positionSignature(state)}:${perspective}:${ply}`;
+  const cached = context.evaluationCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const score = evaluateGameState(state, perspective, ply);
+  if (context.evaluationCache.size < context.tableLimit) {
+    context.evaluationCache.set(cacheKey, score);
+  }
+  return score;
+}
+
+function quickEvaluation(state, perspective) {
+  if (state.winner) return state.winner === perspective ? MATE_SCORE : -MATE_SCORE;
+  const { active, dormant } = stateLayers(state);
+  return Math.round(
+    materialScore(active, perspective) +
+    materialScore(dormant, perspective) * DORMANT_LAYER_WEIGHT
+  );
+}
+
+function orderedCandidates(state, perspective, maximizing, preferredActionKey = null) {
+  return repetitionAwareActions(state).sort((left, right) => {
+    const leftKey = actionKey(left.action);
+    const rightKey = actionKey(right.action);
+    if (leftKey === preferredActionKey) return -1;
+    if (rightKey === preferredActionKey) return 1;
+    const tacticalPriority = actionOrder(right.action) - actionOrder(left.action);
+    if (tacticalPriority) return tacticalPriority;
+    const leftScore = quickEvaluation(left.result.state, perspective);
+    const rightScore = quickEvaluation(right.result.state, perspective);
+    const evaluationOrder = maximizing ? rightScore - leftScore : leftScore - rightScore;
+    if (evaluationOrder) return evaluationOrder;
+    if (left.repetitionCount !== right.repetitionCount) {
+      return left.repetitionCount - right.repetitionCount;
+    }
+    return leftKey.localeCompare(rightKey);
+  });
+}
+
+function tableKey(state, ply) {
+  return `${positionSignature(state)}:${ply}`;
+}
+
+function storeTableEntry(context, key, entry) {
+  if (!context.tableLimit) return;
+  if (!context.transpositionTable.has(key) &&
+      context.transpositionTable.size >= context.tableLimit) {
+    const oldestKey = context.transpositionTable.keys().next().value;
+    context.transpositionTable.delete(oldestKey);
+  }
+  context.transpositionTable.set(key, entry);
+}
+
+function quiescence(state, depth, alpha, beta, perspective, context, ply) {
+  checkSearchLimit(context);
+  context.metrics.quiescenceNodes += 1;
+  if (state.winner) return cachedEvaluation(state, perspective, ply, context);
   const maximizing = state.turn === perspective;
-  let bestScore = maximizing ? -Infinity : Infinity;
-  for (const { result } of candidates) {
-    const score = minimax(result.state, depth - 1, alpha, beta, perspective, metrics);
+  const standPat = cachedEvaluation(state, perspective, ply, context);
+  let bestScore = standPat;
+  if (maximizing) {
+    if (bestScore >= beta) return bestScore;
+    alpha = Math.max(alpha, bestScore);
+  } else {
+    if (bestScore <= alpha) return bestScore;
+    beta = Math.min(beta, bestScore);
+  }
+  if (depth === 0) return bestScore;
+  const tactical = orderedCandidates(state, perspective, maximizing)
+    .filter(({ action }) => action.move.captureId || action.promote ||
+      (action.move.usesPortal && action.move.targetLayer === 'dormant'))
+    .filter((candidate, index, candidates) => {
+      if (!candidate.action.move.usesPortal || candidate.action.move.captureId || candidate.action.promote) {
+        return true;
+      }
+      return candidates
+        .slice(0, index + 1)
+        .filter(item => item.action.move.usesPortal && !item.action.move.captureId && !item.action.promote)
+        .length <= 6;
+    });
+  for (const { result } of tactical) {
+    const score = quiescence(result.state, depth - 1, alpha, beta, perspective, context, ply + 1);
     if (maximizing) {
       bestScore = Math.max(bestScore, score);
       alpha = Math.max(alpha, bestScore);
@@ -1349,52 +2021,187 @@ function minimax(state, depth, alpha, beta, perspective, metrics) {
       beta = Math.min(beta, bestScore);
     }
     if (beta <= alpha) {
-      metrics.prunedBranches += 1;
+      context.metrics.prunedBranches += 1;
       break;
     }
   }
   return bestScore;
 }
 
-function searchAtDepth(state, searchDepth) {
-  const candidates = repetitionAwareActions(state);
-  if (!candidates.length) return null;
+function minimax(state, depth, alpha, beta, perspective, context, ply = 0) {
+  checkSearchLimit(context);
+  context.metrics.searchedNodes += 1;
+  if (state.winner) return cachedEvaluation(state, perspective, ply, context);
+  if (depth === 0) {
+    return context.quiescenceDepth
+      ? quiescence(state, context.quiescenceDepth, alpha, beta, perspective, context, ply)
+      : cachedEvaluation(state, perspective, ply, context);
+  }
+  const key = tableKey(state, ply);
+  const originalAlpha = alpha;
+  const originalBeta = beta;
+  const tableEntry = context.transpositionTable.get(key);
+  if (tableEntry) {
+    context.metrics.cacheHits += 1;
+    if (tableEntry.depth >= depth) {
+      if (tableEntry.bound === 'exact') return tableEntry.score;
+      if (tableEntry.bound === 'lower') alpha = Math.max(alpha, tableEntry.score);
+      if (tableEntry.bound === 'upper') beta = Math.min(beta, tableEntry.score);
+      if (alpha >= beta) return tableEntry.score;
+    }
+  }
+  const maximizing = state.turn === perspective;
+  const candidates = orderedCandidates(state, perspective, maximizing, tableEntry?.bestActionKey);
+  if (!candidates.length) return cachedEvaluation(state, perspective, ply, context);
+  let bestScore = maximizing ? -Infinity : Infinity;
+  let bestActionKey = null;
+  for (const { action, result } of candidates) {
+    const score = minimax(result.state, depth - 1, alpha, beta, perspective, context, ply + 1);
+    if (maximizing) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestActionKey = actionKey(action);
+      }
+      alpha = Math.max(alpha, bestScore);
+    } else {
+      if (score < bestScore) {
+        bestScore = score;
+        bestActionKey = actionKey(action);
+      }
+      beta = Math.min(beta, bestScore);
+    }
+    if (beta <= alpha) {
+      context.metrics.prunedBranches += 1;
+      break;
+    }
+  }
+  const bound = bestScore <= originalAlpha
+    ? 'upper'
+    : bestScore >= originalBeta
+      ? 'lower'
+      : 'exact';
+  storeTableEntry(context, key, { depth, score: bestScore, bound, bestActionKey });
+  return bestScore;
+}
+
+function principalVariation(state, rootAction, searchDepth, context) {
+  const variation = [];
+  let currentState = state;
+  let currentAction = rootAction;
+  for (let ply = 0; currentAction && ply < searchDepth; ply += 1) {
+    variation.push({
+      pieceId: currentAction.pieceId,
+      move: currentAction.move,
+      promote: currentAction.promote
+    });
+    const applied = applyMove(
+      currentState,
+      currentAction.pieceId,
+      actionTarget(currentAction),
+      currentAction.promote,
+      false
+    );
+    currentState = applied.state;
+    const entry = context.transpositionTable.get(tableKey(currentState, ply + 1));
+    if (!entry?.bestActionKey) break;
+    currentAction = actionVariants(currentState).find(action => actionKey(action) === entry.bestActionKey);
+  }
+  return variation;
+}
+
+function searchAtDepth(state, searchDepth, context, preferredActionKey = null) {
   const perspective = state.turn;
-  const metrics = { searchedNodes: 0, prunedBranches: 0 };
+  const candidates = orderedCandidates(state, perspective, true, preferredActionKey);
+  if (!candidates.length) return null;
+  context.metrics = {
+    searchedNodes: 0,
+    quiescenceNodes: 0,
+    prunedBranches: 0,
+    cacheHits: 0
+  };
   let bestAction = null;
   let bestScore = -Infinity;
   let bestRepetitionCount = Infinity;
+  let alpha = -Infinity;
   for (const { action, result, repetitionCount } of candidates) {
     const score = minimax(
       result.state,
       Math.max(0, searchDepth - 1),
-      -Infinity,
+      alpha,
       Infinity,
       perspective,
-      metrics
+      context,
+      1
     );
-    if (score > bestScore) {
+    if (score > bestScore || (score === bestScore && repetitionCount < bestRepetitionCount)) {
       bestScore = score;
       bestAction = action;
       bestRepetitionCount = repetitionCount;
     }
+    alpha = Math.max(alpha, bestScore);
   }
+  const elapsedMs = Math.max(0, context.now() - context.startedAt);
   return {
     ...bestAction,
     score: bestScore,
     searchDepth,
     repetitionCount: bestRepetitionCount,
-    ...metrics
+    elapsedMs: Math.round(elapsedMs * 10) / 10,
+    principalVariation: principalVariation(state, bestAction, searchDepth, context),
+    ...context.metrics
   };
 }
 
 export function* stepwiseGameSearch(state, maxDepth = 3) {
   const normalizedDepth = Math.max(1, Math.floor(maxDepth));
   for (let searchDepth = 1; searchDepth <= normalizedDepth; searchDepth++) {
-    const result = searchAtDepth(state, searchDepth);
+    const context = createSearchContext({ transpositionTableSize: 50000 });
+    const result = searchAtDepth(state, searchDepth, context);
     if (!result) return;
     yield result;
   }
+}
+
+export function* iterativeGameSearch(state, options = {}) {
+  const maxDepth = Math.max(1, Math.floor(options.maxDepth ?? 8));
+  const context = createSearchContext({
+    timeLimitMs: options.timeLimitMs ?? 3000,
+    maxNodes: options.maxNodes,
+    quiescenceDepth: options.quiescenceDepth ?? 4,
+    transpositionTableSize: options.transpositionTableSize ?? 50000,
+    now: options.now
+  });
+  let preferredActionKey = null;
+  let completedDepth = 0;
+  try {
+    for (let searchDepth = 1; searchDepth <= maxDepth; searchDepth += 1) {
+      const result = searchAtDepth(state, searchDepth, context, preferredActionKey);
+      if (!result) return;
+      completedDepth = searchDepth;
+      preferredActionKey = actionKey(result);
+      yield { ...result, completed: true };
+      if (Math.abs(result.score) >= MATE_SCORE - searchDepth) return;
+      if (context.now() >= context.deadline) return;
+    }
+  } catch (error) {
+    if (!(error instanceof SearchLimitReached)) throw error;
+  }
+  if (completedDepth > 0) return;
+  const fallback = orderedCandidates(state, state.turn, true)[0];
+  if (!fallback) return;
+  yield {
+    ...fallback.action,
+    score: quickEvaluation(fallback.result.state, state.turn),
+    searchDepth: 0,
+    repetitionCount: fallback.repetitionCount,
+    searchedNodes: context.metrics?.searchedNodes ?? 0,
+    quiescenceNodes: context.metrics?.quiescenceNodes ?? 0,
+    prunedBranches: context.metrics?.prunedBranches ?? 0,
+    cacheHits: context.metrics?.cacheHits ?? 0,
+    elapsedMs: Math.round(Math.max(0, context.now() - context.startedAt) * 10) / 10,
+    principalVariation: [fallback.action],
+    completed: false
+  };
 }
 
 export function chooseSimulationAction(state, searchDepth = 3) {

@@ -4,8 +4,17 @@ import { createServer } from 'node:http';
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createCustomLayout, createCustomState } from './game.js';
-import { DEFAULT_LAYOUT_NAME, isBuiltInLayoutName, mergeBuiltInLayouts } from './built-in-layouts.js';
+import {
+  DEFAULT_LAYOUT_NAME,
+  LEGACY_SOLID_SOURCE_LAYOUT_NAME,
+  SOLID_TEST_LAYOUT_NAME,
+  mergeBuiltInLayouts
+} from './built-in-layouts.js';
+import {
+  migrateLegacySolidLayouts,
+  normalizeLayoutForStorage,
+  resolvePlayableLayout
+} from './layout-library.js';
 
 export { DEFAULT_LAYOUT_NAME };
 
@@ -18,15 +27,13 @@ const contentTypes = {
   '.json': 'application/json; charset=utf-8'
 };
 
-function clonePieces(boardStates) {
-  return {
-    front: boardStates.front.map(piece => ({ ...piece, position: { ...piece.position } })),
-    back: boardStates.back.map(piece => ({ ...piece, position: { ...piece.position } }))
-  };
-}
-
 function initialLibrary() {
-  return { version: 1, activeLayoutName: DEFAULT_LAYOUT_NAME, layouts: mergeBuiltInLayouts([]) };
+  return {
+    version: 2,
+    activeLayoutName: DEFAULT_LAYOUT_NAME,
+    activeBoardShape: 'flat',
+    layouts: mergeBuiltInLayouts([])
+  };
 }
 
 async function writeLibrary(layoutFile, library) {
@@ -42,9 +49,23 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
     if (!Array.isArray(library.layouts) || typeof library.activeLayoutName !== 'string') {
       throw new TypeError('布局文件结构无效');
     }
-    library.layouts = mergeBuiltInLayouts(library.layouts);
-    if (!library.layouts.some(layout => layout.name === library.activeLayoutName)) {
+    if (library.activeLayoutName === LEGACY_SOLID_SOURCE_LAYOUT_NAME) {
+      library.activeLayoutName = SOLID_TEST_LAYOUT_NAME;
+      library.activeBoardShape = 'flat';
+    }
+    const legacyActiveShape = library.layouts.find(layout =>
+      layout.name === library.activeLayoutName)?.boardShape;
+    library.layouts = migrateLegacySolidLayouts(mergeBuiltInLayouts(library.layouts));
+    library.version = 2;
+    library.activeBoardShape ??= legacyActiveShape ?? 'flat';
+    const activeLayout = library.layouts.find(layout =>
+      layout.name === library.activeLayoutName &&
+      (!library.activeBoardShape || layout.boardShape === library.activeBoardShape));
+    if (!activeLayout) {
       library.activeLayoutName = DEFAULT_LAYOUT_NAME;
+      library.activeBoardShape = 'flat';
+    } else {
+      library.activeBoardShape = activeLayout.boardShape;
     }
     return library;
   } catch (error) {
@@ -55,37 +76,14 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
   }
 }
 
-function normalizedLayout(layout, requirePlayable) {
+function normalizedLayout(layout, layouts, requirePlayable) {
   const name = typeof layout?.name === 'string' ? layout.name.trim() : '';
   if (!name) return { error: '布局名称不能为空' };
-  if (isBuiltInLayoutName(name)) return { error: '内置布局不能被覆盖' };
   if (name.length > 40) return { error: '布局名称不能超过40个字符' };
   if (layout?.boardShape !== undefined && !['flat', 'solid'].includes(layout.boardShape)) {
     return { error: '棋盘形态必须是平面或立体' };
   }
-  const validation = requirePlayable
-    ? createCustomState(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape)
-    : createCustomLayout(layout.boardStates, layout.faceLabels, layout.panelRotations, layout.boardShape);
-  if (validation.error) return validation;
-  const source = requirePlayable
-    ? {
-        boardStates: validation.state.boardStates,
-        faceLabels: validation.state.boardFaceLabels,
-        panelRotations: validation.state.boardPanelRotations
-      }
-    : validation;
-  return {
-    layout: {
-      name,
-      boardShape: layout?.boardShape === 'solid' ? 'solid' : 'flat',
-      boardStates: clonePieces(source.boardStates),
-      faceLabels: { front: [...source.faceLabels.front], back: [...source.faceLabels.back] },
-      panelRotations: {
-        front: [...source.panelRotations.front],
-        back: [...source.panelRotations.back]
-      }
-    }
-  };
+  return normalizeLayoutForStorage({ ...layout, name }, layouts, requirePlayable);
 }
 
 function sendJson(response, status, body) {
@@ -147,29 +145,30 @@ export function createAppServer({
       }
       if (pathname === '/api/layouts' && request.method === 'POST') {
         const body = await readJsonBody(request);
-        const normalized = normalizedLayout(body.layout, Boolean(body.activate));
-        if (normalized.error) {
-          sendJson(response, 400, { error: normalized.error });
-          return;
-        }
         const library = await mutate(async () => {
           const next = await readLibrary(layoutFile, persistLibrary);
-          if (!body.activate && next.activeLayoutName === normalized.layout.name) {
-            const playable = createCustomState(
-              normalized.layout.boardStates,
-              normalized.layout.faceLabels,
-              normalized.layout.panelRotations,
-              normalized.layout.boardShape
-            );
+          const normalized = normalizedLayout(body.layout, next.layouts, Boolean(body.activate));
+          if (normalized.error) return { error: normalized.error, status: 400 };
+          const index = next.layouts.findIndex(layout =>
+            layout.name === normalized.layout.name &&
+            layout.boardShape === normalized.layout.boardShape);
+          const nextLayouts = [...next.layouts];
+          if (index >= 0) nextLayouts[index] = normalized.layout;
+          else nextLayouts.push(normalized.layout);
+          if (!body.activate) {
+            const activeLayout = nextLayouts.find(layout =>
+              layout.name === next.activeLayoutName && layout.boardShape === next.activeBoardShape);
+            const playable = resolvePlayableLayout(activeLayout, nextLayouts);
             if (playable.error) {
               return { error: `当前启用布局必须保持可开局：${playable.error}`, status: 400 };
             }
           }
-          const index = next.layouts.findIndex(layout => layout.name === normalized.layout.name);
-          if (index >= 0) next.layouts[index] = normalized.layout;
-          else next.layouts.push(normalized.layout);
+          next.layouts = nextLayouts;
           next.layouts.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
-          if (body.activate) next.activeLayoutName = normalized.layout.name;
+          if (body.activate) {
+            next.activeLayoutName = normalized.layout.name;
+            next.activeBoardShape = normalized.layout.boardShape;
+          }
           await persistLibrary(layoutFile, next);
           return next;
         });
@@ -181,18 +180,15 @@ export function createAppServer({
         const body = await readJsonBody(request);
         const library = await mutate(async () => {
           const next = await readLibrary(layoutFile, persistLibrary);
-          const layout = next.layouts.find(item => item.name === body.name);
+          const layout = next.layouts.find(item =>
+            item.name === body.name && (!body.boardShape || item.boardShape === body.boardShape));
           if (!layout) return { error: '布局不存在', status: 404 };
           if (!layout.isDefault) {
-            const validation = createCustomState(
-              layout.boardStates,
-              layout.faceLabels,
-              layout.panelRotations,
-              layout.boardShape
-            );
+            const validation = resolvePlayableLayout(layout, next.layouts);
             if (validation.error) return { error: validation.error, status: 400 };
           }
           next.activeLayoutName = layout.name;
+          next.activeBoardShape = layout.boardShape;
           await persistLibrary(layoutFile, next);
           return next;
         });
@@ -202,16 +198,31 @@ export function createAppServer({
       }
       if (pathname.startsWith('/api/layouts/') && request.method === 'DELETE') {
         const name = pathname.slice('/api/layouts/'.length);
-        if (!name || isBuiltInLayoutName(name)) {
-          sendJson(response, 400, { error: '内置布局不能删除' });
+        if (!name) {
+          sendJson(response, 400, { error: '布局名称不能为空' });
           return;
         }
         const library = await mutate(async () => {
           const next = await readLibrary(layoutFile, persistLibrary);
           const originalLength = next.layouts.length;
-          next.layouts = next.layouts.filter(layout => layout.name !== name);
+          const boardShape = url.searchParams.get('boardShape');
+          const selected = next.layouts.find(layout =>
+            layout.name === name && (!boardShape || layout.boardShape === boardShape));
+          if (selected?.builtIn) return { error: '内置布局不能删除', status: 400 };
+          if (selected?.boardShape !== 'solid') {
+            const dependent = next.layouts.find(layout =>
+              layout.boardShape === 'solid' && layout.sourceFlatLayoutName === name);
+            if (dependent) {
+              return { error: `立体布局“${dependent.name}”正在使用该平面布局`, status: 400 };
+            }
+          }
+          next.layouts = next.layouts.filter(layout => layout !== selected);
           if (next.layouts.length === originalLength) return { error: '布局不存在', status: 404 };
-          if (next.activeLayoutName === name) next.activeLayoutName = DEFAULT_LAYOUT_NAME;
+          if (next.activeLayoutName === name && next.activeBoardShape === selected?.boardShape) {
+            next.activeLayoutName = DEFAULT_LAYOUT_NAME;
+            next.activeBoardShape = 'flat';
+          }
+          next.layouts = mergeBuiltInLayouts(next.layouts);
           await persistLibrary(layoutFile, next);
           return next;
         });

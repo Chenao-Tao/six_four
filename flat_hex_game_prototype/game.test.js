@@ -10,9 +10,13 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState,
+  evaluateGameState,
   flipBoardPanel,
+  iterativeGameSearch,
   keyOf,
   legalMoves,
+  PORTAL_PAIRS,
+  portalEndpointLocations,
   positionSignature,
   promotionTypeForMove,
   rotateBoardPanel,
@@ -41,6 +45,20 @@ function piece(id, side, type, q, r) {
 
 function findPiece(state, id) {
   return state.pieces.find(item => item.id === id);
+}
+
+function defaultDoubleSidedState(front, back = [], turn = 'white') {
+  const base = createInitialState();
+  return {
+    ...base,
+    turn,
+    winner: null,
+    moveNumber: 1,
+    history: [],
+    boardSide: 'front',
+    boardStates: { front, back },
+    pieces: front
+  };
 }
 
 test('双面棋盘合计每方只允许一枚王', () => {
@@ -82,13 +100,417 @@ test('后吃象后双方换位，象强制降级为兵', () => {
   assert.equal(findPiece(result.state, 'bB').type, 'pawn');
 });
 
-test('象吃兵时兵被消灭但象留在原位', () => {
+test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 },
+    { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
+  ]);
+
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.portalId === '1A5-4B5' && move.captureId === 'bB');
+
+  assert.ok(portalMove);
+  assert.deepEqual(portalMove.path, [
+    { q: 1, r: -3 },
+    { q: 2, r: -3 },
+    { q: 1, r: -2 },
+    { q: -1, r: -1 }
+  ]);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.move.portalId, '1A5-4B5');
+  assert.equal(result.positionEffect, 'swap');
+  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ' && item.portalTurns === 3), true);
+  assert.equal(result.state.layerExchangeCount, (state.layerExchangeCount ?? 0) + 1);
+  assert.equal(result.captured.type, 'bishop');
+  assert.equal([
+    ...result.state.boardStates.front,
+    ...result.state.boardStates.back
+  ].find(item => item.id === 'bB').type, 'pawn');
+});
+
+test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外层', () => {
+  const outer = [
+    { ...piece('wQ', 'white', 'queen', -3, 2), panelIndex: 2, portalTurns: 3 }
+  ];
+  const inner = [
+    { ...piece('bB', 'black', 'bishop', -1, 2), panelIndex: 1 }
+  ];
+  const base = defaultDoubleSidedState(outer, []);
+  const state = {
+    ...base,
+    boardShape: 'solid',
+    solidLayers: { outer, inner },
+    solidFaceSides: Array(6).fill('front'),
+    pieces: outer
+  };
+
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.portalId === '3A5-6B5' && move.captureId === 'bB');
+  assert.ok(portalMove);
+  assert.equal(portalMove.targetLayer, 'dormant');
+  assert.deepEqual(portalMove.path, [
+    { q: -3, r: 2 },
+    { q: -2, r: 2 },
+    { q: -2, r: 1 },
+    { q: -1, r: 2 }
+  ]);
+
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), true);
+  assert.equal(result.state.solidLayers.outer.find(item => item.id === 'wQ').portalTurns, 3);
+  assert.equal(result.state.solidLayers.inner.some(item => item.id === 'bB' && item.type === 'pawn'), true);
+  assert.equal(result.state.solidFaceSides.every(side => side === 'back'), true);
+});
+
+test('象吃兵时兵被消灭且象占据目标点', () => {
   const bishopAttack = applyMove(stateOf([
     piece('wB', 'white', 'bishop', 0, 0),
     piece('bP', 'black', 'pawn', 1, 1)
   ]), 'wB', { q: 1, r: 1 });
-  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(bishopAttack.state, 'wB').position, { q: 1, r: 1 });
   assert.equal(findPiece(bishopAttack.state, 'bP'), undefined);
+});
+
+test('象不再因为站在传送点而获得传送动作', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wB', 'white', 'bishop', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', 0, -2), panelIndex: 3 }
+  ]);
+
+  assert.equal([...legalMoves(state, 'wB').values()].some(move => move.usesPortal), false);
+});
+
+test('象的传送出口被占用时不能穿越且失败不消耗回合', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wB', 'white', 'bishop', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+
+  assert.equal([...legalMoves(state, 'wB').values()].some(move => move.usesPortal), false);
+  const result = applyMove(state, 'wB', {
+    q: -1,
+    r: -1,
+    panelIndex: 3,
+    mapKey: 'portal:blocked'
+  });
+  assert.equal(result.error, '非法移动');
+  assert.strictEqual(result.state, state);
+  assert.equal(result.state.turn, 'white');
+  assert.equal(result.state.moveNumber, 1);
+});
+
+test('兵不再因为站在传送点而获得传送动作', () => {
+  const successState = defaultDoubleSidedState([
+    { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 },
+    { ...piece('bP', 'black', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+  assert.equal([...legalMoves(successState, 'wP').values()].some(move => move.usesPortal), false);
+
+  const emptyExitState = defaultDoubleSidedState([
+    { ...piece('wP', 'white', 'pawn', 1, -2), panelIndex: 4 }
+  ]);
+  assert.equal([...legalMoves(emptyExitState, 'wP').values()].some(move => move.usesPortal), false);
+});
+
+test('后吃象获得三回合传送能力，普通走棋也会消耗一次能力回合', () => {
+  const state = stateOf([
+    piece('wQ', 'white', 'queen', -3, 0),
+    piece('bB', 'black', 'bishop', 0, 0)
+  ]);
+  const captured = applyMove(state, 'wQ', { q: 0, r: 0 });
+  assert.equal(findPiece(captured.state, 'wQ').portalTurns, 3);
+
+  const chargedState = {
+    ...stateOf([
+      { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 3 }
+    ]),
+    turn: 'white'
+  };
+  const ordinaryMove = [...legalMoves(chargedState, 'wQ').values()]
+    .find(move => !move.usesPortal);
+  const moved = applyMove(chargedState, 'wQ', {
+    ...ordinaryMove.target,
+    panelIndex: ordinaryMove.panelIndex,
+    mapKey: ordinaryMove.mapKey
+  });
+  assert.equal(findPiece(moved.state, 'wQ').portalTurns, 2);
+});
+
+test('后在能力有效期内可穿过空门，传送不再强制吃子', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move => move.usesPortal);
+  assert.ok(portalMove);
+  assert.equal(portalMove.captureId, null);
+  assert.equal(portalMove.path.length, 4);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.turn, 'black');
+  assert.equal(result.state.boardStates.front.find(item => item.id === 'wQ').portalTurns, 2);
+});
+
+test('有传送能力的后不能在第三步停在传送入口', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalPointKeys = new Set(
+    portalEndpointLocations(state)
+      .filter(location => location.layer === 'active')
+      .map(location => location.pointKey)
+  );
+
+  const stoppedAtPortal = [...legalMoves(state, 'wQ').values()].filter(move =>
+    !move.usesPortal && portalPointKeys.has(move.pointKey));
+
+  assert.deepEqual(stoppedAtPortal, []);
+});
+
+test('有传送能力的后经过传送入口时必须生成自动穿越路线', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -3), panelIndex: 4, portalTurns: 3 }
+  ]);
+  const portalPointKeys = new Set(
+    portalEndpointLocations(state)
+      .filter(location => location.layer === 'active')
+      .map(location => location.pointKey)
+  );
+  const moves = [...legalMoves(state, 'wQ').values()];
+  const ordinaryThroughPortal = moves.filter(move =>
+    !move.usesPortal && move.path.slice(1).some(point => portalPointKeys.has(keyOf(point)))
+  );
+
+  assert.deepEqual(ordinaryThroughPortal, []);
+  assert.ok(moves.some(move =>
+    move.usesPortal && move.pathSteps.some(step => step.portalEntry)
+  ));
+});
+
+test('有传送能力的后从传送点起步时第一步强制穿越并记录入口出口', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 }
+  ]);
+
+  const moves = [...legalMoves(state, 'wQ').values()];
+
+  assert.ok(moves.length > 0);
+  assert.ok(moves.every(move => move.usesPortal));
+  assert.ok(moves.every(move => move.portalTransition));
+  assert.deepEqual(moves[0].portalTransition.entry.position, { q: 1, r: -2 });
+  assert.deepEqual(moves[0].portalTransition.exit.position, { q: -1, r: -1 });
+  assert.equal(moves[0].portalTransition.entry.layer, 'active');
+  assert.equal(moves[0].portalTransition.exit.layer, 'active');
+});
+
+test('自动传送出口被占用时保持最终一步吃子约束', () => {
+  const friendlyBlocked = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
+    { ...piece('wP', 'white', 'pawn', -1, -1), panelIndex: 3 }
+  ]);
+  const earlyEnemyBlocked = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 3 },
+    { ...piece('bB', 'black', 'bishop', -1, -1), panelIndex: 3 }
+  ]);
+
+  assert.equal(legalMoves(friendlyBlocked, 'wQ').size, 0);
+  assert.equal(legalMoves(earlyEnemyBlocked, 'wQ').size, 0);
+});
+
+test('两组传送门都支持双向自动穿越', () => {
+  const frontState = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', -1, -1), panelIndex: 3, portalTurns: 3 }
+  ]);
+  const frontMove = [...legalMoves(frontState, 'wQ').values()][0];
+  assert.deepEqual(frontMove.portalTransition.entry.position, { q: -1, r: -1 });
+  assert.deepEqual(frontMove.portalTransition.exit.position, { q: 1, r: -2 });
+
+  const base = defaultDoubleSidedState([], []);
+  const backQueen = { ...piece('wQ', 'white', 'queen', -1, 2), panelIndex: 1, portalTurns: 3 };
+  const backState = {
+    ...base,
+    boardSide: 'back',
+    boardStates: { front: [], back: [backQueen] },
+    pieces: [backQueen]
+  };
+  const backMove = [...legalMoves(backState, 'wQ').values()][0];
+  assert.equal(backMove.portalId, '3A5-6B5');
+  assert.equal(backMove.portalTransition.entry.layer, 'active');
+  assert.equal(backMove.portalTransition.exit.layer, 'dormant');
+  assert.deepEqual(backMove.portalTransition.entry.position, { q: -1, r: 2 });
+  assert.deepEqual(backMove.portalTransition.exit.position, { q: -2, r: 1 });
+});
+
+test('后穿过跨层空门但未吃子时只移动到潜藏层，不触发上浮下沉', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', -2, 1), panelIndex: 2, portalTurns: 3 }
+  ]);
+  const portalMove = [...legalMoves(state, 'wQ').values()].find(move =>
+    move.usesPortal && move.targetLayer === 'dormant');
+  assert.ok(portalMove);
+  const result = applyMove(state, 'wQ', {
+    ...portalMove.target,
+    panelIndex: portalMove.panelIndex,
+    mapKey: portalMove.mapKey
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.layerExchangeCount ?? 0, 0);
+  assert.equal(result.state.boardStates.front.some(item => item.id === 'wQ'), false);
+  assert.equal(result.state.boardStates.back.some(item => item.id === 'wQ' && item.portalTurns === 2), true);
+});
+
+test('传送能力从1回合走棋后消失，剩余回合也进入局面指纹', () => {
+  const oneTurnState = stateOf([
+    { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 1 }
+  ]);
+  const threeTurnState = stateOf([
+    { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 3 }
+  ]);
+  assert.notEqual(positionSignature(oneTurnState), positionSignature(threeTurnState));
+  const ordinaryMove = [...legalMoves(oneTurnState, 'wQ').values()]
+    .find(move => !move.usesPortal);
+  const result = applyMove(oneTurnState, 'wQ', {
+    ...ordinaryMove.target,
+    panelIndex: ordinaryMove.panelIndex,
+    mapKey: ordinaryMove.mapKey
+  });
+  assert.equal(findPiece(result.state, 'wQ').portalTurns, undefined);
+});
+
+test('再次吃象会把已有传送能力刷新为三回合', () => {
+  const state = stateOf([
+    { ...piece('wQ', 'white', 'queen', -3, 0), portalTurns: 1 },
+    piece('bB', 'black', 'bishop', 0, 0)
+  ]);
+  const result = applyMove(state, 'wQ', { q: 0, r: 0 });
+  assert.equal(findPiece(result.state, 'wQ').portalTurns, 3);
+});
+
+test('两组传送门各自同色且颜色不同', () => {
+  assert.equal(PORTAL_PAIRS[0].color, PORTAL_PAIRS[0].color);
+  assert.equal(PORTAL_PAIRS[1].color, PORTAL_PAIRS[1].color);
+  assert.notEqual(PORTAL_PAIRS[0].color, PORTAL_PAIRS[1].color);
+});
+
+test('自定义布局保存成对传送阵且旧布局继续使用默认传送阵', () => {
+  const customPairs = [{
+    id: '2A4-5B7',
+    color: '#7ee081',
+    endpoints: [
+      { faceLabel: '2A', pointNumber: 4 },
+      { faceLabel: '5B', pointNumber: 7 }
+    ]
+  }];
+  const custom = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    customPairs
+  );
+  const legacy = createCustomLayout({ front: [], back: [] });
+
+  assert.deepEqual(custom.portalPairs, customPairs);
+  assert.deepEqual(legacy.portalPairs, PORTAL_PAIRS);
+});
+
+test('自定义传送阵必须成对且端点不能重复使用', () => {
+  const unpaired = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    [{ id: 'bad', color: '#58d9ff', endpoints: [{ faceLabel: '1A', pointNumber: 5 }] }]
+  );
+  const duplicated = createCustomLayout(
+    { front: [], back: [] },
+    BOARD_FACE_LABELS,
+    undefined,
+    'flat',
+    [
+      {
+        id: 'first',
+        color: '#58d9ff',
+        endpoints: [
+          { faceLabel: '1A', pointNumber: 5 },
+          { faceLabel: '4B', pointNumber: 5 }
+        ]
+      },
+      {
+        id: 'second',
+        color: '#ffbe55',
+        endpoints: [
+          { faceLabel: '1A', pointNumber: 5 },
+          { faceLabel: '6B', pointNumber: 5 }
+        ]
+      }
+    ]
+  );
+
+  assert.match(unpaired.error, /必须包含两个端点/);
+  assert.match(duplicated.error, /只能属于一对传送阵/);
+});
+
+test('棋局使用布局自己的传送阵配置定位端点', () => {
+  const customPairs = [{
+    id: '2A4-5B7',
+    color: '#7ee081',
+    endpoints: [
+      { faceLabel: '2A', pointNumber: 4 },
+      { faceLabel: '5B', pointNumber: 7 }
+    ]
+  }];
+  const playable = createCustomState({
+    front: [piece('wk', 'white', 'king', 4, 0)],
+    back: [piece('bk', 'black', 'king', -4, 0)]
+  }, BOARD_FACE_LABELS, undefined, 'flat', customPairs);
+
+  assert.equal(playable.error, undefined);
+  assert.deepEqual(playable.state.portalPairs, customPairs);
+  assert.deepEqual(
+    portalEndpointLocations(playable.state).map(location => location.faceLabel).sort(),
+    ['2A', '5B']
+  );
+});
+
+test('传送点绑定实体板编号并随 1A 板旋转', () => {
+  const state = defaultDoubleSidedState([]);
+  const before = portalEndpointLocations(state).find(location =>
+    location.faceLabel === '1A' && location.layer === 'active');
+  const rotated = rotateBoardPanel(
+    state.boardFaceLabels,
+    state.boardPanelRotations,
+    'front',
+    4,
+    state.boardStates
+  );
+  const rotatedState = {
+    ...state,
+    boardStates: rotated.boardStates,
+    boardFaceLabels: rotated.faceLabels,
+    boardPanelRotations: rotated.panelRotations,
+    pieces: rotated.boardStates.front
+  };
+  const after = portalEndpointLocations(rotatedState).find(location =>
+    location.faceLabel === '1A' && location.layer === 'active');
+
+  assert.deepEqual(before.position, { q: 1, r: -2 });
+  assert.notDeepEqual(after.position, before.position);
+  assert.equal(after.panelIndex, 4);
 });
 
 test('兵消灭兵或王后占据目标点，吃王结束对局', () => {
@@ -447,6 +869,92 @@ test('算法演示优先一步吃王，并自主选择有利升级', () => {
   assert.equal(promotionAction.promote, true);
 });
 
+test('双层评估能识别随棋盘下沉的升级收益', () => {
+  const current = [
+    piece('wK', 'white', 'king', -4, 0),
+    piece('bK', 'black', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 0, -1),
+    piece('bP', 'black', 'pawn', 0, -2)
+  ];
+  const surfaced = [piece('wQ', 'white', 'queen', 1, 1)];
+  const state = {
+    ...stateOf(current),
+    boardSide: 'front',
+    boardStates: { front: current, back: surfaced }
+  };
+  const move = legalMoves(state, 'wP').get('0,-2');
+  const kept = applyMove(state, 'wP', move.target, false, false).state;
+  const promoted = applyMove(state, 'wP', move.target, true, false).state;
+
+  assert.ok(evaluateGameState(promoted, 'white') > evaluateGameState(kept, 'white'));
+  assert.equal(chooseSimulationAction(state, 1).promote, true);
+});
+
+test('王不作为普通物质计分且潜藏层同时参与评估', () => {
+  const kingOnly = stateOf([piece('wK', 'white', 'king', 0, 0)]);
+  assert.ok(Math.abs(evaluateGameState(kingOnly, 'white')) <= 80);
+
+  const outer = [piece('wP', 'white', 'pawn', 0, 0)];
+  const whiteDormant = {
+    ...stateOf(outer),
+    boardShape: 'solid',
+    solidLayers: { outer, inner: [piece('wB', 'white', 'bishop', 1, 1)] }
+  };
+  const blackDormant = {
+    ...stateOf(outer),
+    boardShape: 'solid',
+    solidLayers: { outer, inner: [piece('bB', 'black', 'bishop', 1, 1)] }
+  };
+  assert.ok(evaluateGameState(whiteDormant, 'white') > evaluateGameState(blackDormant, 'white'));
+});
+
+test('传送能力按剩余回合进入评估且最多计十八分', () => {
+  const ordinary = stateOf([
+    piece('wQ', 'white', 'queen', 1, -3),
+    piece('bQ', 'black', 'queen', -1, 3)
+  ]);
+  const charged = stateOf([
+    { ...piece('wQ', 'white', 'queen', 1, -3), portalTurns: 7 },
+    piece('bQ', 'black', 'queen', -1, 3)
+  ]);
+
+  assert.equal(evaluateGameState(charged, 'white') - evaluateGameState(ordinary, 'white'), 18);
+});
+
+test('限时搜索返回的传送主变例保留完整入口出口和路线', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wQ', 'white', 'queen', 1, -2), panelIndex: 4, portalTurns: 1 }
+  ]);
+  const steps = [...iterativeGameSearch(state, {
+    maxDepth: 1,
+    maxNodes: 5000,
+    quiescenceDepth: 1
+  })];
+  const portalAction = steps[0];
+
+  assert.equal(portalAction.move.usesPortal, true);
+  assert.ok(portalAction.move.portalTransition.entry);
+  assert.ok(portalAction.move.portalTransition.exit);
+  assert.ok(portalAction.move.pathSteps.length >= 2);
+  assert.equal(portalAction.principalVariation[0].move.usesPortal, true);
+});
+
+test('近期重复只作同分决胜，不会过滤立即获胜动作', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, -3),
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bK', 'black', 'king', 0, -4),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+  const winning = applyMove(state, 'wP', { q: 0, r: -4 }, false).state;
+  state.positionHistory = [positionSignature(state), positionSignature(winning)];
+
+  const action = chooseSimulationAction(state, 1);
+
+  assert.equal(action.move.capturesKing, true);
+  assert.equal(action.repetitionCount, 1);
+});
+
 test('算法避开会回到近期相同局面的往返动作', () => {
   const state = stateOf([
     piece('wP', 'white', 'pawn', 0, 0),
@@ -500,6 +1008,73 @@ test('分步博弈依次给出一至三层结论，最终结果等同三层搜�
     assert.ok(item.searchedNodes > 0);
     assert.ok(item.prunedBranches >= 0);
   });
+});
+
+test('限时迭代加深返回完整层、主变例与搜索指标', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, -3),
+    piece('wB', 'white', 'bishop', 0, 0),
+    piece('bK', 'black', 'king', 0, -4),
+    piece('bP', 'black', 'pawn', 1, 1)
+  ]);
+
+  const steps = [...iterativeGameSearch(state, {
+    maxDepth: 4,
+    timeLimitMs: 3000,
+    quiescenceDepth: 2
+  })];
+
+  assert.deepEqual(steps.map(item => item.searchDepth), [1]);
+  assert.equal(steps[0].move.capturesKing, true);
+  assert.equal(steps[0].completed, true);
+  assert.ok(steps[0].principalVariation.length >= 1);
+  assert.ok(steps[0].quiescenceNodes >= 0);
+  assert.ok(steps[0].cacheHits >= 0);
+  assert.ok(steps[0].elapsedMs >= 0);
+});
+
+test('节点预算耗尽时只返回首个安全回退动作', () => {
+  const state = stateOf([
+    piece('wP', 'white', 'pawn', 0, 0),
+    piece('bP', 'black', 'pawn', 4, -4)
+  ]);
+
+  const steps = [...iterativeGameSearch(state, { maxDepth: 8, maxNodes: 1 })];
+
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].searchDepth, 0);
+  assert.equal(steps[0].completed, false);
+  assert.ok(steps[0].pieceId);
+});
+
+test('迭代加深复用置换表并在吃子边界执行静态延伸', () => {
+  const current = [
+    piece('wK', 'white', 'king', -4, 0),
+    piece('bK', 'black', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 0, -1),
+    piece('bP', 'black', 'pawn', 0, -2)
+  ];
+  const state = {
+    ...stateOf(current),
+    boardSide: 'front',
+    boardStates: {
+      front: current,
+      back: [
+        piece('wB', 'white', 'bishop', 0, 0),
+        piece('bP2', 'black', 'pawn', 1, 1)
+      ]
+    }
+  };
+
+  const steps = [...iterativeGameSearch(state, {
+    maxDepth: 3,
+    timeLimitMs: 3000,
+    quiescenceDepth: 2
+  })];
+
+  assert.deepEqual(steps.map(item => item.searchDepth), [1, 2, 3]);
+  assert.ok(steps.some(item => item.quiescenceNodes > 0));
+  assert.ok(steps.at(-1).cacheHits > 0);
 });
 
 test('布局三由参考图的互补面拼成正反六边形', () => {

@@ -11,7 +11,7 @@ function layout(name) {
   const initial = createInitialState();
   return {
     name,
-    boardShape: 'solid',
+    boardShape: 'flat',
     boardStates: {
       front: [{ id: 'white-king', side: 'white', type: 'king', position: { q: 0, r: 0 } }],
       back: [{ id: 'black-king', side: 'black', type: 'king', position: { q: 4, r: 0 } }]
@@ -50,8 +50,8 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
 
   const stored = JSON.parse(await readFile(layoutFile, 'utf8'));
   assert.equal(stored.activeLayoutName, '测试布局');
-  assert.equal(stored.layouts.length, 5);
-  assert.equal(stored.layouts.filter(item => item.builtIn).length, 4);
+  assert.equal(stored.layouts.length, 8);
+  assert.equal(stored.layouts.filter(item => item.builtIn).length, 7);
 
   const secondServer = createAppServer({ layoutFile });
   const secondBaseUrl = await listen(secondServer);
@@ -61,7 +61,7 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
   assert.equal(library.activeLayoutName, '测试布局');
   const savedLayout = library.layouts.find(item => item.name === '测试布局');
   assert.ok(savedLayout);
-  assert.equal(savedLayout.boardShape, 'solid');
+  assert.equal(savedLayout.boardShape, 'flat');
   assert.deepEqual(savedLayout.boardStates.front[0].position, { q: 0, r: 0 });
   assert.equal(savedLayout.boardStates.front[0].panelIndex, 0);
   assert.equal(savedLayout.boardStates.back[0].panelIndex, 0);
@@ -111,7 +111,7 @@ test('未完成草稿可以落盘但不能启用，删除活动布局后回到�
   assert.equal(deleted.layouts.some(item => item.name === '可用布局'), false);
 });
 
-test('服务端内置布局可直接启用且不能覆盖或删除', async t => {
+test('服务端内置布局可载入并由同名用户版本覆盖，删除覆盖后恢复原版', async t => {
   const tempDirectory = await mkdtemp(join(tmpdir(), 'flat-hex-layouts-'));
   const server = createAppServer({ layoutFile: join(tempDirectory, 'layouts.json') });
   const baseUrl = await listen(server);
@@ -119,27 +119,33 @@ test('服务端内置布局可直接启用且不能覆盖或删除', async t => 
   t.after(() => rm(tempDirectory, { recursive: true, force: true }));
 
   const library = await fetch(`${baseUrl}/api/layouts`).then(response => response.json());
-  const preset = library.layouts.find(item => item.name === '预设·立体升沉测试');
+  const preset = library.layouts.find(item =>
+    item.name === '预设·立体升沉测试' && item.boardShape === 'solid');
   assert.ok(preset);
 
-  const activated = await fetch(`${baseUrl}/api/layouts/active`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: preset.name })
-  });
-  assert.equal(activated.status, 200);
-
+  const { builtIn, ...override } = preset;
   const overwrite = await fetch(`${baseUrl}/api/layouts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ layout: { ...layout('预设·立体升沉测试'), name: preset.name } })
+    body: JSON.stringify({ layout: override, activate: true })
   });
-  assert.equal(overwrite.status, 400);
+  assert.equal(overwrite.status, 200);
+  const overwrittenLibrary = await overwrite.json();
+  const overwritten = overwrittenLibrary.layouts.find(item =>
+    item.name === preset.name && item.boardShape === 'solid');
+  assert.equal(overwrittenLibrary.activeLayoutName, preset.name);
+  assert.equal(overwritten.builtIn, undefined);
 
-  const deleted = await fetch(`${baseUrl}/api/layouts/${encodeURIComponent(preset.name)}`, {
+  const deleted = await fetch(
+    `${baseUrl}/api/layouts/${encodeURIComponent(preset.name)}?boardShape=solid`, {
     method: 'DELETE'
-  });
-  assert.equal(deleted.status, 400);
+    }
+  );
+  assert.equal(deleted.status, 200);
+  const restoredLibrary = await deleted.json();
+  const restored = restoredLibrary.layouts.find(item =>
+    item.name === preset.name && item.boardShape === 'solid');
+  assert.equal(restored.builtIn, true);
 });
 
 test('布局文件不可写时接口返回可识别的文件系统错误码', async t => {
