@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
 import {
+  createSolidBoardViewer,
   findPanelAtPoint,
   findSolidTargetAtPoint,
   isSharedSolidPoint,
@@ -14,6 +15,47 @@ import {
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
+
+test('重新开局取消立体升沉动画后查看器只保留新棋局模型', async t => {
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const originalWindow = globalThis.window;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  globalThis.window = { matchMedia: () => ({ matches: true }) };
+  t.after(() => {
+    if (originalRequestAnimationFrame === undefined) delete globalThis.requestAnimationFrame;
+    else globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    if (originalCancelAnimationFrame === undefined) delete globalThis.cancelAnimationFrame;
+    else globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  });
+
+  const canvas = {
+    getContext: () => ({}),
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const oldModel = {
+    pieces: [{ id: 'old-piece', position: { q: 0, r: 0 }, panelIndex: 0 }]
+  };
+  const staleModel = {
+    pieces: [{ id: 'stale-piece', position: { q: 1, r: 1 }, panelIndex: 0 }]
+  };
+  const resetModel = {
+    pieces: [{ id: 'reset-piece', position: { q: -1, r: -1 }, panelIndex: 3 }]
+  };
+  const viewer = createSolidBoardViewer(canvas, oldModel);
+  const exchange = viewer.exchangeLayers(staleModel);
+
+  viewer.cancelAnimations(resetModel);
+
+  assert.equal(await exchange, false);
+  assert.equal(viewer.followPiece('reset-piece', false), true);
+  assert.equal(viewer.followPiece('stale-piece', false), false);
+  viewer.destroy();
+});
 
 test('传送端点标签区分当前层与立体潜藏层', () => {
   const endpoint = { faceLabel: '6B', pointNumber: 5 };

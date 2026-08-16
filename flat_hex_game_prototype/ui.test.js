@@ -1,12 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import {
+  commitWhenCurrent,
+  createOperationLifecycle
+} from './operation-lifecycle.js';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
 const aiWorker = readFileSync(new URL('./ai-worker.js', import.meta.url), 'utf8');
 const solidBoard = readFileSync(new URL('./solid-board.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+
+test('重新开局会使等待中的旧落子任务失效且不影响后续新任务', async () => {
+  const lifecycle = createOperationLifecycle();
+  const staleOperation = lifecycle.begin();
+  let resumeAnimation;
+  const animation = new Promise(resolve => {
+    resumeAnimation = resolve;
+  });
+  let currentState = 'old-game';
+  const undoEntries = [];
+  const staleCommit = commitWhenCurrent(staleOperation, animation, () => {
+    currentState = 'stale-move';
+    undoEntries.push('old-game');
+  });
+
+  lifecycle.invalidate();
+  currentState = 'new-game';
+  resumeAnimation();
+  assert.equal(await staleCommit, false);
+
+  assert.equal(currentState, 'new-game');
+  assert.deepEqual(undoEntries, []);
+  assert.equal(staleOperation.isCurrent(), false);
+  const currentOperation = lifecycle.begin();
+  assert.equal(currentOperation.isCurrent(), true);
+  assert.equal(await commitWhenCurrent(currentOperation, Promise.resolve(), () => {
+    currentState = 'current-move';
+  }), true);
+  assert.equal(currentState, 'current-move');
+});
+
+test('落子动画和立体查看器在重新开局时使用同一生命周期失效保护', () => {
+  const commit = app.match(/async function commitMove\([\s\S]*?\n}\n\nfunction chooseMove/);
+  const reset = app.match(/function resetGame\(\)[\s\S]*?\n}\n\nasync function toggleFacePreview/);
+
+  assert.ok(commit);
+  assert.match(commit[0], /const operation = moveLifecycle\.begin\(\)/);
+  assert.match(commit[0], /await commitWhenCurrent\([\s\S]*?closePortalObservation\(observationBaseModel\)/);
+  assert.match(commit[0], /if \(!await animateBoardLayerExchange\(result\.state, operation\)\) return/);
+  assert.ok(reset);
+  assert.match(reset[0], /moveLifecycle\.invalidate\(\)/);
+  assert.match(reset[0], /solidBoardViewer\?\.cancelAnimations\(solidBoardModel\(\)\)/);
+  assert.match(solidBoard, /cancelAnimations\(nextModel\)/);
+});
 
 test('模拟控制保留重开、背面预览和算法按钮，并移除吃子演示', () => {
   assert.doesNotMatch(html, /captureDemoButton|载入吃子演示/);
@@ -94,7 +142,7 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
 });
 
 test('实际吃子换层退出预览并采用规则层返回的新外层棋盘', () => {
-  assert.match(app, /async function animateBoardLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
+  assert.match(app, /async function animateBoardLayerExchange\(nextState, operation\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
 });
 

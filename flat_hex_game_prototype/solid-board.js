@@ -907,10 +907,23 @@ export function createSolidBoardViewer(canvas, initialModel, {
   canvas.addEventListener('pointercancel', pointerEnd);
   canvas.addEventListener('wheel', wheel, { passive: false });
 
+  function cancelPendingAnimations(nextModel = model) {
+    layerExchange?.resolve(false);
+    layerExchange = null;
+    portalEffect?.resolve(false);
+    portalEffect = null;
+    operationEffect = null;
+    cameraMotion = null;
+    model = nextModel;
+  }
+
   animationFrame = requestAnimationFrame(render);
   return {
     update(nextModel) {
       model = nextModel;
+    },
+    cancelAnimations(nextModel) {
+      cancelPendingAnimations(nextModel);
     },
     exchangeLayers(nextModel) {
       if (layerExchange) return Promise.resolve(false);
@@ -1034,10 +1047,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       return true;
     },
     destroy() {
-      layerExchange?.resolve(false);
-      layerExchange = null;
-      portalEffect?.resolve(false);
-      portalEffect = null;
+      cancelPendingAnimations();
       cancelAnimationFrame(animationFrame);
       canvas.removeEventListener('pointerdown', pointerDown);
       canvas.removeEventListener('pointermove', pointerMove);
