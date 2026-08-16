@@ -1709,6 +1709,25 @@ function straightPath(from, to) {
   return Array.from({ length: distance + 1 }, (_, index) => add(from, direction, index));
 }
 
+function addAdjacentQueenCaptures(state, pieceToMove, occupied, moves) {
+  const startPanel = piecePanelIndex(pieceToMove);
+  for (const transition of stepTransitions(state, pieceToMove.position, startPanel)) {
+    const target = occupied.get(transition.pointKey);
+    if (!target || target.side === pieceToMove.side || target.type !== 'queen') continue;
+    addMove(
+      state,
+      moves,
+      pieceToMove,
+      transition.position,
+      [pieceToMove.position, transition.position],
+      occupied,
+      transition.panelIndex,
+      transition.pointKey
+    );
+  }
+  return moves;
+}
+
 function kingMoves(state, pieceToMove, occupied) {
   if (state.boardShape === 'solid') return solidKingMoves(state, pieceToMove, occupied);
   const moves = new Map();
@@ -1728,7 +1747,7 @@ function kingMoves(state, pieceToMove, occupied) {
     });
     if (!blocked) addMove(state, moves, pieceToMove, target, path, occupied);
   });
-  return moves;
+  return addAdjacentQueenCaptures(state, pieceToMove, occupied, moves);
 }
 
 function solidKingMoves(state, pieceToMove, occupied) {
@@ -1768,7 +1787,7 @@ function solidKingMoves(state, pieceToMove, occupied) {
       targetPointKey
     );
   }
-  return moves;
+  return addAdjacentQueenCaptures(state, pieceToMove, occupied, moves);
 }
 
 export function legalMoves(state, pieceId) {
