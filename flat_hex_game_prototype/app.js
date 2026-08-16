@@ -42,6 +42,7 @@ import {
 } from './solid-board.js?v=optional-portal-1';
 import {
   assemblyPanelPreview,
+  assemblyPortalEndpointLocations,
   assemblyToLayout,
   assemblyViewModel,
   createSolidAssembly,
@@ -59,6 +60,10 @@ import {
   solidLayouts
 } from './layout-library.js?v=pending-solid-1';
 import { moveChoicesAtTarget } from './move-choice.js?v=portal-choice-1';
+import {
+  commitWhenCurrent,
+  createOperationLifecycle
+} from './operation-lifecycle.js?v=move-reset-1';
 import { createUndoHistory } from './undo-history.js?v=undo-move-1';
 
 const svg = document.getElementById('board');
@@ -175,6 +180,7 @@ let solidSelectedPanel = null;
 let solidSelectedPanelId = null;
 let layoutStorageMode = 'server';
 const browserLayoutStore = createBrowserLayoutStore(localStorage);
+const moveLifecycle = createOperationLifecycle();
 
 function svgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -517,23 +523,49 @@ function isPreviewing() {
   return previewSide !== null;
 }
 
-function solidBoardModel() {
+function solidPortalTargets(locations, visiblePortalLayer = 'active') {
+  return locations.map(location => {
+    const dormant = location.layer !== visiblePortalLayer;
+    return {
+      ...mapSolidPoint(location.position, location.panelIndex),
+      portalId: location.portalId,
+      portalColor: location.portalColor,
+      faceLabel: location.faceLabel,
+      pointNumber: location.pointNumber,
+      dormant,
+      displayLabel: portalEndpointDisplayLabel({ ...location, dormant }, '内')
+    };
+  });
+}
+
+function solidBoardModel({ closePortalObservation = false } = {}) {
   if (customEditor?.solidAssembly) {
     const assemblyModel = assemblyViewModel(customEditor.solidAssembly);
+    const portalTargets = solidPortalTargets(assemblyPortalEndpointLocations(
+      customEditor.solidAssembly,
+      customEditor.portalPairs
+    ));
     return {
       side: 'front',
       ...assemblyModel,
       selectedPanel: solidSelectedPanel,
       selectedPieceId: null,
       moveTargets: [],
+      portalTargets,
       assemblyMode: true
     };
   }
   const side = displayedBoardSide();
   const faceLabels = [...displayedFaceLabels().front];
   const panelRotations = [...displayedPanelRotations().front];
+  const closingPortalObservation = Boolean(
+    closePortalObservation &&
+    queenTurn?.current?.layer === 'dormant' &&
+    state.solidLayers
+  );
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
-    const showInnerLayer = previewSide !== null || queenTurn?.current.layer === 'dormant';
+    const showInnerLayer = !closingPortalObservation &&
+      (previewSide !== null || queenTurn?.current.layer === 'dormant');
     const visibleFaceSides = showInnerLayer
       ? state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back')
       : state.solidFaceSides;
@@ -544,8 +576,13 @@ function solidBoardModel() {
       panelRotations[panelIndex] = displayedPanelRotations().back[oppositeIndex];
     });
   }
-  const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
-    const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
+  const renderedPieces = closingPortalObservation
+    ? state.solidLayers.outer
+        .filter(piece => piece.id !== queenTurn.pieceId)
+        .map(piece => ({ ...piece, position: { ...piece.position } }))
+    : displayedPieces();
+  const moveTargets = customEditor || closingPortalObservation ? [] : [...selectedMoves.values()].map(move => {
+    const captured = move.captureId ? renderedPieces.find(piece => piece.id === move.captureId) : null;
     const renderedTarget = move.displayTarget ?? move.target;
     const renderedPanelIndex = move.portalSelf
       ? move.portalTransition?.entry.panelIndex
@@ -559,25 +596,17 @@ function solidBoardModel() {
       portalColor: move.portalColor
     };
   });
-  const visiblePortalLayer = queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
-  const portalTargets = customEditor ? [] : portalEndpointLocations(state)
-    .map(location => {
-      const dormant = location.layer !== visiblePortalLayer;
-      return {
-        ...mapSolidPoint(location.position, location.panelIndex),
-        portalId: location.portalId,
-        portalColor: location.portalColor,
-        faceLabel: location.faceLabel,
-        pointNumber: location.pointNumber,
-        dormant,
-        displayLabel: portalEndpointDisplayLabel({ ...location, dormant }, '内')
-      };
-    });
+  const visiblePortalLayer = closingPortalObservation
+    ? 'active'
+    : queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
+  const portalTargets = customEditor
+    ? []
+    : solidPortalTargets(portalEndpointLocations(state), visiblePortalLayer);
   const previewMover = simulationPreview
-    ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
+    ? renderedPieces.find(piece => piece.id === simulationPreview.pieceId)
     : null;
   const previewCaptured = simulationPreview?.move.captureId
-    ? displayedPieces().find(piece => piece.id === simulationPreview.move.captureId)
+    ? renderedPieces.find(piece => piece.id === simulationPreview.move.captureId)
     : null;
   const plannedMove = previewMover
     ? {
@@ -593,7 +622,7 @@ function solidBoardModel() {
     : null;
   return {
     side,
-    pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
+    pieces: renderedPieces.map(piece => ({ ...piece, position: { ...piece.position } })),
     faceLabels,
     panelRotations,
     selectedPanel: customEditor ? solidSelectedPanel : null,
@@ -910,15 +939,28 @@ function openSolidBoard() {
 
 function closeSolidBoard() {
   if (!solidBoardViewer) return;
+  const cancelledQueenMove = !customEditor && Boolean(queenTurn);
+  const interruptedAnimation = !customEditor && animationLock;
+  moveLifecycle.invalidate();
   closeMoveChoice();
+  if (queenTurn) {
+    resetQueenTurnState();
+    selectedPieceId = null;
+    selectedMoves = new Map();
+  }
   solidBoardViewer.destroy();
   solidBoardViewer = null;
+  animationLock = false;
   solidSelectedPanel = null;
   solidSelectedPanelId = null;
   solidViewer.classList.add('hidden');
   boardHelp.textContent = customEditor
     ? '已返回平面编辑，保存形态仍为立体棋盘。'
-    : '已返回当前保存布局。';
+    : cancelledQueenMove
+      ? '已关闭立体视图；尚未提交的后分步移动已取消，棋局保持不变。'
+      : interruptedAnimation
+        ? '已关闭立体视图；动画已停止，棋局保留关闭时已经完成的结算。'
+        : '已返回当前保存布局。';
   render();
 }
 
@@ -1532,20 +1574,32 @@ async function animateQueenStep(move) {
   }
 }
 
-async function animatePortalObservationLayer() {
+async function animatePortalObservationLayer(operation) {
   animationLock = true;
   try {
     if (solidBoardViewer) {
       await solidBoardViewer.exchangeLayers(solidBoardModel());
-      return;
+      return operation.isCurrent();
     }
     boardShell.classList.add('layer-sinking');
     await new Promise(resolve => setTimeout(resolve, 220));
+    if (!operation.isCurrent()) return false;
     render();
     boardShell.classList.remove('layer-sinking');
     boardShell.classList.add('layer-rising');
     await new Promise(resolve => setTimeout(resolve, 260));
-    boardShell.classList.remove('layer-rising');
+    return operation.isCurrent();
+  } finally {
+    boardShell.classList.remove('layer-sinking', 'layer-rising');
+    animationLock = false;
+  }
+}
+
+async function closePortalObservation(observationBaseModel) {
+  if (!solidBoardViewer || !observationBaseModel) return;
+  animationLock = true;
+  try {
+    await solidBoardViewer.exchangeLayers(observationBaseModel);
   } finally {
     animationLock = false;
   }
@@ -1553,15 +1607,17 @@ async function animatePortalObservationLayer() {
 
 async function chooseQueenStep(move) {
   if (!queenTurn || !move?.queenStep || animationLock || pendingMoveChoice) return;
+  const operation = moveLifecycle.begin();
   const previousContext = queenTurn;
   await animateQueenStep(move);
+  if (!operation.isCurrent()) return;
   queenTurn = move.nextQueenContext;
   queenTurn.portalDecision = null;
   queenTurn.detecting = Boolean(previousContext.detecting || move.portalSelf);
 
   if (move.portalSelf) {
     if (!solidBoardViewer) render();
-    await animatePortalObservationLayer();
+    if (!await animatePortalObservationLayer(operation)) return;
     showPortalDetection(false);
   }
 
@@ -1758,19 +1814,24 @@ async function animateMove(
   }
 }
 
-async function animateBoardLayerExchange(nextState) {
+async function animateBoardLayerExchange(nextState, operation) {
   animationLock = true;
   previewSide = null;
   boardShell.classList.add('layer-sinking');
   boardHelp.textContent = '发生吃子：当前棋盘层正在下沉，正下方的棋盘与棋子即将上浮……';
-  await new Promise(resolve => setTimeout(resolve, 280));
-  state = nextState;
-  render();
-  boardShell.classList.remove('layer-sinking');
-  boardShell.classList.add('layer-rising');
-  await new Promise(resolve => setTimeout(resolve, 320));
-  boardShell.classList.remove('layer-rising');
-  animationLock = false;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 280));
+    if (!operation.isCurrent()) return false;
+    state = nextState;
+    render();
+    boardShell.classList.remove('layer-sinking');
+    boardShell.classList.add('layer-rising');
+    await new Promise(resolve => setTimeout(resolve, 320));
+    return operation.isCurrent();
+  } finally {
+    boardShell.classList.remove('layer-sinking', 'layer-rising');
+    animationLock = false;
+  }
 }
 
 async function commitMove(
@@ -1781,8 +1842,14 @@ async function commitMove(
   { skipMoveAnimation = false } = {}
 ) {
   if (customEditor || isPreviewing()) return;
+  const operation = moveLifecycle.begin();
   lockUndoControls();
   const previousState = cloneGameState(state);
+  const observationBaseModel = solidBoardViewer &&
+    queenTurn?.detecting &&
+    queenTurn?.current?.layer === 'dormant'
+    ? solidBoardModel({ closePortalObservation: true })
+    : null;
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
@@ -1808,6 +1875,7 @@ async function commitMove(
       animationLock = false;
     }
   }
+  if (!operation.isCurrent()) return;
   const result = applyMove(state, pieceId, {
     ...move.target,
     ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {}),
@@ -1818,37 +1886,58 @@ async function commitMove(
     render();
     return;
   }
-  undoHistory.push(previousState);
-  resetQueenTurnState();
-  selectedPieceId = null;
-  selectedMoves = new Map();
-  simulationPreview = null;
-  pendingPromotion = null;
-  promotionModal.classList.add('hidden');
+  const observationClosed = await commitWhenCurrent(
+    operation,
+    closePortalObservation(observationBaseModel),
+    () => {
+      undoHistory.push(previousState);
+      resetQueenTurnState();
+      selectedPieceId = null;
+      selectedMoves = new Map();
+      simulationPreview = null;
+      pendingPromotion = null;
+      promotionModal.classList.add('hidden');
+    }
+  );
+  if (!observationClosed) return;
   if (solidBoardViewer && move.captureId) {
     animationLock = true;
     state = result.state;
     try {
-      await solidBoardViewer.exchangeLayers(solidBoardModel());
+      if (result.layerExchange?.type === 'solid-vertex') {
+        await solidBoardViewer.exchangeVertex(solidBoardModel(), result.layerExchange.vertexKey);
+      } else if (result.layerExchange?.type === 'solid-edge') {
+        await solidBoardViewer.exchangeEdge(solidBoardModel(), result.layerExchange.edgeKey);
+      } else if (result.layerExchange?.type === 'solid-face') {
+        await solidBoardViewer.exchangeFace(solidBoardModel(), result.layerExchange.panelIndex);
+      }
     } finally {
       animationLock = false;
     }
+    if (!operation.isCurrent()) return;
   } else if (solidBoardViewer) {
     state = result.state;
   } else if (move.captureId) {
-    await animateBoardLayerExchange(result.state);
+    if (!await animateBoardLayerExchange(result.state, operation)) return;
   } else {
     state = result.state;
   }
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
-    : decisionNote || (move.captureId
+    : decisionNote || ((move.captureId
       ? positionEffect === 'swap'
         ? '吃子完成：攻击者与降级后的防守棋子交换位置。'
         : positionEffect === 'occupy'
           ? '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
           : '攻击完成：攻击者留在原位，被攻击棋子已降级或移出。'
-      : '移动完成，轮到另一方。');
+      : '移动完成，轮到另一方。') +
+      (result.layerExchange?.type === 'solid-vertex'
+        ? '该公共顶点完成升沉，棱与三角面保持不变。'
+        : result.layerExchange?.type === 'solid-edge'
+          ? '该公共棱完成升沉，其他棱与三角面保持不变。'
+          : result.layerExchange?.type === 'solid-face'
+            ? `第 ${result.layerExchange.panelIndex + 1} 个三角面及其边界完成升沉。`
+            : ''));
   if (solidBoardViewer) {
     solidViewerStatus.textContent = state.winner
       ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
@@ -2720,6 +2809,7 @@ function undoLastMove() {
 
 function resetGame() {
   if (customEditor) return;
+  moveLifecycle.invalidate();
   stopAutoSimulation();
   closeMoveChoice();
   resetQueenTurnState();
@@ -2731,6 +2821,9 @@ function resetGame() {
   simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
+  animationLock = false;
+  boardShell.classList.remove('layer-sinking', 'layer-rising');
+  solidBoardViewer?.cancelAnimations(solidBoardModel());
   boardHelp.textContent = `已从启用布局“${activeLayoutName}”重新开局。`;
   render();
   openActiveBoardShape();

@@ -3,14 +3,59 @@ import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
 import {
+  createSolidBoardViewer,
   findPanelAtPoint,
   findSolidTargetAtPoint,
   isSharedSolidPoint,
   mapPiecesToPanels,
   portalEndpointDisplayLabel,
+  solidEdgePieceIds,
+  solidFacePieceIds,
+  solidVertexPieceIds,
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
+
+test('重新开局取消立体升沉动画后查看器只保留新棋局模型', async t => {
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const originalWindow = globalThis.window;
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  globalThis.window = { matchMedia: () => ({ matches: true }) };
+  t.after(() => {
+    if (originalRequestAnimationFrame === undefined) delete globalThis.requestAnimationFrame;
+    else globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    if (originalCancelAnimationFrame === undefined) delete globalThis.cancelAnimationFrame;
+    else globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  });
+
+  const canvas = {
+    getContext: () => ({}),
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const oldModel = {
+    pieces: [{ id: 'old-piece', position: { q: 0, r: 0 }, panelIndex: 0 }]
+  };
+  const staleModel = {
+    pieces: [{ id: 'stale-piece', position: { q: 1, r: 1 }, panelIndex: 0 }]
+  };
+  const resetModel = {
+    pieces: [{ id: 'reset-piece', position: { q: -1, r: -1 }, panelIndex: 3 }]
+  };
+  const viewer = createSolidBoardViewer(canvas, oldModel);
+  const exchange = viewer.exchangeLayers(staleModel);
+
+  viewer.cancelAnimations(resetModel);
+
+  assert.equal(await exchange, false);
+  assert.equal(viewer.followPiece('reset-piece', false), true);
+  assert.equal(viewer.followPiece('stale-piece', false), false);
+  viewer.destroy();
+});
 
 test('传送端点标签区分当前层与立体潜藏层', () => {
   const endpoint = { faceLabel: '6B', pointNumber: 5 };
@@ -112,4 +157,47 @@ test('公共棱和公共顶点棋子会进入最后绘制层', () => {
   assert.equal(isSharedSolidPoint({ center: 0, u: 0.5, v: 0.5 }), true);
   assert.equal(isSharedSolidPoint({ center: 0, u: 1, v: 0 }), true);
   assert.equal(isSharedSolidPoint({ center: 0.25, u: 0.5, v: 0.25 }), false);
+});
+
+test('公共棱升沉选择同一物理棱及其端点上的棋子并排除面内棋子', () => {
+  const pieces = [
+    { id: 'edge-first-alias', position: { q: -1, r: 1 }, panelIndex: 1 },
+    { id: 'edge-second-point', position: { q: -3, r: 3 }, panelIndex: 2 },
+    { id: 'different-edge', position: { q: 1, r: 0 }, panelIndex: 0 },
+    { id: 'vertex', position: { q: 0, r: 0 }, panelIndex: 0 },
+    { id: 'face', position: { q: 1, r: 2 }, panelIndex: 0 }
+  ];
+
+  assert.deepEqual(
+    [...solidEdgePieceIds(pieces, 'c:top')],
+    ['edge-first-alias', 'edge-second-point', 'vertex']
+  );
+});
+
+test('公共顶点升沉只选择同一物理顶点并排除相邻棱棋子', () => {
+  const pieces = [
+    { id: 'top-first-alias', position: { q: 0, r: 0 }, panelIndex: 0 },
+    { id: 'top-second-alias', position: { q: 0, r: 0 }, panelIndex: 2 },
+    { id: 'top-edge', position: { q: 1, r: 0 }, panelIndex: 0 },
+    { id: 'other-vertex', position: { q: 4, r: 0 }, panelIndex: 0 }
+  ];
+
+  assert.deepEqual(
+    [...solidVertexPieceIds(pieces, 'top')],
+    ['top-first-alias', 'top-second-alias']
+  );
+});
+
+test('三角面升沉包含该面的棱与顶点并排除相邻面内部棋子', () => {
+  const pieces = [
+    { id: 'face-interior', position: { q: 1, r: 1 }, panelIndex: 0 },
+    { id: 'shared-edge-alias', position: { q: -1, r: 0 }, panelIndex: 2 },
+    { id: 'shared-vertex-alias', position: { q: 0, r: 0 }, panelIndex: 2 },
+    { id: 'other-face-interior', position: { q: -1, r: 2 }, panelIndex: 1 }
+  ];
+
+  assert.deepEqual(
+    [...solidFacePieceIds(pieces, 0)],
+    ['face-interior', 'shared-edge-alias', 'shared-vertex-alias']
+  );
 });

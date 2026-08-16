@@ -2,6 +2,7 @@ import {
   BOARD_RADIUS,
   CORNERS,
   panelIndexForPoint,
+  portalEndpointLocations,
   solidPointKey,
   verticalMirrorPanelIndex
 } from './game.js?v=separate-layout-storage-1';
@@ -247,6 +248,54 @@ export function assemblyPanelPreview(assembly, panelId) {
   };
 }
 
+function assemblyLayoutState(assembly) {
+  const faceLabels = {
+    front: Array(6).fill(null),
+    back: Array(6).fill(null)
+  };
+  const panelRotations = {
+    front: Array(6).fill(0),
+    back: Array(6).fill(0)
+  };
+  const boardStates = { front: [], back: [] };
+  assembly.slots.forEach((slot, slotIndex) => {
+    if (!slot) return;
+    const panel = panelById(assembly, slot.panelId);
+    const oppositeIndex = verticalMirrorPanelIndex(slotIndex);
+    faceLabels.front[slotIndex] = `${slot.panelId}${slot.face}`;
+    faceLabels.back[oppositeIndex] = `${slot.panelId}${oppositeFace(slot.face)}`;
+    panelRotations.front[slotIndex] = slot.rotation;
+    panelRotations.back[oppositeIndex] = normalizedRotation(360 - slot.rotation);
+    boardStates.front.push(...facePiecesAtSlot(
+      panel,
+      slot.face,
+      slot.rotation,
+      slotIndex
+    ).map(layoutPiece));
+    boardStates.back.push(...facePiecesAtSlot(
+      panel,
+      oppositeFace(slot.face),
+      slot.rotation,
+      slotIndex,
+      true
+    ).map(layoutPiece));
+  });
+  return { boardStates, faceLabels, panelRotations };
+}
+
+export function assemblyPortalEndpointLocations(assembly, portalPairs) {
+  const layout = assemblyLayoutState(assembly);
+  return portalEndpointLocations({
+    boardShape: 'solid',
+    boardStates: layout.boardStates,
+    boardFaceLabels: layout.faceLabels,
+    boardPanelRotations: layout.panelRotations,
+    portalPairs,
+    solidLayers: { outer: [], inner: [] },
+    solidFaceSides: Array(6).fill('front')
+  });
+}
+
 export function rotateAssemblyPanel(assembly, panelId) {
   const next = cloneAssembly(assembly);
   const panel = panelById(next, panelId);
@@ -294,29 +343,5 @@ export function assemblyToLayout(assembly) {
   if (assembly.slots.some(slot => !slot)) return { error: '请先将六块三角板全部安装到六面体骨架' };
   const collision = collisionError(assembly);
   if (collision) return { error: collision };
-  const faceLabels = { front: Array(6), back: Array(6) };
-  const panelRotations = { front: Array(6), back: Array(6) };
-  const boardStates = { front: [], back: [] };
-  assembly.slots.forEach((slot, slotIndex) => {
-    const panel = panelById(assembly, slot.panelId);
-    const oppositeIndex = verticalMirrorPanelIndex(slotIndex);
-    faceLabels.front[slotIndex] = `${slot.panelId}${slot.face}`;
-    faceLabels.back[oppositeIndex] = `${slot.panelId}${oppositeFace(slot.face)}`;
-    panelRotations.front[slotIndex] = slot.rotation;
-    panelRotations.back[oppositeIndex] = normalizedRotation(360 - slot.rotation);
-    boardStates.front.push(...facePiecesAtSlot(
-      panel,
-      slot.face,
-      slot.rotation,
-      slotIndex
-    ).map(layoutPiece));
-    boardStates.back.push(...facePiecesAtSlot(
-      panel,
-      oppositeFace(slot.face),
-      slot.rotation,
-      slotIndex,
-      true
-    ).map(layoutPiece));
-  });
-  return { boardStates, faceLabels, panelRotations };
+  return assemblyLayoutState(assembly);
 }

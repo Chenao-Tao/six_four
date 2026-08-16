@@ -1,12 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import {
+  commitWhenCurrent,
+  createOperationLifecycle
+} from './operation-lifecycle.js';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
 const aiWorker = readFileSync(new URL('./ai-worker.js', import.meta.url), 'utf8');
 const solidBoard = readFileSync(new URL('./solid-board.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+
+test('重新开局会使等待中的旧落子任务失效且不影响后续新任务', async () => {
+  const lifecycle = createOperationLifecycle();
+  const staleOperation = lifecycle.begin();
+  let resumeAnimation;
+  const animation = new Promise(resolve => {
+    resumeAnimation = resolve;
+  });
+  let currentState = 'old-game';
+  const undoEntries = [];
+  const staleCommit = commitWhenCurrent(staleOperation, animation, () => {
+    currentState = 'stale-move';
+    undoEntries.push('old-game');
+  });
+
+  lifecycle.invalidate();
+  currentState = 'new-game';
+  resumeAnimation();
+  assert.equal(await staleCommit, false);
+
+  assert.equal(currentState, 'new-game');
+  assert.deepEqual(undoEntries, []);
+  assert.equal(staleOperation.isCurrent(), false);
+  const currentOperation = lifecycle.begin();
+  assert.equal(currentOperation.isCurrent(), true);
+  assert.equal(await commitWhenCurrent(currentOperation, Promise.resolve(), () => {
+    currentState = 'current-move';
+  }), true);
+  assert.equal(currentState, 'current-move');
+});
+
+test('落子动画和立体查看器在重新开局时使用同一生命周期失效保护', () => {
+  const commit = app.match(/async function commitMove\([\s\S]*?\n}\n\nfunction chooseMove/);
+  const reset = app.match(/function resetGame\(\)[\s\S]*?\n}\n\nasync function toggleFacePreview/);
+
+  assert.ok(commit);
+  assert.match(commit[0], /const operation = moveLifecycle\.begin\(\)/);
+  assert.match(commit[0], /await commitWhenCurrent\([\s\S]*?closePortalObservation\(observationBaseModel\)/);
+  assert.match(commit[0], /if \(!await animateBoardLayerExchange\(result\.state, operation\)\) return/);
+  assert.ok(reset);
+  assert.match(reset[0], /moveLifecycle\.invalidate\(\)/);
+  assert.match(reset[0], /solidBoardViewer\?\.cancelAnimations\(solidBoardModel\(\)\)/);
+  assert.match(solidBoard, /cancelAnimations\(nextModel\)/);
+});
 
 test('模拟控制保留重开、背面预览和算法按钮，并移除吃子演示', () => {
   assert.doesNotMatch(html, /captureDemoButton|载入吃子演示/);
@@ -94,7 +142,7 @@ test('背面预览使用独立显示状态并锁定移动入口', () => {
 });
 
 test('实际吃子换层退出预览并采用规则层返回的新外层棋盘', () => {
-  assert.match(app, /async function animateBoardLayerExchange\(nextState\) \{[\s\S]*?previewSide = null/);
+  assert.match(app, /async function animateBoardLayerExchange\(nextState, operation\) \{[\s\S]*?previewSide = null/);
   assert.match(app, /state = nextState/);
 });
 
@@ -103,6 +151,18 @@ test('吃子换层动画携带整层棋盘且不旋转平面棋盘', () => {
   assert.match(styles, /\.board-shell\.layer-rising/);
   assert.doesNotMatch(app, /animateBoardFlip/);
   assert.match(app, /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+});
+
+test('立体吃子按顶点公共棱和三角面分流局部升沉动画', () => {
+  assert.match(solidBoard, /exchangeVertex\(nextModel, vertexKey\)/);
+  assert.match(solidBoard, /exchangeEdge\(nextModel, edgeKey\)/);
+  assert.match(solidBoard, /exchangeFace\(nextModel, panelIndex\)/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-vertex'/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-edge'/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-face'/);
+  assert.match(app, /solidBoardViewer\.exchangeVertex\(solidBoardModel\(\), result\.layerExchange\.vertexKey\)/);
+  assert.match(app, /solidBoardViewer\.exchangeEdge\(solidBoardModel\(\), result\.layerExchange\.edgeKey\)/);
+  assert.match(app, /solidBoardViewer\.exchangeFace\(solidBoardModel\(\), result\.layerExchange\.panelIndex\)/);
 });
 
 test('所有平面翻面动画使用垂直镜像轴', () => {
@@ -231,7 +291,7 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(html, /id="solidBoardCanvas"/);
   assert.match(html, /id="closeSolidViewButton"/);
   assert.match(app, /createSolidBoardViewer/);
-  assert.match(app, /function solidBoardModel\(\)/);
+  assert.match(app, /function solidBoardModel\([^)]*\)/);
   assert.match(app, /function openSolidBoard\(\)/);
   assert.match(app, /function closeSolidBoard\(\)/);
   assert.match(app, /function setBoardShape\(boardShape\)/);
@@ -239,7 +299,7 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /solidLayoutSnapshot/);
   assert.match(app, /customEditor\.solidAssembly = createSolidAssembly\(/);
   assert.match(app, /syncAssemblyPieces\(customEditor\.solidAssembly, sourceLayout\)/);
-  assert.match(app, /pieces: displayedPieces\(\)\.map/);
+  assert.match(app, /pieces: renderedPieces\.map/);
 });
 
 test('从立体对局进入自定义时载入当前同名棋子并保持立体形态', () => {
@@ -291,6 +351,19 @@ test('载入待组装入口会创建空骨架且平面方案可直接切换到�
   assert.match(switcher[0], /const schemeName = enteredName \|\| selectedFlatName \|\| selectedSolidName/);
   assert.doesNotMatch(switcher[0], /solidLayouts\(savedLayouts\)\.some\(layout => layout\.name === selectedFlatName\)/);
   assert.match(app, /saveSolidLayoutButton\.disabled = Boolean\(assemblyToLayout\(customEditor\.solidAssembly\)\.error\)/);
+});
+
+test('立体装配编辑显示同名平面布局的传送阵但不开放传送阵编辑', () => {
+  const modelBuilder = app.match(/function solidBoardModel\([^)]*\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
+  const assemblyBranch = modelBuilder?.[0].match(
+    /if \(customEditor\?\.solidAssembly\) \{[\s\S]*?\n  }/
+  );
+
+  assert.ok(assemblyBranch);
+  assert.match(assemblyBranch[0], /portalTargets/);
+  assert.match(assemblyBranch[0], /customEditor\.portalPairs/);
+  assert.match(assemblyBranch[0], /assemblyMode: true/);
+  assert.doesNotMatch(assemblyBranch[0], /editPortalEndpoint/);
 });
 
 test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
@@ -409,6 +482,7 @@ test('传送后进入眼睛检测态并在五秒或手动结束时提交空门�
   assert.match(app, /setTimeout\(\(\) => \{\s*finishPortalDetection\(/);
   assert.match(app, /finishPortalDetectionButton\.addEventListener\('click', finishPortalDetection\)/);
   assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+  assert.match(app, /closePortalObservation/);
   assert.match(styles, /\.portal-detection-eye\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*34px/);
   assert.match(styles, /\.portal-detection\s*\{[\s\S]*?top:\s*72px/);
   assert.match(styles, /--portal-eye-red:\s*#ff1f3d/);

@@ -135,7 +135,7 @@ test('后在第三步穿过 1A5 到 4B5 吃象后传送成功并触发换层', (
   ].find(item => item.id === 'bB').type, 'pawn');
 });
 
-test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外层', () => {
+test('立体棋盘的后传送到内层吃象后按被吃子所在面局部升沉', () => {
   const outer = [
     { ...piece('wQ', 'white', 'queen', -3, 2), panelIndex: 2, portalTurns: 3 }
   ];
@@ -168,10 +168,11 @@ test('立体棋盘的后可从外层 3A5 传到内层 6B5 吃象并交换内外�
     mapKey: portalMove.mapKey
   });
   assert.equal(result.error, undefined);
+  assert.deepEqual(result.layerExchange, { type: 'solid-face', panelIndex: 1 });
   assert.equal(result.state.solidLayers.outer.some(item => item.id === 'wQ'), true);
   assert.equal(result.state.solidLayers.outer.find(item => item.id === 'wQ').portalTurns, 3);
-  assert.equal(result.state.solidLayers.inner.some(item => item.id === 'bB' && item.type === 'pawn'), true);
-  assert.equal(result.state.solidFaceSides.every(side => side === 'back'), true);
+  assert.equal(result.state.solidLayers.outer.some(item => item.id === 'bB' && item.type === 'pawn'), true);
+  assert.deepEqual(result.state.solidFaceSides, ['front', 'back', 'front', 'front', 'front', 'front']);
 });
 
 test('象吃兵时兵被消灭且象占据目标点', () => {
@@ -887,7 +888,7 @@ test('立体王沿棱移动时忽略棱上棋子但受目标顶点占用约束',
   assert.equal(capture?.captureId, 'target');
 });
 
-test('立体吃子不旋转棋盘并整体交换内外层棋盘与棋子', () => {
+test('立体面内吃子只升沉被吃子所在三角面及其边界', () => {
   const state = {
     ...solidStateOf([
       { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
@@ -900,50 +901,158 @@ test('立体吃子不旋转棋盘并整体交换内外层棋盘与棋子', () =>
         { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
         { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
         { ...piece('outer', 'white', 'bishop', 1, 2), panelIndex: 0 },
+        { ...piece('shared-edge-alias', 'white', 'bishop', -1, 0), panelIndex: 2 },
         { ...piece('other-face', 'black', 'bishop', -1, 2), panelIndex: 1 }
       ],
-      inner: [{ ...piece('inner', 'black', 'bishop', 1, 2), panelIndex: 0 }]
+      inner: [
+        { ...piece('inner', 'black', 'bishop', 1, 2), panelIndex: 0 },
+        { ...piece('inner-other-face', 'black', 'bishop', -1, 2), panelIndex: 1 }
+      ]
     },
     solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
   };
   state.pieces = state.solidLayers.outer;
 
-  const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
+  const applied = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 });
+  const result = applied.state;
 
-  assert.deepEqual(result.solidFaceSides, Array(6).fill('back'));
+  assert.deepEqual(applied.layerExchange, { type: 'solid-face', panelIndex: 0 });
+  assert.deepEqual(result.solidFaceSides, ['back', 'front', 'front', 'front', 'front', 'front']);
   assert.equal(findPiece(result, 'outer'), undefined);
   assert.ok(findPiece(result, 'inner'));
-  assert.equal(findPiece(result, 'other-face'), undefined);
+  assert.ok(findPiece(result, 'other-face'));
+  assert.equal(findPiece(result, 'inner-other-face'), undefined);
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wP'));
   assert.ok(result.solidLayers.inner.some(item => item.id === 'outer'));
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'other-face'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'shared-edge-alias'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'inner-other-face'));
 });
 
-test('公共棱吃子正常结算后也整体交换棋盘与棋子层级', () => {
+test('公共棱吃子只交换该棱棋子层级且不翻动六个三角面', () => {
   const outer = [
     { ...piece('wB', 'white', 'bishop', 1, 1), panelIndex: 0 },
-    { ...piece('bP', 'black', 'pawn', -1, 1), panelIndex: 1 }
+    { ...piece('bP', 'black', 'pawn', -1, 1), panelIndex: 1 },
+    { ...piece('edge-outer', 'white', 'bishop', -2, 2), panelIndex: 1 },
+    { ...piece('face-outer', 'white', 'bishop', 1, 2), panelIndex: 0 }
   ];
   const state = {
     ...solidStateOf(outer),
-    solidLayers: { outer, inner: [] },
+    solidLayers: {
+      outer,
+      inner: [
+        { ...piece('edge-inner', 'black', 'bishop', -3, 3), panelIndex: 1 },
+        { ...piece('face-inner', 'black', 'bishop', -1, 2), panelIndex: 1 }
+      ]
+    },
     solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
   };
+  state.pieces = state.solidLayers.outer;
 
   const move = [...legalMoves(state, 'wB').values()]
     .find(item => item.captureId === 'bP');
 
   assert.equal(move.panelIndex, 1, '回归场景必须从相邻面进入公共棱');
-  const result = applyMove(
+  const applied = applyMove(
     state,
     'wB',
     { ...move.target, panelIndex: move.panelIndex }
-  ).state;
+  );
+  const result = applied.state;
 
   assert.equal(findPiece(result, 'bP'), undefined);
   assert.equal(findPiece(result, 'wB'), undefined);
-  assert.deepEqual(result.solidFaceSides, Array(6).fill('back'));
+  assert.deepEqual(result.solidFaceSides, Array(6).fill('front'));
+  assert.deepEqual(applied.layerExchange, { type: 'solid-edge', edgeKey: 'c:top' });
+  assert.ok(findPiece(result, 'edge-inner'));
+  assert.ok(findPiece(result, 'face-outer'));
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wB'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-outer'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'face-inner'));
+  assert.match(result.history.at(-1), /该公共棱与棱上棋子交换上下层/);
+});
+
+test('王沿公共棱吃顶点上的后时只按被吃子顶点进行升沉', () => {
+  const outer = [
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('bQ', 'black', 'queen', 4, 0), panelIndex: 0 },
+    { ...piece('face-outer', 'white', 'bishop', 1, 2), panelIndex: 0 }
+  ];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: {
+      outer,
+      inner: [
+        { ...piece('vertex-inner', 'black', 'bishop', 4, 0), panelIndex: 0 },
+        { ...piece('edge-inner', 'black', 'bishop', 2, 0), panelIndex: 0 }
+      ]
+    },
+    solidFaceSides: Array(6).fill('front')
+  };
+  state.pieces = state.solidLayers.outer;
+  const move = [...legalMoves(state, 'wK').values()]
+    .find(item => item.captureId === 'bQ');
+
+  const applied = applyMove(state, 'wK', { ...move.target, panelIndex: move.panelIndex });
+
+  assert.deepEqual(applied.layerExchange, { type: 'solid-vertex', vertexKey: 'a' });
+  assert.deepEqual(applied.state.solidFaceSides, Array(6).fill('front'));
+  assert.ok(findPiece(applied.state, 'vertex-inner'));
+  assert.equal(findPiece(applied.state, 'edge-inner'), undefined);
+  assert.ok(findPiece(applied.state, 'face-outer'));
+  assert.ok(findPiece(applied.state, 'wK'));
+  assert.ok(applied.state.solidLayers.inner.some(item => item.id === 'edge-inner'));
+  assert.ok(applied.state.solidLayers.inner.some(item => item.id === 'bQ' && item.type === 'bishop'));
+});
+
+test('后连续三步沿公共棱吃顶点棋子时仍只进行顶点升沉', () => {
+  const outer = [
+    { ...piece('wQ', 'white', 'queen', 1, 0), panelIndex: 0 },
+    { ...piece('bB', 'black', 'bishop', 4, 0), panelIndex: 0 },
+    { ...piece('face-outer', 'white', 'pawn', 1, 2), panelIndex: 0 }
+  ];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: {
+      outer,
+      inner: [
+        { ...piece('vertex-inner', 'black', 'pawn', 4, 0), panelIndex: 0 },
+        { ...piece('edge-inner', 'black', 'pawn', 2, 0), panelIndex: 0 }
+      ]
+    },
+    solidFaceSides: Array(6).fill('front')
+  };
+  state.pieces = state.solidLayers.outer;
+  const move = [...legalMoves(state, 'wQ').values()]
+    .find(item => item.captureId === 'bB');
+
+  const applied = applyMove(state, 'wQ', { ...move.target, mapKey: move.mapKey });
+
+  assert.deepEqual(applied.layerExchange, { type: 'solid-vertex', vertexKey: 'a' });
+  assert.ok(findPiece(applied.state, 'vertex-inner'));
+  assert.equal(findPiece(applied.state, 'edge-inner'), undefined);
+  assert.ok(findPiece(applied.state, 'face-outer'));
+  assert.ok(findPiece(applied.state, 'bB'));
+  assert.ok(applied.state.solidLayers.inner.some(item => item.id === 'edge-inner'));
+  assert.ok(applied.state.solidLayers.inner.some(item => item.id === 'wQ'));
+});
+
+test('没有吃子的普通公共棱移动不触发升沉', () => {
+  const outer = [{ ...piece('wQ', 'white', 'queen', 1, 0), panelIndex: 0 }];
+  const state = {
+    ...solidStateOf(outer),
+    solidLayers: { outer, inner: [] },
+    solidFaceSides: Array(6).fill('front')
+  };
+  state.pieces = state.solidLayers.outer;
+  const move = [...legalMoves(state, 'wQ').values()]
+    .find(item => item.target.q === 4 && item.target.r === 0);
+
+  const applied = applyMove(state, 'wQ', { ...move.target, mapKey: move.mapKey });
+
+  assert.equal(applied.layerExchange, null);
+  assert.deepEqual(applied.state.solidFaceSides, Array(6).fill('front'));
+  assert.ok(findPiece(applied.state, 'wQ'));
+  assert.equal(applied.state.solidLayers.inner.length, 0);
 });
 
 test('公共棱正下方有棋子时两枚棋子直接交换层级', () => {
@@ -970,7 +1079,7 @@ test('公共棱正下方有棋子时两枚棋子直接交换层级', () => {
   assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-outer'));
 });
 
-test('公共顶点棋子与其他位置一样整体上浮下沉', () => {
+test('面升沉会带动该面边界上的公共顶点但不会影响其他面', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
