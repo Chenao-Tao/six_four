@@ -21,7 +21,6 @@ import {
   positionSignature,
   promotionTypeForMove,
   rotateBoardPanel,
-  solidPointKey,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
@@ -947,70 +946,31 @@ test('公共棱吃子正常结算后也整体交换棋盘与棋子层级', () =>
   assert.ok(result.solidLayers.inner.some(item => item.id === 'wB'));
 });
 
-test('公共棱内外层同一物理位置都有棋子时保持原层，其他棋子正常升沉', () => {
+test('公共棱正下方有棋子时两枚棋子直接交换层级', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
-    { ...piece('edge-outer', 'white', 'bishop', 1, 0), panelIndex: 0 },
-    { ...piece('outer-regular', 'white', 'bishop', 1, 2), panelIndex: 0 }
+    { ...piece('edge-outer', 'white', 'bishop', 1, 0), panelIndex: 0 }
   ];
   const state = {
     ...solidStateOf(outer),
     solidLayers: {
       outer,
-      inner: [
-        { ...piece('edge-inner', 'black', 'bishop', -1, 0), panelIndex: 2 },
-        { ...piece('inner-regular', 'black', 'bishop', -1, 2), panelIndex: 1 }
-      ]
+      inner: [{ ...piece('edge-inner', 'black', 'bishop', 3, 0), panelIndex: 0 }]
     },
     solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
   };
   state.pieces = state.solidLayers.outer;
 
-  assert.equal(
-    solidPointKey(state.solidLayers.outer[2].position, state.solidLayers.outer[2].panelIndex),
-    solidPointKey(state.solidLayers.inner[0].position, state.solidLayers.inner[0].panelIndex),
-    '夹具必须使用不同三角面别名表示同一个公共棱物理位置'
-  );
-
   const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
 
-  assert.ok(findPiece(result, 'edge-outer'));
+  assert.equal(findPiece(result, 'edge-outer'), undefined);
   assert.equal(findPiece(result, 'wP'), undefined);
-  assert.equal(findPiece(result, 'edge-inner'), undefined);
-  assert.ok(findPiece(result, 'inner-regular'));
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-inner'));
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'outer-regular'));
+  assert.ok(findPiece(result, 'edge-inner'));
+  assert.ok(result.solidLayers.inner.some(item => item.id === 'edge-outer'));
 });
 
-test('公共顶点通过不同相邻面表示时仍按同一物理位置锁定升沉', () => {
-  const outer = [
-    { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
-    { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },
-    { ...piece('apex-outer', 'white', 'king', 4, 0), panelIndex: 0 }
-  ];
-  const innerApex = { ...piece('apex-inner', 'black', 'king', -4, 0), panelIndex: 2 };
-  const state = {
-    ...solidStateOf(outer),
-    solidLayers: { outer, inner: [innerApex] },
-    solidFaceSides: ['front', 'front', 'front', 'front', 'front', 'front']
-  };
-  state.pieces = state.solidLayers.outer;
-
-  assert.equal(
-    solidPointKey(outer[2].position, outer[2].panelIndex),
-    solidPointKey(innerApex.position, innerApex.panelIndex),
-    '夹具必须使用不同三角面别名表示同一个公共顶点'
-  );
-
-  const result = applyMove(state, 'wP', { q: 2, r: 1, panelIndex: 0 }).state;
-
-  assert.ok(findPiece(result, 'apex-outer'));
-  assert.equal(findPiece(result, 'apex-inner'), undefined);
-  assert.ok(result.solidLayers.inner.some(item => item.id === 'apex-inner'));
-});
-
-test('公共位置仅一层有棋子时仍随该层正常上浮下沉', () => {
+test('公共顶点棋子与其他位置一样整体上浮下沉', () => {
   const outer = [
     { ...piece('wP', 'white', 'pawn', 1, 1), panelIndex: 0 },
     { ...piece('bP', 'black', 'pawn', 2, 1), panelIndex: 0 },

@@ -9,8 +9,7 @@ import {
   mapPiecesToPanels,
   portalEndpointDisplayLabel,
   solidCameraAngles,
-  solidEffectFrame,
-  stationarySolidPieceIds
+  solidEffectFrame
 } from './solid-board.js';
 
 test('传送端点标签区分当前层与立体潜藏层', () => {
@@ -113,22 +112,4 @@ test('公共棱和公共顶点棋子会进入最后绘制层', () => {
   assert.equal(isSharedSolidPoint({ center: 0, u: 0.5, v: 0.5 }), true);
   assert.equal(isSharedSolidPoint({ center: 0, u: 1, v: 0 }), true);
   assert.equal(isSharedSolidPoint({ center: 0.25, u: 0.5, v: 0.25 }), false);
-});
-
-test('换层动画只保持位置和棋子状态都未变化的公共锁定棋子', () => {
-  const currentPieces = [
-    { id: 'locked', side: 'white', type: 'bishop', position: { q: 1, r: 0 }, panelIndex: 0 },
-    { id: 'moving', side: 'white', type: 'pawn', position: { q: 1, r: 1 }, panelIndex: 0 },
-    { id: 'promoting', side: 'white', type: 'bishop', position: { q: 0, r: 0 }, panelIndex: 0 },
-    { id: 'regular', side: 'black', type: 'bishop', position: { q: 1, r: 2 }, panelIndex: 0 }
-  ];
-  const nextPieces = [
-    { ...currentPieces[0], position: { ...currentPieces[0].position } },
-    { ...currentPieces[1], position: { q: 2, r: 1 } },
-    { ...currentPieces[2], type: 'queen' },
-    { ...currentPieces[3], position: { ...currentPieces[3].position } },
-    { id: 'surfaced', side: 'black', type: 'pawn', position: { q: -1, r: 2 }, panelIndex: 1 }
-  ];
-
-  assert.deepEqual([...stationarySolidPieceIds(currentPieces, nextPieces)], ['locked']);
 });
