@@ -205,6 +205,18 @@ test('立体交互优先命中更靠近观察者的棋子或合法落点', () =>
   assert.equal(findSolidTargetAtPoint(targets, { x: 100, y: 100 }), null);
 });
 
+test('后的相邻单步落点与自身命中圈重叠时点击落点优先执行移动', () => {
+  const targets = [
+    { type: 'piece', pieceId: 'white-queen', x: 50, y: 50, radius: 24, depth: 1 },
+    { type: 'move', targetKey: 'queen-step-1', x: 68, y: 50, radius: 17, depth: 0.9 }
+  ];
+
+  assert.equal(
+    findSolidTargetAtPoint(targets, { x: 68, y: 50 }).targetKey,
+    'queen-step-1'
+  );
+});
+
 test('立体操作特效提供稳定进度并在时长结束后清除', () => {
   const effect = { startedAt: 1000, duration: 800 };
 
