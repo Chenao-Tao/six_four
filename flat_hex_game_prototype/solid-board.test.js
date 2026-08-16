@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
 import {
+  centeredGlyphPlacement,
   createSolidBoardViewer,
   findPanelAtPoint,
   findSolidTargetAtPoint,
@@ -15,6 +16,42 @@ import {
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
+
+test('立体棋子文字按可见字形边界居中而非依赖字体排版中线', () => {
+  const placement = centeredGlyphPlacement(
+    {
+      actualBoundingBoxLeft: 1,
+      actualBoundingBoxRight: 17,
+      actualBoundingBoxAscent: 15,
+      actualBoundingBoxDescent: 3
+    },
+    { x: 100, y: 80 }
+  );
+
+  assert.deepEqual(placement, {
+    x: 92,
+    y: 86,
+    textAlign: 'left',
+    textBaseline: 'alphabetic'
+  });
+});
+
+test('浏览器未提供字形实际边界时立体棋子文字安全回退到标准居中', () => {
+  const expected = {
+      x: 100,
+      y: 80,
+      textAlign: 'center',
+      textBaseline: 'middle'
+  };
+
+  assert.deepEqual(centeredGlyphPlacement({ width: 18 }, { x: 100, y: 80 }), expected);
+  assert.deepEqual(centeredGlyphPlacement({
+    actualBoundingBoxLeft: 0,
+    actualBoundingBoxRight: 0,
+    actualBoundingBoxAscent: 0,
+    actualBoundingBoxDescent: 0
+  }, { x: 100, y: 80 }), expected);
+});
 
 test('重新开局取消立体升沉动画后查看器只保留新棋局模型', async t => {
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;

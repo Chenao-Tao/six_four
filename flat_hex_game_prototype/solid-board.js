@@ -11,6 +11,32 @@ const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
 const EFFECT_DURATIONS = { rotate: 720, flip: 780, swap: 900 };
 
+export function centeredGlyphPlacement(metrics, center) {
+  const bounds = [
+    metrics?.actualBoundingBoxLeft,
+    metrics?.actualBoundingBoxRight,
+    metrics?.actualBoundingBoxAscent,
+    metrics?.actualBoundingBoxDescent
+  ];
+  const hasVisibleBounds = bounds.every(Number.isFinite) &&
+    metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight > 0 &&
+    metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent > 0;
+  if (!hasVisibleBounds) {
+    return {
+      x: center.x,
+      y: center.y,
+      textAlign: 'center',
+      textBaseline: 'middle'
+    };
+  }
+  return {
+    x: center.x + (metrics.actualBoundingBoxLeft - metrics.actualBoundingBoxRight) / 2,
+    y: center.y + (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2,
+    textAlign: 'left',
+    textBaseline: 'alphabetic'
+  };
+}
+
 export function portalEndpointDisplayLabel(portal, dormantLayerName = '内') {
   const endpoint = typeof portal?.faceLabel === 'string' && Number.isInteger(portal?.pointNumber)
     ? `${portal.faceLabel}${portal.pointNumber}`
@@ -632,8 +658,15 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.strokeStyle = isSelectedPiece ? '#ffc96a' : piece.side === 'white' ? '#7196ad' : '#d6eaf7';
       context.stroke();
       context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
-      context.font = `750 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", sans-serif`;
-      context.fillText(PIECE_SYMBOLS[piece.type] ?? '?', position.x, position.y + 1);
+      context.font = `700 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`;
+      const symbol = PIECE_SYMBOLS[piece.type] ?? '?';
+      const symbolPlacement = centeredGlyphPlacement(
+        context.measureText(symbol),
+        { x: position.x, y: position.y }
+      );
+      context.textAlign = symbolPlacement.textAlign;
+      context.textBaseline = symbolPlacement.textBaseline;
+      context.fillText(symbol, symbolPlacement.x, symbolPlacement.y);
       if (piece.type === 'queen' && piece.portalTurns > 0) {
         const badgeX = position.x + radius * 0.72;
         const badgeY = position.y - radius * 0.72;
@@ -645,7 +678,9 @@ export function createSolidBoardViewer(canvas, initialModel, {
         context.strokeStyle = '#ffc96a';
         context.stroke();
         context.fillStyle = '#fff3c2';
-        context.font = `850 ${Math.max(9, radius * 0.42)}px "Microsoft YaHei", sans-serif`;
+        context.font = `700 ${Math.max(9, radius * 0.42)}px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
         context.fillText(String(piece.portalTurns), badgeX, badgeY + 1);
       }
       interactionTargets.push({
