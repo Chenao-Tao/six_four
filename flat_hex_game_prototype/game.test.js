@@ -689,6 +689,29 @@ test('王吃后时双方保持原位，后强制降级为象', () => {
   assert.equal(findPiece(result.state, 'bQ').type, 'bishop');
 });
 
+test('平面王可以攻击相邻一格的后但不能攻击更远的后或其他棋子', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 0, 0),
+    piece('near-queen', 'black', 'queen', 1, 0),
+    piece('far-queen', 'black', 'queen', 2, 0),
+    piece('near-pawn', 'black', 'pawn', 0, 1)
+  ]);
+
+  const moves = [...legalMoves(state, 'wK').values()];
+  const capture = moves.find(move => move.captureId === 'near-queen');
+
+  assert.ok(capture);
+  assert.deepEqual(capture.path, [{ q: 0, r: 0 }, { q: 1, r: 0 }]);
+  assert.equal(moves.some(move => move.captureId === 'far-queen'), false);
+  assert.equal(moves.some(move => move.captureId === 'near-pawn'), false);
+
+  const result = applyMove(state, 'wK', capture);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(findPiece(result.state, 'wK').position, { q: 0, r: 0 });
+  assert.deepEqual(findPiece(result.state, 'near-queen').position, { q: 1, r: 0 });
+  assert.equal(findPiece(result.state, 'near-queen').type, 'bishop');
+});
+
 test('带传送能力的后被降级时立即清除传送能力', () => {
   const state = stateOf([
     piece('wK', 'white', 'king', 4, 0),
@@ -886,6 +909,30 @@ test('立体王沿棱移动时忽略棱上棋子但受目标顶点占用约束',
   const capture = [...legalMoves(capturableVertex, 'wK').values()]
     .find(move => move.pointKey === '0,0,4,0,0');
   assert.equal(capture?.captureId, 'target');
+});
+
+test('立体王可以跨相邻面攻击一格内的后但不扩大对其他棋子的攻击范围', () => {
+  const state = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('near-queen', 'black', 'queen', -1, 1), panelIndex: 1 },
+    { ...piece('far-queen', 'black', 'queen', 0, 2), panelIndex: 0 },
+    { ...piece('near-pawn', 'black', 'pawn', 1, 0), panelIndex: 0 }
+  ]);
+
+  const moves = [...legalMoves(state, 'wK').values()];
+  const capture = moves.find(move => move.captureId === 'near-queen');
+
+  assert.ok(capture);
+  assert.equal(capture.panelIndex, 1);
+  assert.deepEqual(capture.path, [{ q: 0, r: 0 }, { q: -1, r: 1 }]);
+  assert.equal(moves.some(move => move.captureId === 'far-queen'), false);
+  assert.equal(moves.some(move => move.captureId === 'near-pawn'), false);
+
+  const result = applyMove(state, 'wK', capture);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(findPiece(result.state, 'wK').position, { q: 0, r: 0 });
+  assert.equal(findPiece(result.state, 'near-queen').type, 'bishop');
+  assert.equal(findPiece(result.state, 'near-queen').panelIndex, 1);
 });
 
 test('立体面内吃子只升沉被吃子所在三角面及其边界', () => {
