@@ -44,7 +44,7 @@ export const CORNERS = DIRECTIONS.map(direction => ({
   q: direction[0] * BOARD_RADIUS,
   r: direction[1] * BOARD_RADIUS
 }));
-export const KING_POINTS = [{ q: 0, r: 0 }, ...CORNERS];
+export const KING_POINTS = CORNERS;
 const SOLID_SLOT_VERTICES = [
   ['top', 'a', 'b'],
   ['top', 'b', 'c'],
@@ -834,8 +834,15 @@ function normalizeCustomFace(face, pieces, boardShape) {
       ? solidPointKey(position, panelIndex)
       : positionKey;
     if (occupied.has(occupiedKey)) return { error: `${faceName}同一交点只能放一枚棋子` };
-    if (item.type === 'king' && !KING_POINT_KEYS.has(positionKey)) {
-      return { error: `${faceName}的王只能放在中心或六个外角` };
+    const kingIsOnVertex = boardShape === 'solid'
+      ? solidPointVertices(occupiedKey).length === 1
+      : KING_POINT_KEYS.has(positionKey);
+    if (item.type === 'king' && !kingIsOnVertex) {
+      return {
+        error: boardShape === 'solid'
+          ? `${faceName}的王只能放在立体图形的顶点`
+          : `${faceName}的王只能放在六边形的六个顶点`
+      };
     }
     occupied.add(occupiedKey);
     if (item.type === 'king') kingCounts[item.side] += 1;
@@ -1731,21 +1738,17 @@ function addAdjacentQueenCaptures(state, pieceToMove, occupied, moves) {
 function kingMoves(state, pieceToMove, occupied) {
   if (state.boardShape === 'solid') return solidKingMoves(state, pieceToMove, occupied);
   const moves = new Map();
-  const currentIndex = KING_POINTS.findIndex(point => pointsEqual(point, pieceToMove.position));
+  const currentIndex = CORNERS.findIndex(point => pointsEqual(point, pieceToMove.position));
   if (currentIndex < 0) return moves;
-  const center = KING_POINTS[0];
-  const targets = currentIndex === 0
-    ? CORNERS
-    : [center, CORNERS[(currentIndex - 2 + 6) % 6], CORNERS[currentIndex % 6]];
+  const targets = [
+    CORNERS[(currentIndex - 1 + CORNERS.length) % CORNERS.length],
+    CORNERS[(currentIndex + 1) % CORNERS.length]
+  ];
 
   targets.forEach(target => {
     const path = straightPath(pieceToMove.position, target);
     if (!path) return;
-    const blocked = path.slice(1, -1).some(point => {
-      const pointKey = boardPointKey(state, point, movePanelIndex(pieceToMove, point));
-      return pointKey ? occupied.has(pointKey) : false;
-    });
-    if (!blocked) addMove(state, moves, pieceToMove, target, path, occupied);
+    addMove(state, moves, pieceToMove, target, path, occupied);
   });
   return addAdjacentQueenCaptures(state, pieceToMove, occupied, moves);
 }

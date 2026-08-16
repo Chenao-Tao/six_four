@@ -65,5 +65,8 @@ test('缩减棋子配对对局交换先后手且优化算法得分不低于 60%'
       ['black', 'white']
     );
   });
+  assert.ok(first.rows
+    .filter(row => row.name === '缩减重复局面（获胜动作不可过滤）')
+    .every(row => row.winner === row.optimizedSide));
   assert.ok(first.score >= 0.6, `优化算法配对得分仅为 ${first.score}`);
 });

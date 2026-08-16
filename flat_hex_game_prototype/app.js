@@ -2152,7 +2152,7 @@ function openPieceEditor(point) {
 function setEditorPiece(side, type) {
   if (!customEditor || !editorPoint) return;
   if (type === 'king' && !KING_POINTS.some(point => keyOf(point) === keyOf(editorPoint))) {
-    pieceEditorPoint.textContent = '王只能放在棋盘中心或六个外角，请取消后重新选点。';
+    pieceEditorPoint.textContent = '王只能放在六边形的六个顶点，请取消后重新选点。';
     return;
   }
   const pieces = customEditor.boardStates[customEditor.side];

@@ -77,7 +77,7 @@ export function builtInLayouts() {
     }, state),
     snapshot(SOLID_TEST_LAYOUT_NAME, 'flat', {
     front: [
-      piece('preset-solid-wk', 'white', 'king', 0, 0),
+      piece('preset-solid-wk', 'white', 'king', -4, 0),
       piece('preset-solid-bk', 'black', 'king', 4, 0),
       piece('preset-solid-wp', 'white', 'pawn', 1, 1),
       piece('preset-solid-bp', 'black', 'pawn', 2, 1),
