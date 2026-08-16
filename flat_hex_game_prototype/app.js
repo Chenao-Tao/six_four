@@ -39,7 +39,7 @@ import {
   createSolidBoardViewer,
   mapPiecesToPanels,
   portalEndpointDisplayLabel
-} from './solid-board.js?v=optional-portal-1';
+} from './solid-board.js?v=solid-input-text-1';
 import {
   assemblyPanelPreview,
   assemblyPortalEndpointLocations,

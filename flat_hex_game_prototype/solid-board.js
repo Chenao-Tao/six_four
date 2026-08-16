@@ -37,6 +37,16 @@ export function centeredGlyphPlacement(metrics, center) {
   };
 }
 
+export function drawCenteredGlyph(context, text, center) {
+  context.textAlign = 'left';
+  context.textBaseline = 'alphabetic';
+  const placement = centeredGlyphPlacement(context.measureText(text), center);
+  context.textAlign = placement.textAlign;
+  context.textBaseline = placement.textBaseline;
+  context.fillText(text, placement.x, placement.y);
+  return placement;
+}
+
 export function portalEndpointDisplayLabel(portal, dormantLayerName = '内') {
   const endpoint = typeof portal?.faceLabel === 'string' && Number.isInteger(portal?.pointNumber)
     ? `${portal.faceLabel}${portal.pointNumber}`
@@ -660,13 +670,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
       context.font = `700 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`;
       const symbol = PIECE_SYMBOLS[piece.type] ?? '?';
-      const symbolPlacement = centeredGlyphPlacement(
-        context.measureText(symbol),
-        { x: position.x, y: position.y }
-      );
-      context.textAlign = symbolPlacement.textAlign;
-      context.textBaseline = symbolPlacement.textBaseline;
-      context.fillText(symbol, symbolPlacement.x, symbolPlacement.y);
+      drawCenteredGlyph(context, symbol, { x: position.x, y: position.y });
       if (piece.type === 'queen' && piece.portalTurns > 0) {
         const badgeX = position.x + radius * 0.72;
         const badgeY = position.y - radius * 0.72;
