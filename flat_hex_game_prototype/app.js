@@ -533,7 +533,7 @@ function solidPortalTargets(locations, visiblePortalLayer = 'active') {
   });
 }
 
-function solidBoardModel() {
+function solidBoardModel({ closePortalObservation = false } = {}) {
   if (customEditor?.solidAssembly) {
     const assemblyModel = assemblyViewModel(customEditor.solidAssembly);
     const portalTargets = solidPortalTargets(assemblyPortalEndpointLocations(
@@ -553,8 +553,14 @@ function solidBoardModel() {
   const side = displayedBoardSide();
   const faceLabels = [...displayedFaceLabels().front];
   const panelRotations = [...displayedPanelRotations().front];
+  const closingPortalObservation = Boolean(
+    closePortalObservation &&
+    queenTurn?.current?.layer === 'dormant' &&
+    state.solidLayers
+  );
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
-    const showInnerLayer = previewSide !== null || queenTurn?.current.layer === 'dormant';
+    const showInnerLayer = !closingPortalObservation &&
+      (previewSide !== null || queenTurn?.current.layer === 'dormant');
     const visibleFaceSides = showInnerLayer
       ? state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back')
       : state.solidFaceSides;
@@ -565,8 +571,13 @@ function solidBoardModel() {
       panelRotations[panelIndex] = displayedPanelRotations().back[oppositeIndex];
     });
   }
-  const moveTargets = customEditor ? [] : [...selectedMoves.values()].map(move => {
-    const captured = move.captureId ? displayedPieces().find(piece => piece.id === move.captureId) : null;
+  const renderedPieces = closingPortalObservation
+    ? state.solidLayers.outer
+        .filter(piece => piece.id !== queenTurn.pieceId)
+        .map(piece => ({ ...piece, position: { ...piece.position } }))
+    : displayedPieces();
+  const moveTargets = customEditor || closingPortalObservation ? [] : [...selectedMoves.values()].map(move => {
+    const captured = move.captureId ? renderedPieces.find(piece => piece.id === move.captureId) : null;
     const renderedTarget = move.displayTarget ?? move.target;
     const renderedPanelIndex = move.portalSelf
       ? move.portalTransition?.entry.panelIndex
@@ -580,15 +591,17 @@ function solidBoardModel() {
       portalColor: move.portalColor
     };
   });
-  const visiblePortalLayer = queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
+  const visiblePortalLayer = closingPortalObservation
+    ? 'active'
+    : queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
   const portalTargets = customEditor
     ? []
     : solidPortalTargets(portalEndpointLocations(state), visiblePortalLayer);
   const previewMover = simulationPreview
-    ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
+    ? renderedPieces.find(piece => piece.id === simulationPreview.pieceId)
     : null;
   const previewCaptured = simulationPreview?.move.captureId
-    ? displayedPieces().find(piece => piece.id === simulationPreview.move.captureId)
+    ? renderedPieces.find(piece => piece.id === simulationPreview.move.captureId)
     : null;
   const plannedMove = previewMover
     ? {
@@ -604,7 +617,7 @@ function solidBoardModel() {
     : null;
   return {
     side,
-    pieces: displayedPieces().map(piece => ({ ...piece, position: { ...piece.position } })),
+    pieces: renderedPieces.map(piece => ({ ...piece, position: { ...piece.position } })),
     faceLabels,
     panelRotations,
     selectedPanel: customEditor ? solidSelectedPanel : null,
@@ -1562,6 +1575,16 @@ async function animatePortalObservationLayer() {
   }
 }
 
+async function closePortalObservation(observationBaseModel) {
+  if (!solidBoardViewer || !observationBaseModel) return;
+  animationLock = true;
+  try {
+    await solidBoardViewer.exchangeLayers(observationBaseModel);
+  } finally {
+    animationLock = false;
+  }
+}
+
 async function chooseQueenStep(move) {
   if (!queenTurn || !move?.queenStep || animationLock || pendingMoveChoice) return;
   const previousContext = queenTurn;
@@ -1794,6 +1817,11 @@ async function commitMove(
   if (customEditor || isPreviewing()) return;
   lockUndoControls();
   const previousState = cloneGameState(state);
+  const observationBaseModel = solidBoardViewer &&
+    queenTurn?.detecting &&
+    queenTurn?.current?.layer === 'dormant'
+    ? solidBoardModel({ closePortalObservation: true })
+    : null;
   const captured = move.captureId
     ? state.pieces.find(item => item.id === move.captureId)
     : null;
@@ -1836,11 +1864,18 @@ async function commitMove(
   simulationPreview = null;
   pendingPromotion = null;
   promotionModal.classList.add('hidden');
+  await closePortalObservation(observationBaseModel);
   if (solidBoardViewer && move.captureId) {
     animationLock = true;
     state = result.state;
     try {
-      await solidBoardViewer.exchangeLayers(solidBoardModel());
+      if (result.layerExchange?.type === 'solid-vertex') {
+        await solidBoardViewer.exchangeVertex(solidBoardModel(), result.layerExchange.vertexKey);
+      } else if (result.layerExchange?.type === 'solid-edge') {
+        await solidBoardViewer.exchangeEdge(solidBoardModel(), result.layerExchange.edgeKey);
+      } else if (result.layerExchange?.type === 'solid-face') {
+        await solidBoardViewer.exchangeFace(solidBoardModel(), result.layerExchange.panelIndex);
+      }
     } finally {
       animationLock = false;
     }
@@ -1853,13 +1888,20 @@ async function commitMove(
   }
   boardHelp.textContent = state.winner
     ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`
-    : decisionNote || (move.captureId
+    : decisionNote || ((move.captureId
       ? positionEffect === 'swap'
         ? '吃子完成：攻击者与降级后的防守棋子交换位置。'
         : positionEffect === 'occupy'
           ? '吃子完成：被攻击棋子已消灭，攻击者占据目标点。'
           : '攻击完成：攻击者留在原位，被攻击棋子已降级或移出。'
-      : '移动完成，轮到另一方。');
+      : '移动完成，轮到另一方。') +
+      (result.layerExchange?.type === 'solid-vertex'
+        ? '该公共顶点完成升沉，棱与三角面保持不变。'
+        : result.layerExchange?.type === 'solid-edge'
+          ? '该公共棱完成升沉，其他棱与三角面保持不变。'
+          : result.layerExchange?.type === 'solid-face'
+            ? `第 ${result.layerExchange.panelIndex + 1} 个三角面及其边界完成升沉。`
+            : ''));
   if (solidBoardViewer) {
     solidViewerStatus.textContent = state.winner
       ? `${state.winner === 'white' ? '白方' : '黑方'}吃到王，游戏结束。`

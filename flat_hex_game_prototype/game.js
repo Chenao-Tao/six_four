@@ -262,6 +262,43 @@ export function solidPointKey(position, panelIndex) {
   return `${weights.top},${weights.bottom},${weights.a},${weights.b},${weights.c}`;
 }
 
+export function solidEdgeKey(position, panelIndex) {
+  const pointKey = solidPointKey(position, panelIndex);
+  if (!pointKey) return null;
+  const vertices = solidPointVertices(pointKey);
+  return vertices.length === 2 ? vertices.sort().join(':') : null;
+}
+
+export function solidVertexKey(position, panelIndex) {
+  const pointKey = solidPointKey(position, panelIndex);
+  if (!pointKey) return null;
+  const vertices = solidPointVertices(pointKey);
+  return vertices.length === 1 ? vertices[0] : null;
+}
+
+export function solidPointBelongsToVertex(position, panelIndex, vertexKey) {
+  if (!SOLID_VERTEX_NAMES.includes(vertexKey)) return false;
+  return solidVertexKey(position, panelIndex) === vertexKey;
+}
+
+export function solidPointBelongsToEdge(position, panelIndex, edgeKey) {
+  const edgeVertices = typeof edgeKey === 'string' ? edgeKey.split(':') : [];
+  if (edgeVertices.length !== 2) return false;
+  const pointKey = solidPointKey(position, panelIndex);
+  if (!pointKey) return false;
+  const pointVertices = solidPointVertices(pointKey);
+  return pointVertices.length > 0 && pointVertices.every(vertex => edgeVertices.includes(vertex));
+}
+
+export function solidPointBelongsToFace(position, panelIndex, facePanelIndex) {
+  if (!validatePanelIndex(facePanelIndex)) return false;
+  const pointKey = solidPointKey(position, panelIndex);
+  if (!pointKey) return false;
+  const faceVertices = SOLID_SLOT_VERTICES[facePanelIndex];
+  const pointVertices = solidPointVertices(pointKey);
+  return pointVertices.length > 0 && pointVertices.every(vertex => faceVertices.includes(vertex));
+}
+
 function solidPointWeights(pointKey) {
   const values = pointKey.split(',').map(Number);
   return Object.fromEntries(SOLID_VERTEX_NAMES.map((name, index) => [name, values[index]]));
@@ -1777,17 +1814,41 @@ export function capturePositionEffect(attackerType, defenderType) {
   return 'hold';
 }
 
-function exchangeSolidLayers(nextOuterPieces, nextInnerPieces) {
+function exchangeSolidRegionLayers(nextOuterPieces, nextInnerPieces, belongsToRegion) {
+  const clonePiece = item => ({ ...item, position: { ...item.position } });
   return {
-    outer: nextInnerPieces.map(item => ({
-      ...item,
-      position: { ...item.position }
-    })),
-    inner: nextOuterPieces.map(item => ({
-      ...item,
-      position: { ...item.position }
-    }))
+    outer: [
+      ...nextOuterPieces.filter(item => !belongsToRegion(item)),
+      ...nextInnerPieces.filter(belongsToRegion)
+    ].map(clonePiece),
+    inner: [
+      ...nextInnerPieces.filter(item => !belongsToRegion(item)),
+      ...nextOuterPieces.filter(belongsToRegion)
+    ].map(clonePiece)
   };
+}
+
+function solidCaptureRegion(captured) {
+  const panelIndex = piecePanelIndex(captured);
+  const vertexKey = solidVertexKey(captured.position, panelIndex);
+  if (vertexKey) return { type: 'solid-vertex', vertexKey };
+  const edgeKey = solidEdgeKey(captured.position, panelIndex);
+  if (edgeKey) return { type: 'solid-edge', edgeKey };
+  return { type: 'solid-face', panelIndex };
+}
+
+function exchangeSolidCaptureRegion(nextOuterPieces, nextInnerPieces, region) {
+  const belongsToRegion = item => {
+    const panelIndex = piecePanelIndex(item);
+    if (region.type === 'solid-vertex') {
+      return solidPointBelongsToVertex(item.position, panelIndex, region.vertexKey);
+    }
+    if (region.type === 'solid-edge') {
+      return solidPointBelongsToEdge(item.position, panelIndex, region.edgeKey);
+    }
+    return solidPointBelongsToFace(item.position, panelIndex, region.panelIndex);
+  };
+  return exchangeSolidRegionLayers(nextOuterPieces, nextInnerPieces, belongsToRegion);
 }
 
 function moveForTarget(moves, target) {
@@ -1903,10 +1964,18 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const shouldExchangeSolidLayers = Boolean(
     captured && state.boardShape === 'solid' && state.solidLayers
   );
+  const solidRegion = shouldExchangeSolidLayers
+    ? solidCaptureRegion(captured)
+    : null;
+  const layerExchange = shouldExchangeLayers
+    ? shouldExchangeSolidLayers
+      ? solidRegion
+      : { type: 'flat-board' }
+    : null;
   const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
-      ? exchangeSolidLayers(nextActivePieces, nextDormantPieces)
+      ? exchangeSolidCaptureRegion(nextActivePieces, nextDormantPieces, solidRegion)
       : { ...state.solidLayers, outer: nextActivePieces, inner: nextDormantPieces }
     : undefined;
   const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers
@@ -1931,12 +2000,20 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
             [state.boardSide === 'front' ? 'back' : 'front']: nextDormantPieces
           }
     : undefined;
-  const layerExchangeResult = shouldExchangeLayers
-    ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
-    : '';
-  const solidFaceSides = shouldExchangeSolidLayers
-    ? (state.solidFaceSides ?? Array(6).fill('front'))
-        .map(side => side === 'back' ? 'front' : 'back')
+  const layerExchangeResult = layerExchange?.type === 'solid-vertex'
+    ? '，棋盘不旋转，该公共顶点与顶点棋子交换上下层'
+    : layerExchange?.type === 'solid-edge'
+      ? '，棋盘不旋转，该公共棱与棱上棋子交换上下层'
+      : layerExchange?.type === 'solid-face'
+        ? '，棋盘不旋转，被吃子所在三角面及其边界交换上下层'
+        : shouldExchangeLayers
+          ? '，棋盘不旋转，棋盘与棋子整体交换上下层'
+          : '';
+  const solidFaceSides = layerExchange?.type === 'solid-face'
+    ? (state.solidFaceSides ?? Array(6).fill('front')).map((side, panelIndex) =>
+        panelIndex === layerExchange.panelIndex
+          ? side === 'back' ? 'front' : 'back'
+          : side)
     : state.solidFaceSides;
   const nextState = {
     ...state,
@@ -1969,6 +2046,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     move,
     captured,
     positionEffect,
+    layerExchange,
     needsPromotionChoice: Boolean(promotionType)
   };
 }

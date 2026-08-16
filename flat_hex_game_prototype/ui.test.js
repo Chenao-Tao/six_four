@@ -105,6 +105,18 @@ test('吃子换层动画携带整层棋盘且不旋转平面棋盘', () => {
   assert.match(app, /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
 });
 
+test('立体吃子按顶点公共棱和三角面分流局部升沉动画', () => {
+  assert.match(solidBoard, /exchangeVertex\(nextModel, vertexKey\)/);
+  assert.match(solidBoard, /exchangeEdge\(nextModel, edgeKey\)/);
+  assert.match(solidBoard, /exchangeFace\(nextModel, panelIndex\)/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-vertex'/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-edge'/);
+  assert.match(app, /result\.layerExchange\?\.type === 'solid-face'/);
+  assert.match(app, /solidBoardViewer\.exchangeVertex\(solidBoardModel\(\), result\.layerExchange\.vertexKey\)/);
+  assert.match(app, /solidBoardViewer\.exchangeEdge\(solidBoardModel\(\), result\.layerExchange\.edgeKey\)/);
+  assert.match(app, /solidBoardViewer\.exchangeFace\(solidBoardModel\(\), result\.layerExchange\.panelIndex\)/);
+});
+
 test('所有平面翻面动画使用垂直镜像轴', () => {
   assert.match(styles, /@keyframes flip-whole-board[\s\S]*?rotateY\(88deg\)/);
   assert.doesNotMatch(styles, /@keyframes flip-whole-board[\s\S]*?rotateX\(/);
@@ -231,7 +243,7 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(html, /id="solidBoardCanvas"/);
   assert.match(html, /id="closeSolidViewButton"/);
   assert.match(app, /createSolidBoardViewer/);
-  assert.match(app, /function solidBoardModel\(\)/);
+  assert.match(app, /function solidBoardModel\([^)]*\)/);
   assert.match(app, /function openSolidBoard\(\)/);
   assert.match(app, /function closeSolidBoard\(\)/);
   assert.match(app, /function setBoardShape\(boardShape\)/);
@@ -239,7 +251,7 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /solidLayoutSnapshot/);
   assert.match(app, /customEditor\.solidAssembly = createSolidAssembly\(/);
   assert.match(app, /syncAssemblyPieces\(customEditor\.solidAssembly, sourceLayout\)/);
-  assert.match(app, /pieces: displayedPieces\(\)\.map/);
+  assert.match(app, /pieces: renderedPieces\.map/);
 });
 
 test('从立体对局进入自定义时载入当前同名棋子并保持立体形态', () => {
@@ -294,7 +306,7 @@ test('载入待组装入口会创建空骨架且平面方案可直接切换到�
 });
 
 test('立体装配编辑显示同名平面布局的传送阵但不开放传送阵编辑', () => {
-  const modelBuilder = app.match(/function solidBoardModel\(\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
+  const modelBuilder = app.match(/function solidBoardModel\([^)]*\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
   const assemblyBranch = modelBuilder?.[0].match(
     /if \(customEditor\?\.solidAssembly\) \{[\s\S]*?\n  }/
   );
@@ -422,6 +434,7 @@ test('传送后进入眼睛检测态并在五秒或手动结束时提交空门�
   assert.match(app, /setTimeout\(\(\) => \{\s*finishPortalDetection\(/);
   assert.match(app, /finishPortalDetectionButton\.addEventListener\('click', finishPortalDetection\)/);
   assert.match(app, /await solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+  assert.match(app, /closePortalObservation/);
   assert.match(styles, /\.portal-detection-eye\s*\{[\s\S]*?width:\s*56px;[\s\S]*?height:\s*34px/);
   assert.match(styles, /\.portal-detection\s*\{[\s\S]*?top:\s*72px/);
   assert.match(styles, /--portal-eye-red:\s*#ff1f3d/);

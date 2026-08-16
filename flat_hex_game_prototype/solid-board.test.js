@@ -8,6 +8,9 @@ import {
   isSharedSolidPoint,
   mapPiecesToPanels,
   portalEndpointDisplayLabel,
+  solidEdgePieceIds,
+  solidFacePieceIds,
+  solidVertexPieceIds,
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
@@ -112,4 +115,47 @@ test('公共棱和公共顶点棋子会进入最后绘制层', () => {
   assert.equal(isSharedSolidPoint({ center: 0, u: 0.5, v: 0.5 }), true);
   assert.equal(isSharedSolidPoint({ center: 0, u: 1, v: 0 }), true);
   assert.equal(isSharedSolidPoint({ center: 0.25, u: 0.5, v: 0.25 }), false);
+});
+
+test('公共棱升沉选择同一物理棱及其端点上的棋子并排除面内棋子', () => {
+  const pieces = [
+    { id: 'edge-first-alias', position: { q: -1, r: 1 }, panelIndex: 1 },
+    { id: 'edge-second-point', position: { q: -3, r: 3 }, panelIndex: 2 },
+    { id: 'different-edge', position: { q: 1, r: 0 }, panelIndex: 0 },
+    { id: 'vertex', position: { q: 0, r: 0 }, panelIndex: 0 },
+    { id: 'face', position: { q: 1, r: 2 }, panelIndex: 0 }
+  ];
+
+  assert.deepEqual(
+    [...solidEdgePieceIds(pieces, 'c:top')],
+    ['edge-first-alias', 'edge-second-point', 'vertex']
+  );
+});
+
+test('公共顶点升沉只选择同一物理顶点并排除相邻棱棋子', () => {
+  const pieces = [
+    { id: 'top-first-alias', position: { q: 0, r: 0 }, panelIndex: 0 },
+    { id: 'top-second-alias', position: { q: 0, r: 0 }, panelIndex: 2 },
+    { id: 'top-edge', position: { q: 1, r: 0 }, panelIndex: 0 },
+    { id: 'other-vertex', position: { q: 4, r: 0 }, panelIndex: 0 }
+  ];
+
+  assert.deepEqual(
+    [...solidVertexPieceIds(pieces, 'top')],
+    ['top-first-alias', 'top-second-alias']
+  );
+});
+
+test('三角面升沉包含该面的棱与顶点并排除相邻面内部棋子', () => {
+  const pieces = [
+    { id: 'face-interior', position: { q: 1, r: 1 }, panelIndex: 0 },
+    { id: 'shared-edge-alias', position: { q: -1, r: 0 }, panelIndex: 2 },
+    { id: 'shared-vertex-alias', position: { q: 0, r: 0 }, panelIndex: 2 },
+    { id: 'other-face-interior', position: { q: -1, r: 2 }, panelIndex: 1 }
+  ];
+
+  assert.deepEqual(
+    [...solidFacePieceIds(pieces, 0)],
+    ['face-interior', 'shared-edge-alias', 'shared-vertex-alias']
+  );
 });

@@ -1,4 +1,11 @@
-import { BOARD_RADIUS, CORNERS, panelIndexForPoint } from './game.js?v=separate-layout-storage-1';
+import {
+  BOARD_RADIUS,
+  CORNERS,
+  panelIndexForPoint,
+  solidPointBelongsToEdge,
+  solidPointBelongsToFace,
+  solidPointBelongsToVertex
+} from './game.js?v=separate-layout-storage-1';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -126,7 +133,7 @@ function rotatePoint(point, rotationX, rotationY) {
   };
 }
 
-function modelFaces() {
+function modelVertexPoints() {
   const sideLength = 4;
   const radius = sideLength / Math.sqrt(3);
   const height = sideLength * Math.sqrt(2 / 3);
@@ -135,6 +142,11 @@ function modelFaces() {
   const c = { x: -radius / 2, y: -sideLength / 2, z: 0 };
   const top = { x: 0, y: 0, z: height };
   const bottom = { x: 0, y: 0, z: -height };
+  return { a, b, c, top, bottom };
+}
+
+function modelFaces() {
+  const { a, b, c, top, bottom } = modelVertexPoints();
   return [
     [top, a, b], [top, b, c], [top, c, a],
     [bottom, b, a], [bottom, c, b], [bottom, a, c]
@@ -209,6 +221,27 @@ export function isSharedSolidPoint(local) {
   return [local.center, local.u, local.v].some(weight => Math.abs(weight) <= EPSILON);
 }
 
+export function solidEdgePieceIds(pieces = [], edgeKey) {
+  if (typeof edgeKey !== 'string' || !edgeKey) return new Set();
+  return new Set(pieces
+    .filter(piece => solidPointBelongsToEdge(piece.position, piece.panelIndex, edgeKey))
+    .map(piece => piece.id));
+}
+
+export function solidVertexPieceIds(pieces = [], vertexKey) {
+  if (typeof vertexKey !== 'string' || !vertexKey) return new Set();
+  return new Set(pieces
+    .filter(piece => solidPointBelongsToVertex(piece.position, piece.panelIndex, vertexKey))
+    .map(piece => piece.id));
+}
+
+export function solidFacePieceIds(pieces = [], panelIndex) {
+  if (!Number.isInteger(panelIndex) || panelIndex < 0 || panelIndex >= 6) return new Set();
+  return new Set(pieces
+    .filter(piece => solidPointBelongsToFace(piece.position, piece.panelIndex, panelIndex))
+    .map(piece => piece.id));
+}
+
 export function createSolidBoardViewer(canvas, initialModel, {
   onPanelSelect = () => {},
   onPieceSelect = () => {},
@@ -216,6 +249,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
 } = {}) {
   const context = canvas.getContext('2d');
   const faces = modelFaces();
+  const vertexPoints = modelVertexPoints();
   let model = initialModel;
   let rotationX = -0.35;
   let rotationY = 0.65;
@@ -514,27 +548,44 @@ export function createSolidBoardViewer(canvas, initialModel, {
 
     let displayedModel = model;
     let boardLayerMotion = null;
+    let regionLayerMotion = null;
     if (layerExchange) {
       const progress = Math.max(0, Math.min(1, (now - layerExchange.startedAt) / layerExchange.duration));
       const rising = progress >= 0.5;
       const phaseProgress = rising ? (progress - 0.5) * 2 : progress * 2;
       displayedModel = rising ? layerExchange.nextModel : model;
-      boardLayerMotion = rising
+      const motion = rising
         ? { scale: 0.82 + 0.18 * phaseProgress, alpha: phaseProgress }
         : { scale: 1 - 0.18 * phaseProgress, alpha: 1 - phaseProgress };
+      if (['vertex', 'edge', 'face'].includes(layerExchange.type)) {
+        regionLayerMotion = {
+          ...motion,
+          type: layerExchange.type,
+          vertexKey: layerExchange.vertexKey,
+          edgeKey: layerExchange.edgeKey,
+          panelIndex: layerExchange.panelIndex,
+          rising,
+          pulse: Math.sin(progress * Math.PI)
+        };
+      } else {
+        boardLayerMotion = motion;
+      }
       if (progress >= 1) {
         model = layerExchange.nextModel;
         const resolve = layerExchange.resolve;
         layerExchange = null;
         displayedModel = model;
         boardLayerMotion = null;
+        regionLayerMotion = null;
         resolve();
       }
     }
     const mappedPieces = mapPiecesToPanels(displayedModel.pieces);
     const renderFaces = faces.map((vertices, panelIndex) => {
-      const animatedVertices = boardLayerMotion
-        ? vertices.map(vertex => scale(vertex, boardLayerMotion.scale))
+      const isExchangingFace = regionLayerMotion?.type === 'face' &&
+        regionLayerMotion.panelIndex === panelIndex;
+      const animatedVertices = boardLayerMotion || isExchangingFace
+        ? vertices.map(vertex => scale(vertex, boardLayerMotion?.scale ?? regionLayerMotion.scale))
         : vertices;
       const projected = animatedVertices.map(vertex => project(vertex, width, height));
       return {
@@ -554,10 +605,25 @@ export function createSolidBoardViewer(canvas, initialModel, {
         subtract(face.vertices[2], face.vertices[0])
       ));
       const world = barycentricPoint(face.vertices, piece.local);
-      const position = project(add(world, scale(normal, 0.055)), width, height);
+      const isExchangingRegionPiece = regionLayerMotion && (
+        regionLayerMotion.type === 'vertex'
+          ? solidPointBelongsToVertex(piece.position, piece.panelIndex, regionLayerMotion.vertexKey)
+          : regionLayerMotion.type === 'edge'
+            ? solidPointBelongsToEdge(piece.position, piece.panelIndex, regionLayerMotion.edgeKey)
+            : solidPointBelongsToFace(piece.position, piece.panelIndex, regionLayerMotion.panelIndex)
+      );
+      const faceAlreadyAnimated = regionLayerMotion?.type === 'face' &&
+        face.panelIndex === regionLayerMotion.panelIndex;
+      const animatedWorld = isExchangingRegionPiece && !faceAlreadyAnimated
+        ? scale(world, regionLayerMotion.scale)
+        : world;
+      const position = project(add(animatedWorld, scale(normal, 0.055)), width, height);
       const radius = Math.max(12, 17 * position.perspective * zoom);
       const isSelectedPiece = displayedModel.selectedPieceId === piece.id;
       context.save();
+      if (isExchangingRegionPiece && !faceAlreadyAnimated) {
+        context.globalAlpha *= regionLayerMotion.alpha;
+      }
       context.beginPath();
       context.arc(position.x, position.y, radius, 0, Math.PI * 2);
       context.fillStyle = piece.side === 'white' ? '#edf6ff' : '#111922';
@@ -596,7 +662,11 @@ export function createSolidBoardViewer(canvas, initialModel, {
     context.save();
     context.globalAlpha = boardLayerMotion?.alpha ?? 1;
     renderFaces.forEach(face => {
+      context.save();
       const { panelIndex, vertices, projected } = face;
+      if (regionLayerMotion?.type === 'face' && regionLayerMotion.panelIndex === panelIndex) {
+        context.globalAlpha *= regionLayerMotion.alpha;
+      }
       const label = displayedModel.faceLabels[panelIndex];
       const isEmptySlot = displayedModel.assemblyMode && !label;
       const normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
@@ -706,9 +776,81 @@ export function createSolidBoardViewer(canvas, initialModel, {
         if (move.usesPortal) interactionTargets.unshift(interactionTarget);
         else interactionTargets.push(interactionTarget);
       });
+      context.restore();
     });
     drawPlannedMove(renderFaces);
     sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
+    if (regionLayerMotion?.type === 'vertex') {
+      const vertex = vertexPoints[regionLayerMotion.vertexKey];
+      if (vertex) {
+        const point = project(scale(vertex, regionLayerMotion.scale), width, height);
+        context.save();
+        context.globalAlpha = 0.55 + regionLayerMotion.pulse * 0.45;
+        context.strokeStyle = regionLayerMotion.rising ? '#7cf4ff' : '#ff7186';
+        context.shadowColor = context.strokeStyle;
+        context.shadowBlur = 16 + regionLayerMotion.pulse * 20;
+        context.lineWidth = 5 + regionLayerMotion.pulse * 3;
+        context.beginPath();
+        context.arc(point.x, point.y, 12 + regionLayerMotion.pulse * 8, 0, Math.PI * 2);
+        context.stroke();
+        context.restore();
+        drawOperationLabel(
+          regionLayerMotion.rising ? '公共顶点上浮' : '公共顶点下沉',
+          { x: point.x, y: point.y - 28 },
+          0.7 + regionLayerMotion.pulse * 0.3
+        );
+      }
+    } else if (regionLayerMotion?.type === 'edge') {
+      const [firstName, secondName] = regionLayerMotion.edgeKey.split(':');
+      const first = vertexPoints[firstName];
+      const second = vertexPoints[secondName];
+      if (first && second) {
+        const start = project(scale(first, regionLayerMotion.scale), width, height);
+        const end = project(scale(second, regionLayerMotion.scale), width, height);
+        context.save();
+        context.globalAlpha = 0.55 + regionLayerMotion.pulse * 0.45;
+        context.strokeStyle = regionLayerMotion.rising ? '#7cf4ff' : '#ff7186';
+        context.shadowColor = context.strokeStyle;
+        context.shadowBlur = 14 + regionLayerMotion.pulse * 18;
+        context.lineWidth = 5 + regionLayerMotion.pulse * 3;
+        context.lineCap = 'round';
+        context.beginPath();
+        context.moveTo(start.x, start.y);
+        context.lineTo(end.x, end.y);
+        context.stroke();
+        context.restore();
+        drawOperationLabel(
+          regionLayerMotion.rising ? '公共棱上浮' : '公共棱下沉',
+          { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 24 },
+          0.7 + regionLayerMotion.pulse * 0.3
+        );
+      }
+    } else if (regionLayerMotion?.type === 'face') {
+      const face = renderFaces.find(item => item.panelIndex === regionLayerMotion.panelIndex);
+      if (face) {
+        const center = project(
+          barycentricPoint(face.vertices, { center: 1 / 3, u: 1 / 3, v: 1 / 3 }),
+          width,
+          height
+        );
+        context.save();
+        context.globalAlpha = 0.18 + regionLayerMotion.pulse * 0.28;
+        context.shadowColor = regionLayerMotion.rising ? '#7cf4ff' : '#ff7186';
+        context.shadowBlur = 18 + regionLayerMotion.pulse * 20;
+        drawPath(
+          face.projected,
+          regionLayerMotion.rising ? 'rgba(124,244,255,.22)' : 'rgba(255,113,134,.22)',
+          regionLayerMotion.rising ? '#7cf4ff' : '#ff7186',
+          5 + regionLayerMotion.pulse * 2
+        );
+        context.restore();
+        drawOperationLabel(
+          regionLayerMotion.rising ? '三角面上浮' : '三角面下沉',
+          { x: center.x, y: center.y - 24 },
+          0.7 + regionLayerMotion.pulse * 0.3
+        );
+      }
+    }
     context.restore();
     lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
@@ -774,9 +916,51 @@ export function createSolidBoardViewer(canvas, initialModel, {
       if (layerExchange) return Promise.resolve(false);
       return new Promise(resolve => {
         layerExchange = {
+          type: 'faces',
           nextModel,
           startedAt: performance.now(),
           duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 220 : 680,
+          resolve
+        };
+      });
+    },
+    exchangeVertex(nextModel, vertexKey) {
+      if (layerExchange || typeof vertexKey !== 'string' || !vertexKey) return Promise.resolve(false);
+      return new Promise(resolve => {
+        layerExchange = {
+          type: 'vertex',
+          vertexKey,
+          nextModel,
+          startedAt: performance.now(),
+          duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 160 : 520,
+          resolve
+        };
+      });
+    },
+    exchangeEdge(nextModel, edgeKey) {
+      if (layerExchange || typeof edgeKey !== 'string' || !edgeKey) return Promise.resolve(false);
+      return new Promise(resolve => {
+        layerExchange = {
+          type: 'edge',
+          edgeKey,
+          nextModel,
+          startedAt: performance.now(),
+          duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 180 : 560,
+          resolve
+        };
+      });
+    },
+    exchangeFace(nextModel, panelIndex) {
+      if (layerExchange || !Number.isInteger(panelIndex) || panelIndex < 0 || panelIndex >= 6) {
+        return Promise.resolve(false);
+      }
+      return new Promise(resolve => {
+        layerExchange = {
+          type: 'face',
+          panelIndex,
+          nextModel,
+          startedAt: performance.now(),
+          duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 200 : 620,
           resolve
         };
       });
