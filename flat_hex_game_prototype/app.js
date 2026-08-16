@@ -565,7 +565,7 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
   );
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
     const showInnerLayer = !closingPortalObservation &&
-      (previewSide !== null || queenTurn?.current.layer === 'dormant');
+      (previewSide !== null || queenTurn?.current?.layer === 'dormant');
     const visibleFaceSides = showInnerLayer
       ? state.solidFaceSides.map(faceSide => faceSide === 'back' ? 'front' : 'back')
       : state.solidFaceSides;
@@ -598,7 +598,7 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
   });
   const visiblePortalLayer = closingPortalObservation
     ? 'active'
-    : queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
+    : queenTurn?.current?.layer ?? (previewSide === null ? 'active' : 'dormant');
   const portalTargets = customEditor
     ? []
     : solidPortalTargets(portalEndpointLocations(state), visiblePortalLayer);

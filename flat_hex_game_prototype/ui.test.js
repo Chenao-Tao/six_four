@@ -468,6 +468,14 @@ test('人工后回合拆成三次单步并持续显示剩余步数', () => {
   assert.match(app, /当前后没有合法的单步起点/);
 });
 
+test('立体后刚选中且尚未建立当前分步位置时安全使用外层模型', () => {
+  const modelBuilder = app.match(/function solidBoardModel\([^)]*\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
+  assert.ok(modelBuilder);
+  assert.doesNotMatch(modelBuilder[0], /queenTurn\?\.current\.layer/);
+  assert.match(modelBuilder[0], /queenTurn\?\.current\?\.layer === 'dormant'/);
+  assert.match(modelBuilder[0], /queenTurn\?\.current\?\.layer \?\?/);
+});
+
 test('传送后进入眼睛检测态并在五秒或手动结束时提交空门落点', () => {
   const finishDetection = app.match(
     /async function finishPortalDetection\([\s\S]*?\n}\n\nfunction queenRouteMatches/,
