@@ -91,8 +91,8 @@ export function findSolidTargetAtPoint(targets, point) {
   for (const target of targets) {
     const distance = Math.hypot(point.x - target.x, point.y - target.y);
     if (distance > target.radius) continue;
-    if (!match || target.depth > match.depth ||
-      (target.depth === match.depth && distance < match.distance)) {
+    if (!match || distance < match.distance - EPSILON ||
+      (Math.abs(distance - match.distance) <= EPSILON && target.depth > match.depth)) {
       match = { ...target, distance };
     }
   }
