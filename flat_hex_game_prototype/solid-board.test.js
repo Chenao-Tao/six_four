@@ -5,6 +5,7 @@ import { createInitialState, keyOf, rotateBoardPanel } from './game.js';
 import {
   centeredGlyphPlacement,
   createSolidBoardViewer,
+  drawCenteredGlyph,
   findPanelAtPoint,
   findSolidTargetAtPoint,
   isSharedSolidPoint,
@@ -16,6 +17,40 @@ import {
   solidCameraAngles,
   solidEffectFrame
 } from './solid-board.js';
+
+test('立体棋子每次重绘都先固定文字基准再测量并绘制字形', () => {
+  const calls = [];
+  const context = {
+    textAlign: 'center',
+    textBaseline: 'middle',
+    measureText(text) {
+      calls.push({ type: 'measure', text, textAlign: this.textAlign, textBaseline: this.textBaseline });
+      return this.textAlign === 'left'
+        ? {
+            actualBoundingBoxLeft: 0,
+            actualBoundingBoxRight: 18,
+            actualBoundingBoxAscent: 15,
+            actualBoundingBoxDescent: 3
+          }
+        : {
+            actualBoundingBoxLeft: 9,
+            actualBoundingBoxRight: 9,
+            actualBoundingBoxAscent: 9,
+            actualBoundingBoxDescent: 9
+          };
+    },
+    fillText(text, x, y) {
+      calls.push({ type: 'fill', text, x, y, textAlign: this.textAlign, textBaseline: this.textBaseline });
+    }
+  };
+
+  drawCenteredGlyph(context, '象', { x: 100, y: 80 });
+
+  assert.deepEqual(calls, [
+    { type: 'measure', text: '象', textAlign: 'left', textBaseline: 'alphabetic' },
+    { type: 'fill', text: '象', x: 91, y: 86, textAlign: 'left', textBaseline: 'alphabetic' }
+  ]);
+});
 
 test('立体棋子文字按可见字形边界居中而非依赖字体排版中线', () => {
   const placement = centeredGlyphPlacement(

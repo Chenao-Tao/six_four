@@ -12,6 +12,11 @@ const aiWorker = readFileSync(new URL('./ai-worker.js', import.meta.url), 'utf8'
 const solidBoard = readFileSync(new URL('./solid-board.js', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
 
+test('立体对局信息面板空白区域不拦截棋盘点击且控制按钮仍可操作', () => {
+  assert.match(styles, /\.solid-viewer-panel\s*\{[^}]*pointer-events:\s*none;/);
+  assert.match(styles, /\.solid-viewer-panel\s*>\s*\*\s*\{[^}]*pointer-events:\s*auto;/);
+});
+
 test('重新开局会使等待中的旧落子任务失效且不影响后续新任务', async () => {
   const lifecycle = createOperationLifecycle();
   const staleOperation = lifecycle.begin();
