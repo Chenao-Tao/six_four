@@ -5,6 +5,7 @@ import { CORNERS, createCustomLayout, createCustomState, createInitialState } fr
 import { createBrowserLayoutStore } from './layout-storage.js';
 import {
   assemblyPanelPreview,
+  assemblyPortalEndpointLocations,
   assemblyToLayout,
   assemblyViewModel,
   createSolidAssembly,
@@ -153,6 +154,32 @@ test('装配视图只显示已经安装到骨架的板块与棋子', () => {
   assert.equal(model.faceLabels[0], '5A');
   assert.equal(model.faceLabels.slice(1).every(label => label === null), true);
   assert.equal(model.pieces.every(piece => piece.panelIndex === 0), true);
+});
+
+test('立体装配传送端点随安装、旋转和翻面更新且未安装时不显示', () => {
+  const state = createInitialState();
+  let assembly = createSolidAssembly(initialLayout());
+
+  assert.deepEqual(assemblyPortalEndpointLocations(assembly, state.portalPairs), []);
+
+  assembly = placeAssemblyPanel(assembly, '1', 0).assembly;
+  const installed = assemblyPortalEndpointLocations(assembly, state.portalPairs)
+    .find(location => location.faceLabel === '1A');
+  assert.ok(installed);
+  assert.equal(installed.layer, 'active');
+  assert.equal(installed.panelIndex, 0);
+
+  assembly = rotateAssemblyPanel(assembly, '1').assembly;
+  const rotated = assemblyPortalEndpointLocations(assembly, state.portalPairs)
+    .find(location => location.faceLabel === '1A');
+  assert.notDeepEqual(rotated.position, installed.position);
+
+  assembly = flipAssemblyPanel(assembly, '1').assembly;
+  const hidden = assemblyPortalEndpointLocations(assembly, state.portalPairs)
+    .find(location => location.faceLabel === '1A');
+  assert.ok(hidden);
+  assert.equal(hidden.layer, 'dormant');
+  assert.equal(hidden.panelIndex, 0);
 });
 
 test('完整无冲突装配生成的双面布局可以直接进入现有开局校验', () => {

@@ -293,6 +293,19 @@ test('载入待组装入口会创建空骨架且平面方案可直接切换到�
   assert.match(app, /saveSolidLayoutButton\.disabled = Boolean\(assemblyToLayout\(customEditor\.solidAssembly\)\.error\)/);
 });
 
+test('立体装配编辑显示同名平面布局的传送阵但不开放传送阵编辑', () => {
+  const modelBuilder = app.match(/function solidBoardModel\(\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
+  const assemblyBranch = modelBuilder?.[0].match(
+    /if \(customEditor\?\.solidAssembly\) \{[\s\S]*?\n  }/
+  );
+
+  assert.ok(assemblyBranch);
+  assert.match(assemblyBranch[0], /portalTargets/);
+  assert.match(assemblyBranch[0], /customEditor\.portalPairs/);
+  assert.match(assemblyBranch[0], /assemblyMode: true/);
+  assert.doesNotMatch(assemblyBranch[0], /editPortalEndpoint/);
+});
+
 test('立体编辑嵌入当前棋盘卡片且不会覆盖整页工作区', () => {
   const boardCardStart = html.indexOf('<div class="board-card">');
   const solidViewerStart = html.indexOf('<div class="solid-viewer hidden"');

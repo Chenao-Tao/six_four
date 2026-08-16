@@ -42,6 +42,7 @@ import {
 } from './solid-board.js?v=optional-portal-1';
 import {
   assemblyPanelPreview,
+  assemblyPortalEndpointLocations,
   assemblyToLayout,
   assemblyViewModel,
   createSolidAssembly,
@@ -517,15 +518,35 @@ function isPreviewing() {
   return previewSide !== null;
 }
 
+function solidPortalTargets(locations, visiblePortalLayer = 'active') {
+  return locations.map(location => {
+    const dormant = location.layer !== visiblePortalLayer;
+    return {
+      ...mapSolidPoint(location.position, location.panelIndex),
+      portalId: location.portalId,
+      portalColor: location.portalColor,
+      faceLabel: location.faceLabel,
+      pointNumber: location.pointNumber,
+      dormant,
+      displayLabel: portalEndpointDisplayLabel({ ...location, dormant }, '内')
+    };
+  });
+}
+
 function solidBoardModel() {
   if (customEditor?.solidAssembly) {
     const assemblyModel = assemblyViewModel(customEditor.solidAssembly);
+    const portalTargets = solidPortalTargets(assemblyPortalEndpointLocations(
+      customEditor.solidAssembly,
+      customEditor.portalPairs
+    ));
     return {
       side: 'front',
       ...assemblyModel,
       selectedPanel: solidSelectedPanel,
       selectedPieceId: null,
       moveTargets: [],
+      portalTargets,
       assemblyMode: true
     };
   }
@@ -560,19 +581,9 @@ function solidBoardModel() {
     };
   });
   const visiblePortalLayer = queenTurn?.current.layer ?? (previewSide === null ? 'active' : 'dormant');
-  const portalTargets = customEditor ? [] : portalEndpointLocations(state)
-    .map(location => {
-      const dormant = location.layer !== visiblePortalLayer;
-      return {
-        ...mapSolidPoint(location.position, location.panelIndex),
-        portalId: location.portalId,
-        portalColor: location.portalColor,
-        faceLabel: location.faceLabel,
-        pointNumber: location.pointNumber,
-        dormant,
-        displayLabel: portalEndpointDisplayLabel({ ...location, dormant }, '内')
-      };
-    });
+  const portalTargets = customEditor
+    ? []
+    : solidPortalTargets(portalEndpointLocations(state), visiblePortalLayer);
   const previewMover = simulationPreview
     ? displayedPieces().find(piece => piece.id === simulationPreview.pieceId)
     : null;
