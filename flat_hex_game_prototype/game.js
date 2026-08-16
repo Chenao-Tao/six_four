@@ -1778,15 +1778,30 @@ export function capturePositionEffect(attackerType, defenderType) {
 }
 
 function exchangeSolidLayers(nextOuterPieces, nextInnerPieces) {
+  const sharedPointKey = item => {
+    const pointKey = solidPointKey(item.position, piecePanelIndex(item));
+    return solidSurfaceGraph().get(pointKey)?.aliases.length > 1 ? pointKey : null;
+  };
+  const outerSharedKeys = new Set(nextOuterPieces.map(sharedPointKey).filter(Boolean));
+  const innerSharedKeys = new Set(nextInnerPieces.map(sharedPointKey).filter(Boolean));
+  const lockedPointKeys = new Set(
+    [...outerSharedKeys].filter(pointKey => innerSharedKeys.has(pointKey))
+  );
+  const isLocked = item => lockedPointKeys.has(sharedPointKey(item));
+  const clonePiece = item => ({
+    ...item,
+    position: { ...item.position }
+  });
+
   return {
-    outer: nextInnerPieces.map(item => ({
-      ...item,
-      position: { ...item.position }
-    })),
-    inner: nextOuterPieces.map(item => ({
-      ...item,
-      position: { ...item.position }
-    }))
+    outer: [
+      ...nextOuterPieces.filter(isLocked),
+      ...nextInnerPieces.filter(item => !isLocked(item))
+    ].map(clonePiece),
+    inner: [
+      ...nextInnerPieces.filter(isLocked),
+      ...nextOuterPieces.filter(item => !isLocked(item))
+    ].map(clonePiece)
   };
 }
 

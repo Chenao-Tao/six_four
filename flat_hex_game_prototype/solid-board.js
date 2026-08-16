@@ -209,6 +209,20 @@ export function isSharedSolidPoint(local) {
   return [local.center, local.u, local.v].some(weight => Math.abs(weight) <= EPSILON);
 }
 
+export function stationarySolidPieceIds(currentPieces = [], nextPieces = []) {
+  const currentById = new Map(mapPiecesToPanels(currentPieces).map(piece => [piece.id, piece]));
+  return new Set(mapPiecesToPanels(nextPieces).filter(piece => {
+    const current = currentById.get(piece.id);
+    return isSharedSolidPoint(piece.local) && current &&
+      current.side === piece.side &&
+      current.type === piece.type &&
+      current.portalTurns === piece.portalTurns &&
+      current.panelIndex === piece.panelIndex &&
+      current.position.q === piece.position.q &&
+      current.position.r === piece.position.r;
+  }).map(piece => piece.id));
+}
+
 export function createSolidBoardViewer(canvas, initialModel, {
   onPanelSelect = () => {},
   onPieceSelect = () => {},
@@ -531,6 +545,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
         resolve();
       }
     }
+    const stationaryPieceIds = layerExchange?.stationaryPieceIds ?? new Set();
     const mappedPieces = mapPiecesToPanels(displayedModel.pieces);
     const renderFaces = faces.map((vertices, panelIndex) => {
       const animatedVertices = boardLayerMotion
@@ -547,6 +562,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
     lastRenderFaces = renderFaces;
     const interactionTargets = [];
     const sharedPieceDraws = [];
+    const stationaryPieceDraws = [];
 
     function drawPiece(face, piece) {
       const normal = normalize(cross(
@@ -671,7 +687,9 @@ export function createSolidBoardViewer(canvas, initialModel, {
         });
 
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
-        if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
+        if (stationaryPieceIds.has(piece.id)) {
+          stationaryPieceDraws.push({ face: { ...face, vertices: faces[panelIndex] }, piece });
+        } else if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
         else drawPiece(face, piece);
       });
 
@@ -709,6 +727,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
     });
     drawPlannedMove(renderFaces);
     sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
+    context.globalAlpha = 1;
+    stationaryPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
     context.restore();
     lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
@@ -775,6 +795,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       return new Promise(resolve => {
         layerExchange = {
           nextModel,
+          stationaryPieceIds: stationarySolidPieceIds(model.pieces, nextModel.pieces),
           startedAt: performance.now(),
           duration: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 220 : 680,
           resolve
