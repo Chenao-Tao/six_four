@@ -64,7 +64,7 @@ function defaultDoubleSidedState(front, back = [], turn = 'white') {
 
 test('双面棋盘合计每方只允许一枚王', () => {
   const partialBoard = {
-    front: [piece('white-king', 'white', 'king', 0, 0)],
+    front: [piece('white-king', 'white', 'king', -4, 0)],
     back: []
   };
 
@@ -76,13 +76,13 @@ test('双面棋盘合计每方只允许一枚王', () => {
   assert.match(createCustomState(partialBoard).error, /双面棋盘.*黑方王/);
 
   const playable = createCustomState({
-    front: [piece('white-king', 'white', 'king', 0, 0)],
+    front: [piece('white-king', 'white', 'king', -4, 0)],
     back: [piece('black-king', 'black', 'king', 4, 0)]
   });
   assert.equal(playable.error, undefined);
 
   assert.match(createCustomLayout({
-    front: [piece('white-king-1', 'white', 'king', 0, 0)],
+    front: [piece('white-king-1', 'white', 'king', -4, 0)],
     back: [piece('white-king-2', 'white', 'king', 4, 0)]
   }).error, /双面棋盘.*白方王/);
 });
@@ -689,26 +689,54 @@ test('王吃后时双方保持原位，后强制降级为象', () => {
   assert.equal(findPiece(result.state, 'bQ').type, 'bishop');
 });
 
+test('平面王只沿六边形相邻顶点移动且不受路径棋子阻挡', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('edge-blocker', 'white', 'pawn', 2, 2),
+    piece('target-blocker', 'white', 'pawn', 4, -4)
+  ]);
+
+  const moves = [...legalMoves(state, 'wK').values()];
+
+  assert.equal(moves.length, 1);
+  assert.deepEqual(moves[0].target, { q: 0, r: 4 });
+  assert.deepEqual(moves[0].path, [
+    { q: 4, r: 0 },
+    { q: 3, r: 1 },
+    { q: 2, r: 2 },
+    { q: 1, r: 3 },
+    { q: 0, r: 4 }
+  ]);
+  assert.equal(moves.some(move => move.target.q === 0 && move.target.r === 0), false);
+  assert.equal(moves.some(move => move.target.q === -4 && move.target.r === 4), false);
+});
+
+test('平面王位于中心时不能生成移动', () => {
+  const state = stateOf([piece('wK', 'white', 'king', 0, 0)]);
+
+  assert.equal(legalMoves(state, 'wK').size, 0);
+});
+
 test('平面王可以攻击相邻一格的后但不能攻击更远的后或其他棋子', () => {
   const state = stateOf([
-    piece('wK', 'white', 'king', 0, 0),
-    piece('near-queen', 'black', 'queen', 1, 0),
+    piece('wK', 'white', 'king', 4, 0),
+    piece('near-queen', 'black', 'queen', 3, 0),
     piece('far-queen', 'black', 'queen', 2, 0),
-    piece('near-pawn', 'black', 'pawn', 0, 1)
+    piece('near-pawn', 'black', 'pawn', 3, 1)
   ]);
 
   const moves = [...legalMoves(state, 'wK').values()];
   const capture = moves.find(move => move.captureId === 'near-queen');
 
   assert.ok(capture);
-  assert.deepEqual(capture.path, [{ q: 0, r: 0 }, { q: 1, r: 0 }]);
+  assert.deepEqual(capture.path, [{ q: 4, r: 0 }, { q: 3, r: 0 }]);
   assert.equal(moves.some(move => move.captureId === 'far-queen'), false);
   assert.equal(moves.some(move => move.captureId === 'near-pawn'), false);
 
   const result = applyMove(state, 'wK', capture);
   assert.equal(result.error, undefined);
-  assert.deepEqual(findPiece(result.state, 'wK').position, { q: 0, r: 0 });
-  assert.deepEqual(findPiece(result.state, 'near-queen').position, { q: 1, r: 0 });
+  assert.deepEqual(findPiece(result.state, 'wK').position, { q: 4, r: 0 });
+  assert.deepEqual(findPiece(result.state, 'near-queen').position, { q: 3, r: 0 });
   assert.equal(findPiece(result.state, 'near-queen').type, 'bishop');
 });
 
@@ -1573,7 +1601,7 @@ test('旧镜像布局迁移不会吞掉非法棋子', () => {
 test('自定义双面棋盘通过校验后以白方第一手开局且不引用编辑草稿', () => {
   const draft = {
     front: [
-      piece('', 'white', 'king', 0, 0),
+      piece('', 'white', 'king', 4, 0),
       piece('', 'white', 'pawn', 1, 0)
     ],
     back: [
@@ -1594,38 +1622,46 @@ test('自定义双面棋盘通过校验后以白方第一手开局且不引用�
   assert.equal(new Set(result.state.boardStates.front.map(item => item.id)).size, 2);
 
   draft.front[0].position.q = 3;
-  assert.deepEqual(result.state.boardStates.front[0].position, { q: 0, r: 0 });
+  assert.deepEqual(result.state.boardStates.front[0].position, { q: 4, r: 0 });
 });
 
 test('自定义棋盘拒绝重叠、越界和双面合计缺少王的布局', () => {
   assert.match(createCustomState({
     front: [
-      piece('', 'white', 'king', 0, 0),
-      piece('', 'black', 'king', 0, 0)
+      piece('', 'white', 'king', 4, 0),
+      piece('', 'black', 'king', 4, 0)
     ],
     back: []
   }).error, /A 面.*同一交点/);
 
   assert.match(createCustomState({
     front: [
-      piece('', 'white', 'king', 0, 0),
+      piece('', 'white', 'king', 4, 0),
       piece('', 'black', 'king', 5, 0)
     ],
     back: []
   }).error, /A 面.*棋盘外/);
 
   assert.match(createCustomState({
-    front: [piece('', 'white', 'king', 0, 0)],
+    front: [piece('', 'white', 'king', 4, 0)],
     back: []
   }).error, /双面棋盘.*黑方王/);
 
   assert.match(createCustomState({
     front: [
-      piece('', 'white', 'king', 1, 0),
+      piece('', 'white', 'king', 0, 0),
       piece('', 'black', 'king', 4, 0)
     ],
     back: []
-  }).error, /A 面.*王只能放在中心或六个外角/);
+  }).error, /A 面.*王只能放在六边形的六个顶点/);
+
+  assert.equal(createCustomState({
+    front: [
+      { ...piece('', 'white', 'king', 0, 0), panelIndex: 0 },
+      { ...piece('', 'black', 'king', 4, 0), panelIndex: 0 }
+    ],
+    back: []
+  }, undefined, undefined, 'solid').error, undefined);
 });
 
 test('单块三角板翻面时同步更新整板另一面的镜像槽位', () => {
@@ -1660,7 +1696,7 @@ test('交换两块三角板时同步交换另一面的镜像位置', () => {
 
 test('自定义棋局保存拆装后的板块布局并拒绝不成对的双面数据', () => {
   const pieces = {
-    front: [piece('', 'white', 'king', 0, 0)],
+    front: [piece('', 'white', 'king', 4, 0)],
     back: [piece('', 'black', 'king', 0, 4)]
   };
   const swapped = swapBoardPanels(createInitialState().boardFaceLabels, 'front', 1, 4);
@@ -1729,7 +1765,7 @@ test('自定义棋局保存旋转方向并拒绝正反面朝向不成镜像的�
     4
   );
   const pieces = {
-    front: [piece('', 'white', 'king', 0, 0)],
+    front: [piece('', 'white', 'king', 4, 0)],
     back: [piece('', 'black', 'king', 0, 4)]
   };
 

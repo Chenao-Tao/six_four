@@ -9,6 +9,7 @@ import {
   createInitialState,
   iterativeGameSearch,
   keyOf,
+  legalMoves,
   positionSignature,
   promotionTypeForMove
 } from './game.js';
@@ -158,6 +159,32 @@ function pairedState(front, back) {
 
 export function pairedMatchCases() {
   const piece = (id, side, type, q, r) => ({ id, side, type, position: { q, r } });
+  const repetitionTactic = pairedState([
+    piece('paired-repeat-wk', 'white', 'king', -4, 0),
+    piece('paired-repeat-wb1', 'white', 'bishop', -4, 4),
+    piece('paired-repeat-wb2', 'white', 'bishop', 0, -4),
+    piece('paired-repeat-wp', 'white', 'pawn', 3, 0),
+    piece('paired-repeat-bk', 'black', 'king', 4, 0),
+    piece('paired-repeat-bp', 'black', 'pawn', -3, 0)
+  ], []);
+  const whitePawn = repetitionTactic.pieces.find(item =>
+    item.side === 'white' && item.type === 'pawn');
+  if (!whitePawn) throw new Error('缩减重复局面缺少白兵');
+  const repeatedWin = [...legalMoves(repetitionTactic, whitePawn.id).values()]
+    .find(move => move.capturesKing);
+  if (!repeatedWin) throw new Error('缩减重复局面缺少白方立即获胜动作');
+  const repeatedWinState = applyMove(
+    repetitionTactic,
+    whitePawn.id,
+    actionTarget({ move: repeatedWin }),
+    false,
+    false
+  ).state;
+  repetitionTactic.positionHistory = [
+    positionSignature(repetitionTactic),
+    positionSignature(repeatedWinState)
+  ];
+
   return [
     {
       name: '缩减双层局面（潜藏白后）',
@@ -187,6 +214,10 @@ export function pairedMatchCases() {
         piece('paired-b-wp2', 'white', 'pawn', -3, 3),
         piece('paired-b-bq', 'black', 'queen', -2, 3)
       ])
+    },
+    {
+      name: '缩减重复局面（获胜动作不可过滤）',
+      state: repetitionTactic
     }
   ];
 }
