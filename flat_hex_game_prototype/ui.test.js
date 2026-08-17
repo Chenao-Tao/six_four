@@ -537,14 +537,21 @@ test('传送后进入眼睛检测态并在五秒或手动结束时提交空门�
   assert.match(styles, /@keyframes portal-eye-scan/);
 });
 
-test('立体传送检测态同步显示棋体和当前后周身红光', () => {
+test('立体传送检测态沿棋体真实棱发红而不是绘制外围圆环', () => {
   assert.match(app, /portalDetecting: Boolean\(queenTurn\?\.detecting\)/);
   assert.match(app, /portalDetectionPieceId: queenTurn\?\.detecting \? queenTurn\.pieceId : null/);
-  assert.match(solidBoard, /function drawPortalDetectionAura\(renderFaces, now\)/);
+  const edgeGlow = solidBoard.match(
+    /function drawPortalDetectionEdgeGlow\(renderFaces, now\)[\s\S]*?\r?\n  }\r?\n\r?\n  function drawOperationLabel/
+  );
+  assert.ok(edgeGlow);
+  assert.match(edgeGlow[0], /solidWireframeSegments\(renderFaces\)/);
+  assert.match(edgeGlow[0], /context\.moveTo\(segment\.start\.x, segment\.start\.y\)/);
+  assert.match(edgeGlow[0], /context\.lineTo\(segment\.end\.x, segment\.end\.y\)/);
+  assert.doesNotMatch(edgeGlow[0], /context\.arc\(/);
   assert.match(solidBoard, /displayedModel\.portalDetecting/);
   assert.match(solidBoard, /displayedModel\.portalDetectionPieceId === piece\.id/);
   assert.match(solidBoard, /rgba\(255, 31, 61/);
-  assert.match(solidBoard, /context\.shadowBlur = 24 \+ pulse \* 16/);
+  assert.match(solidBoard, /context\.shadowBlur = 14 \+ pulse \* 18/);
 });
 
 test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {

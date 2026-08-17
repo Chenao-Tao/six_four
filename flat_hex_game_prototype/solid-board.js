@@ -278,6 +278,44 @@ export function solidFacePieceIds(pieces = [], panelIndex) {
     .map(piece => piece.id));
 }
 
+function solidVertexCoordinateKey(point) {
+  return [point.x, point.y, point.z]
+    .map(value => Number(value).toFixed(6))
+    .join(',');
+}
+
+export function solidWireframeSegments(renderFaces = []) {
+  const segments = new Map();
+  for (const face of renderFaces) {
+    if (face?.vertices?.length !== 3 || face?.projected?.length !== 3) continue;
+    for (const [startIndex, endIndex] of [[0, 1], [1, 2], [2, 0]]) {
+      const startVertex = face.vertices[startIndex];
+      const endVertex = face.vertices[endIndex];
+      const vertexKeys = [
+        solidVertexCoordinateKey(startVertex),
+        solidVertexCoordinateKey(endVertex)
+      ].sort();
+      const key = vertexKeys.join('|');
+      const existing = segments.get(key);
+      if (existing) {
+        existing.frontFacing ||= face.frontFacing !== false;
+        existing.depth = Math.max(existing.depth, face.depth ?? existing.depth);
+        continue;
+      }
+      segments.set(key, {
+        key,
+        start: face.projected[startIndex],
+        end: face.projected[endIndex],
+        depth: face.depth ?? 0,
+        frontFacing: face.frontFacing !== false
+      });
+    }
+  }
+  return [...segments.values()]
+    .filter(segment => segment.frontFacing)
+    .sort((left, right) => left.depth - right.depth);
+}
+
 export function createSolidBoardViewer(canvas, initialModel, {
   onPanelSelect = () => {},
   onPieceSelect = () => {},
@@ -330,26 +368,46 @@ export function createSolidBoardViewer(canvas, initialModel, {
     }
   }
 
-  function drawPortalDetectionAura(renderFaces, now) {
+  function drawPortalDetectionEdgeGlow(renderFaces, now) {
     if (!model.portalDetecting || !renderFaces.length) return;
-    const points = renderFaces.flatMap(face => face.projected);
-    const minX = Math.min(...points.map(point => point.x));
-    const maxX = Math.max(...points.map(point => point.x));
-    const minY = Math.min(...points.map(point => point.y));
-    const maxY = Math.max(...points.map(point => point.y));
-    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
-    const radius = Math.hypot(maxX - minX, maxY - minY) / 2;
+    const segments = solidWireframeSegments(renderFaces);
+    if (!segments.length) return;
     const pulse = (Math.sin(now / 260) + 1) / 2;
+    const traceSegments = () => {
+      context.beginPath();
+      segments.forEach(segment => {
+        context.moveTo(segment.start.x, segment.start.y);
+        context.lineTo(segment.end.x, segment.end.y);
+      });
+      context.stroke();
+    };
+
     context.save();
-    context.globalCompositeOperation = 'destination-over';
-    context.globalAlpha = 0.42 + pulse * 0.24;
-    context.strokeStyle = `rgba(255, 31, 61, ${0.42 + pulse * 0.24})`;
-    context.shadowColor = `rgba(255, 31, 61, ${0.72 + pulse * 0.18})`;
-    context.shadowBlur = 24 + pulse * 16;
+    context.globalCompositeOperation = 'screen';
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+
+    context.globalAlpha = 0.3 + pulse * 0.18;
+    context.strokeStyle = `rgba(255, 31, 61, ${0.48 + pulse * 0.2})`;
+    context.shadowColor = `rgba(255, 0, 28, ${0.78 + pulse * 0.18})`;
+    context.shadowBlur = 14 + pulse * 18;
     context.lineWidth = 7 + pulse * 3;
-    context.beginPath();
-    context.arc(center.x, center.y, radius + 20 + pulse * 8, 0, Math.PI * 2);
-    context.stroke();
+    traceSegments();
+
+    context.globalAlpha = 0.72 + pulse * 0.2;
+    context.strokeStyle = `rgba(255, 72, 88, ${0.78 + pulse * 0.18})`;
+    context.shadowBlur = 5 + pulse * 8;
+    context.lineWidth = 2.2 + pulse * 1.2;
+    traceSegments();
+
+    context.globalAlpha = 0.32 + pulse * 0.16;
+    context.strokeStyle = 'rgba(255, 206, 211, .92)';
+    context.shadowBlur = 3 + pulse * 4;
+    context.lineWidth = 1.2;
+    context.setLineDash([7 + pulse * 3, 18 - pulse * 4]);
+    context.lineDashOffset = -now / 24;
+    traceSegments();
+    context.setLineDash([]);
     context.restore();
   }
 
@@ -647,15 +705,19 @@ export function createSolidBoardViewer(canvas, initialModel, {
         ? vertices.map(vertex => scale(vertex, boardLayerMotion?.scale ?? regionLayerMotion.scale))
         : vertices;
       const projected = animatedVertices.map(vertex => project(vertex, width, height));
+      const normal = normalize(cross(
+        subtract(animatedVertices[1], animatedVertices[0]),
+        subtract(animatedVertices[2], animatedVertices[0])
+      ));
       return {
         panelIndex,
         vertices: animatedVertices,
         projected,
-        depth: projected.reduce((sum, point) => sum + point.z, 0) / 3
+        depth: projected.reduce((sum, point) => sum + point.z, 0) / 3,
+        frontFacing: rotatePoint(normal, rotationX, rotationY).z >= -EPSILON
       };
     }).sort((left, right) => left.depth - right.depth);
     lastRenderFaces = renderFaces;
-    drawPortalDetectionAura(renderFaces, now);
     const interactionTargets = [];
     const sharedPieceDraws = [];
 
@@ -856,6 +918,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       });
       context.restore();
     });
+    drawPortalDetectionEdgeGlow(renderFaces, now);
     drawPlannedMove(renderFaces);
     sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
     if (regionLayerMotion?.type === 'vertex') {
