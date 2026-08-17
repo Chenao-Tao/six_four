@@ -67,6 +67,10 @@ test('模拟控制保留重开、背面预览和算法按钮，并移除吃子�
   assert.match(html, />预览背面</);
 });
 
+test('规则说明明确后可以消耗步数原路返回', () => {
+  assert.match(html, /皇后[\s\S]*?消耗一步原路返回或重复经过同一点[\s\S]*?只有第3步可以吃子/);
+});
+
 test('平面与立体棋盘共用回退一步功能并按交互状态禁用', () => {
   assert.match(html, /id="undoButton"[^>]*>回退一步</);
   assert.match(html, /id="solidUndoButton"[^>]*>回退一步</);

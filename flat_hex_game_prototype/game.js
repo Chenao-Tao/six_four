@@ -1136,6 +1136,11 @@ function canLand(pieceToMove, occupant) {
   return canCapture(pieceToMove.type, occupant.type);
 }
 
+function occupantExcludingMover(occupied, pointKey, pieceId) {
+  const occupant = occupied.get(pointKey);
+  return occupant?.id === pieceId ? null : occupant;
+}
+
 function addMove(
   state,
   moves,
@@ -1148,7 +1153,7 @@ function addMove(
 ) {
   const pointKey = knownPointKey ?? boardPointKey(state, target, panelIndex);
   if (!pointKey) return false;
-  const occupant = occupied.get(pointKey);
+  const occupant = occupantExcludingMover(occupied, pointKey, pieceToMove.id);
   if (!canLand(pieceToMove, occupant)) return false;
   if ([...moves.values()].some(move => move.pointKey === pointKey)) return !occupant;
   const baseKey = keyOf(target);
@@ -1223,11 +1228,9 @@ function bishopMoves(state, pieceToMove, occupied) {
 function queenMoves(state, pieceToMove, occupied) {
   if (state.boardShape === 'solid') return solidQueenMoves(state, pieceToMove, occupied);
   const moves = new Map();
-  const startPanel = piecePanelIndex(pieceToMove);
   const queue = [{
     point: pieceToMove.position,
-    path: [pieceToMove.position],
-    pointKeys: [boardPointKey(state, pieceToMove.position, startPanel)]
+    path: [pieceToMove.position]
   }];
   while (queue.length) {
     const current = queue.shift();
@@ -1239,10 +1242,9 @@ function queenMoves(state, pieceToMove, occupied) {
       const targetKey = keyOf(target);
       const panelIndex = movePanelIndex(pieceToMove, target);
       const pointKey = boardPointKey(state, target, panelIndex);
-      if (!pointKey || current.pointKeys.includes(pointKey)) return;
-      const occupant = pointKey ? occupied.get(pointKey) : null;
+      if (!pointKey) return;
+      const occupant = occupantExcludingMover(occupied, pointKey, pieceToMove.id);
       const path = [...current.path, target];
-      const pointKeys = [...current.pointKeys, pointKey];
       const nextDepth = depth + 1;
       if (nextDepth === 3) {
         if (!moves.has(targetKey)) {
@@ -1250,7 +1252,7 @@ function queenMoves(state, pieceToMove, occupied) {
         }
         return;
       }
-      if (!occupant) queue.push({ point: target, path, pointKeys });
+      if (!occupant) queue.push({ point: target, path });
     });
   }
   return moves;
@@ -1264,18 +1266,15 @@ function solidQueenMoves(state, pieceToMove, occupied) {
     point: pieceToMove.position,
     panelIndex: startPanel,
     pointKey: startPointKey,
-    path: [pieceToMove.position],
-    pointKeys: [startPointKey]
+    path: [pieceToMove.position]
   }];
   while (queue.length) {
     const current = queue.shift();
     const depth = current.path.length - 1;
     if (depth === 3) continue;
     for (const transition of solidSurfaceGraph().get(current.pointKey)?.step ?? []) {
-      if (current.pointKeys.includes(transition.pointKey)) continue;
-      const occupant = occupied.get(transition.pointKey);
+      const occupant = occupantExcludingMover(occupied, transition.pointKey, pieceToMove.id);
       const path = [...current.path, transition.position];
-      const pointKeys = [...current.pointKeys, transition.pointKey];
       const nextDepth = depth + 1;
       if (nextDepth === 3) {
         addMove(
@@ -1289,7 +1288,7 @@ function solidQueenMoves(state, pieceToMove, occupied) {
           transition.pointKey
         );
       } else if (!occupant) {
-        queue.push({ ...transition, path, pointKeys });
+        queue.push({ ...transition, path });
       }
     }
   }
@@ -1355,8 +1354,7 @@ function chargedQueenMoves(state, pieceToMove) {
       position: { ...pieceToMove.position },
       panelIndex: startPanel,
       pointKey: startPointKey
-    }],
-    visited: new Set([`active:${startPointKey}`])
+    }]
   }];
 
   while (queue.length) {
@@ -1365,19 +1363,11 @@ function chargedQueenMoves(state, pieceToMove) {
     if (depth >= 3) continue;
     const nextDepth = depth + 1;
     const consider = (target, portal = null, deferredPortal = current.deferredPortal) => {
-      const visitKey = `${target.layer}:${target.pointKey}`;
-      const returnsToDeferredPortal = Boolean(
-        !portal &&
-        deferredPortal &&
-        nextDepth === 2 &&
-        target.layer === deferredPortal.layer &&
-        target.pointKey === deferredPortal.pointKey
+      const occupant = occupantExcludingMover(
+        occupantsByLayer[target.layer],
+        target.pointKey,
+        pieceToMove.id
       );
-      if (current.visited.has(visitKey) && !returnsToDeferredPortal) return;
-      const targetOccupant = occupantsByLayer[target.layer].get(target.pointKey);
-      const occupant = returnsToDeferredPortal && targetOccupant?.id === pieceToMove.id
-        ? null
-        : targetOccupant;
       const usedPortal = current.usedPortal || Boolean(portal);
       const portalId = portal?.portalId ?? current.portalId;
       const portalColor = portal?.portalColor ?? current.portalColor;
@@ -1460,8 +1450,7 @@ function chargedQueenMoves(state, pieceToMove) {
         portalColor,
         portalTransition,
         deferredPortal: portal ? null : deferredPortal,
-        pathSteps,
-        visited: new Set([...current.visited, visitKey])
+        pathSteps
       });
     };
 
@@ -1608,15 +1597,11 @@ export function queenStepMoves(state, pieceId, context = {}) {
   } = {}) => {
     const nextDepth = stepsUsed + 1;
     const visitKey = `${target.layer}:${target.pointKey}`;
-    const repeatsDeferredEntry = Boolean(
-      !portal && deferredPortal && nextDepth === 2 &&
-      visitKey === `${deferredPortal.layer}:${deferredPortal.pointKey}`
+    const effectiveOccupant = occupantExcludingMover(
+      occupantsByLayer[target.layer],
+      target.pointKey,
+      pieceId
     );
-    if (visited.has(visitKey) && !repeatsDeferredEntry) return;
-
-    const occupant = occupantsByLayer[target.layer].get(target.pointKey);
-    const occupantIsSelf = occupant?.id === pieceId;
-    const effectiveOccupant = occupantIsSelf ? null : occupant;
     if (effectiveOccupant && nextDepth < 3) return;
     if (effectiveOccupant && (
       effectiveOccupant.side === pieceToMove.side ||

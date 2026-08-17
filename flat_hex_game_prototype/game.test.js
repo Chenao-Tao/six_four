@@ -1178,15 +1178,61 @@ test('面升沉会带动该面边界上的公共顶点但不会影响其他面',
   assert.ok(result.solidLayers.inner.some(item => item.id === 'apex'));
 });
 
-test('皇后的每个合法动作都必须完整走三步', () => {
+test('后的完整动作必须走三步且可以消耗步数返回起点', () => {
   const state = stateOf([piece('wQ', 'white', 'queen', 0, 0)]);
   const moves = legalMoves(state, 'wQ');
 
   assert.ok(moves.size > 0);
   moves.forEach(move => {
     assert.equal(move.path.length - 1, 3, `终点 ${keyOf(move.target)} 的路径不是三步`);
-    assert.equal(new Set(move.path.map(keyOf)).size, move.path.length, '皇后路径不应重复经过同一点');
   });
+  const returnToStart = [...moves.values()].find(move =>
+    move.pointKey === keyOf(state.pieces[0].position)
+  );
+  assert.ok(returnToStart, '后应能用三步绕回起点');
+  assert.deepEqual(returnToStart.path[0], returnToStart.path[3]);
+});
+
+test('人工分步移动允许后原路返回且每次仍消耗一步', () => {
+  const state = stateOf([piece('wQ', 'white', 'queen', 0, 0)]);
+  const first = [...queenStepMoves(state, 'wQ').values()].find(move =>
+    move.pointKey === '1,0'
+  );
+  const second = [...queenStepMoves(state, 'wQ', first?.nextQueenContext).values()].find(move =>
+    move.pointKey === '0,0'
+  );
+  const third = [...queenStepMoves(state, 'wQ', second?.nextQueenContext).values()].find(move =>
+    move.pointKey === '1,0'
+  );
+
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(third);
+  assert.equal(first.nextQueenContext.stepsUsed, 1);
+  assert.equal(second.nextQueenContext.stepsUsed, 2);
+  assert.equal(third.nextQueenContext.stepsUsed, 3);
+  assert.deepEqual(third.path, [
+    { q: 0, r: 0 },
+    { q: 1, r: 0 },
+    { q: 0, r: 0 },
+    { q: 1, r: 0 }
+  ]);
+});
+
+test('立体后分步移动也允许沿同一物理棱原路返回', () => {
+  const state = solidStateOf([
+    { ...piece('wQ', 'white', 'queen', 1, 1), panelIndex: 0 }
+  ]);
+  const first = [...queenStepMoves(state, 'wQ').values()][0];
+  assert.ok(first);
+  const startPointKey = first.pathSteps[0].pointKey;
+  const second = [...queenStepMoves(state, 'wQ', first.nextQueenContext).values()].find(move =>
+    move.pointKey === startPointKey
+  );
+
+  assert.ok(second);
+  assert.equal(second.nextQueenContext.stepsUsed, 2);
+  assert.equal(second.pathSteps[0].pointKey, second.pathSteps[2].pointKey);
 });
 
 test('算法演示优先一步吃王，并自主选择有利升级', () => {
