@@ -67,6 +67,10 @@ test('模拟控制保留重开、背面预览和算法按钮，并移除吃子�
   assert.match(html, />预览背面</);
 });
 
+test('规则说明明确后可以消耗步数原路返回', () => {
+  assert.match(html, /皇后[\s\S]*?消耗一步原路返回或重复经过同一点[\s\S]*?只有第3步可以吃子/);
+});
+
 test('平面与立体棋盘共用回退一步功能并按交互状态禁用', () => {
   assert.match(html, /id="undoButton"[^>]*>回退一步</);
   assert.match(html, /id="solidUndoButton"[^>]*>回退一步</);
@@ -531,6 +535,23 @@ test('传送后进入眼睛检测态并在五秒或手动结束时提交空门�
   assert.match(styles, /@keyframes portal-eye-lid-top/);
   assert.match(styles, /@keyframes portal-eye-lid-bottom/);
   assert.match(styles, /@keyframes portal-eye-scan/);
+});
+
+test('立体传送检测态沿棋体真实棱发红而不是绘制外围圆环', () => {
+  assert.match(app, /portalDetecting: Boolean\(queenTurn\?\.detecting\)/);
+  assert.match(app, /portalDetectionPieceId: queenTurn\?\.detecting \? queenTurn\.pieceId : null/);
+  const edgeGlow = solidBoard.match(
+    /function drawPortalDetectionEdgeGlow\(renderFaces, now\)[\s\S]*?\r?\n  }\r?\n\r?\n  function drawOperationLabel/
+  );
+  assert.ok(edgeGlow);
+  assert.match(edgeGlow[0], /solidWireframeSegments\(renderFaces\)/);
+  assert.match(edgeGlow[0], /context\.moveTo\(segment\.start\.x, segment\.start\.y\)/);
+  assert.match(edgeGlow[0], /context\.lineTo\(segment\.end\.x, segment\.end\.y\)/);
+  assert.doesNotMatch(edgeGlow[0], /context\.arc\(/);
+  assert.match(solidBoard, /displayedModel\.portalDetecting/);
+  assert.match(solidBoard, /displayedModel\.portalDetectionPieceId === piece\.id/);
+  assert.match(solidBoard, /rgba\(255, 31, 61/);
+  assert.match(solidBoard, /context\.shadowBlur = 14 \+ pulse \* 18/);
 });
 
 test('平面与立体棋盘都显示传送点并用唯一路线键提交动作', () => {

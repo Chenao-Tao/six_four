@@ -15,8 +15,37 @@ import {
   solidFacePieceIds,
   solidVertexPieceIds,
   solidCameraAngles,
-  solidEffectFrame
+  solidEffectFrame,
+  solidWireframeSegments
 } from './solid-board.js';
+
+test('立体线框按物理棱去重并排除完全背向视角的隐藏棱', () => {
+  const top = { x: 0, y: 0, z: 1 };
+  const left = { x: -1, y: 0, z: 0 };
+  const right = { x: 1, y: 0, z: 0 };
+  const front = { x: 0, y: 1, z: 0 };
+  const project = point => ({ ...point });
+  const visibleFaces = [
+    {
+      vertices: [top, left, right],
+      projected: [top, left, right].map(project),
+      depth: 1,
+      frontFacing: true
+    },
+    {
+      vertices: [top, right, front],
+      projected: [top, right, front].map(project),
+      depth: 2,
+      frontFacing: true
+    }
+  ];
+
+  const segments = solidWireframeSegments(visibleFaces);
+  assert.equal(segments.length, 5, '两个三角面共享的一条物理棱只能绘制一次');
+  assert.equal(solidWireframeSegments([
+    { ...visibleFaces[0], frontFacing: false }
+  ]).length, 0, '完全背向视角的棱不应覆盖绘制到棋体正面');
+});
 
 test('立体棋子每次重绘都先固定文字基准再测量并绘制字形', () => {
   const calls = [];
