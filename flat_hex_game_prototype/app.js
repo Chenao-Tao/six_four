@@ -567,7 +567,7 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
   const panelRotations = [...displayedPanelRotations().front];
   const closingPortalObservation = Boolean(
     closePortalObservation &&
-    queenTurn?.current?.layer === 'dormant' &&
+    queenTurn?.detecting &&
     state.solidLayers
   );
   if (!customEditor && state.boardShape === 'solid' && state.solidFaceSides) {
@@ -636,8 +636,10 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
     selectedPieceId: customEditor ? null : selectedPieceId,
     moveTargets,
     portalTargets,
-    portalDetecting: Boolean(queenTurn?.detecting),
-    portalDetectionPieceId: queenTurn?.detecting ? queenTurn.pieceId : null,
+    portalDetecting: Boolean(queenTurn?.detecting && !closingPortalObservation),
+    portalDetectionPieceId: queenTurn?.detecting && !closingPortalObservation
+      ? queenTurn.pieceId
+      : null,
     plannedMove
   };
 }
@@ -1861,9 +1863,7 @@ async function commitMove(
   const operation = moveLifecycle.begin();
   lockUndoControls();
   const previousState = cloneGameState(state);
-  const observationBaseModel = solidBoardViewer &&
-    queenTurn?.detecting &&
-    queenTurn?.current?.layer === 'dormant'
+  const observationBaseModel = solidBoardViewer && queenTurn?.detecting
     ? solidBoardModel({ closePortalObservation: true })
     : null;
   const captured = move.captureId
@@ -1902,20 +1902,33 @@ async function commitMove(
     render();
     return;
   }
-  const observationClosed = await commitWhenCurrent(
-    operation,
-    closePortalObservation(observationBaseModel),
-    () => {
-      undoHistory.push(previousState);
-      resetQueenTurnState();
-      selectedPieceId = null;
-      selectedMoves = new Map();
-      simulationPreview = null;
-      pendingPromotion = null;
-      promotionModal.classList.add('hidden');
-    }
-  );
-  if (!observationClosed) return;
+  const finalizeMoveUi = () => {
+    undoHistory.push(previousState);
+    resetQueenTurnState();
+    selectedPieceId = null;
+    selectedMoves = new Map();
+    simulationPreview = null;
+    pendingPromotion = null;
+    promotionModal.classList.add('hidden');
+  };
+  let formalStateCommitted = false;
+  if (observationBaseModel && !move.captureId) {
+    const formalStateReady = await commitWhenCurrent(operation, Promise.resolve(), () => {
+      state = result.state;
+      formalStateCommitted = true;
+      finalizeMoveUi();
+    });
+    if (!formalStateReady) return;
+    await closePortalObservation(solidBoardModel());
+    if (!operation.isCurrent()) return;
+  } else {
+    const observationClosed = await commitWhenCurrent(
+      operation,
+      closePortalObservation(observationBaseModel),
+      finalizeMoveUi
+    );
+    if (!observationClosed) return;
+  }
   if (solidBoardViewer && move.captureId) {
     animationLock = true;
     state = result.state;
@@ -1932,7 +1945,7 @@ async function commitMove(
     }
     if (!operation.isCurrent()) return;
   } else if (solidBoardViewer) {
-    state = result.state;
+    if (!formalStateCommitted) state = result.state;
   } else if (move.captureId) {
     if (!await animateBoardLayerExchange(result.state, operation)) return;
   } else {

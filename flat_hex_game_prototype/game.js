@@ -317,6 +317,11 @@ function solidIncidentEdges(pointKey) {
   return [...SOLID_EDGE_IDS].filter(edge => edge.split(':').includes(vertex));
 }
 
+function solidPointsShareEdge(firstPointKey, secondPointKey) {
+  const secondEdges = new Set(solidIncidentEdges(secondPointKey));
+  return solidIncidentEdges(firstPointKey).some(edge => secondEdges.has(edge));
+}
+
 function solidSurfaceGraph() {
   if (cachedSolidSurfaceGraph) return cachedSolidSurfaceGraph;
   const nodes = new Map();
@@ -363,7 +368,7 @@ function solidSurfaceGraph() {
       }
     }
     for (const [targetPointKey, count] of commonNeighborCounts) {
-      if (count < 2) continue;
+      if (count < 2 || solidPointsShareEdge(pointKey, targetPointKey)) continue;
       const targetNode = nodes.get(targetPointKey);
       const alias = targetNode.aliases.find(candidate =>
         node.aliases.some(source => source.panelIndex === candidate.panelIndex)) ?? targetNode.aliases[0];

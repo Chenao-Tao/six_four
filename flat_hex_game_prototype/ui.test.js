@@ -537,9 +537,32 @@ test('传送后进入眼睛检测态并在五秒或手动结束时提交空门�
   assert.match(styles, /@keyframes portal-eye-scan/);
 });
 
+test('立体空门传送结束观察时先提交正式状态再恢复棋体布局', () => {
+  const commit = app.match(/async function commitMove\([\s\S]*?\n}\n\nfunction chooseMove/);
+
+  assert.ok(commit);
+  assert.match(
+    commit[0],
+    /const finalizeMoveUi = \(\) => \{[\s\S]*?resetQueenTurnState\(\);[\s\S]*?\};/
+  );
+  assert.match(
+    commit[0],
+    /if \(observationBaseModel && !move\.captureId\) \{[\s\S]*?state = result\.state;[\s\S]*?finalizeMoveUi\(\);[\s\S]*?await closePortalObservation\(solidBoardModel\(\)\)/
+  );
+  assert.match(
+    commit[0],
+    /if \(solidBoardViewer && move\.captureId\) \{[\s\S]*?exchangeVertex[\s\S]*?exchangeEdge[\s\S]*?exchangeFace/
+  );
+  assert.match(app, /queenTurn\?\.detecting && !closingPortalObservation/);
+  assert.doesNotMatch(app, /closePortalObservation &&[\s\S]{0,100}current\?\.layer === 'dormant'/);
+});
+
 test('立体传送检测态沿棋体真实棱发红而不是绘制外围圆环', () => {
-  assert.match(app, /portalDetecting: Boolean\(queenTurn\?\.detecting\)/);
-  assert.match(app, /portalDetectionPieceId: queenTurn\?\.detecting \? queenTurn\.pieceId : null/);
+  assert.match(app, /portalDetecting: Boolean\(queenTurn\?\.detecting && !closingPortalObservation\)/);
+  assert.match(
+    app,
+    /portalDetectionPieceId: queenTurn\?\.detecting && !closingPortalObservation[\s\S]*?\? queenTurn\.pieceId[\s\S]*?: null/
+  );
   const edgeGlow = solidBoard.match(
     /function drawPortalDetectionEdgeGlow\(renderFaces, now\)[\s\S]*?\r?\n  }\r?\n\r?\n  function drawOperationLabel/
   );
