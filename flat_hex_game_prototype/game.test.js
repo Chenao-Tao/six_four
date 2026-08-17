@@ -21,6 +21,7 @@ import {
   positionSignature,
   promotionTypeForMove,
   rotateBoardPanel,
+  solidEdgeKey,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
@@ -900,6 +901,18 @@ test('立体后与象可以沿连续表面跨过相邻面', () => {
     { ...piece('wB', 'white', 'bishop', 1, 2), panelIndex: 0 }
   ]);
   assert.ok([...legalMoves(bishopState, 'wB').values()].some(move => move.panelIndex !== 0));
+});
+
+test('立体象不能把同一条公共棱误判为菱形对角线', () => {
+  const bishop = { ...piece('wB', 'white', 'bishop', 0, 1), panelIndex: 0 };
+  const state = solidStateOf([bishop]);
+  const startEdge = solidEdgeKey(bishop.position, bishop.panelIndex);
+  const movesAlongEdge = [...legalMoves(state, bishop.id).values()].filter(move =>
+    solidEdgeKey(move.target, move.panelIndex) === startEdge
+  );
+
+  assert.equal(startEdge, 'b:top');
+  assert.deepEqual(movesAlongEdge, []);
 });
 
 test('立体王沿六面体真实棱在顶点之间移动', () => {
