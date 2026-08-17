@@ -468,6 +468,35 @@ test('人工后回合拆成三次单步并持续显示剩余步数', () => {
   assert.match(app, /当前后没有合法的单步起点/);
 });
 
+test('后分步移动每走一步都可回退并恢复传送观察前状态', () => {
+  const chooseStep = app.match(/async function chooseQueenStep\(move\)[\s\S]*?\n}\n\nfunction handleSelectedMove/);
+  const undoStep = app.match(/async function undoQueenStep\(\)[\s\S]*?\n}\n\nasync function undoLastMove/);
+  const undoMove = app.match(/async function undoLastMove\(\)[\s\S]*?\n}\n\nfunction resetGame/);
+  const resetQueen = app.match(/function resetQueenTurnState\(\)[\s\S]*?\n}/);
+
+  assert.match(html, /id="queenStepUndoChoiceButton"[^>]*>回退后的上一步</);
+  assert.match(app, /const queenStepUndoHistory = createUndoHistory\([\s\S]*?limit: 3/);
+  assert.ok(chooseStep);
+  assert.match(
+    chooseStep[0],
+    /queenStepUndoHistory\.push\(previousContext\)[\s\S]*?queenTurn = move\.nextQueenContext/
+  );
+  assert.ok(undoStep);
+  assert.match(undoStep[0], /moveLifecycle\.invalidate\(\)/);
+  assert.match(undoStep[0], /closeMoveChoice\(\)/);
+  assert.match(undoStep[0], /const previousContext = queenStepUndoHistory\.undo\(\)/);
+  assert.match(undoStep[0], /queenTurn = previousContext/);
+  assert.match(undoStep[0], /updateQueenStepSelection\(/);
+  assert.match(undoStep[0], /solidBoardViewer\.exchangeLayers\(solidBoardModel\(\)\)/);
+  assert.match(undoStep[0], /showPortalDetection\(false\)/);
+  assert.ok(undoMove);
+  assert.match(undoMove[0], /if \(queenTurn\) \{[\s\S]*?await undoQueenStep\(\);[\s\S]*?return;/);
+  assert.ok(resetQueen);
+  assert.match(resetQueen[0], /queenStepUndoHistory\.clear\(\)/);
+  assert.match(app, /const canUndoQueenStep = Boolean\(queenTurn && queenStepUndoHistory\.canUndo\)/);
+  assert.match(app, /queenStepUndoChoiceButton\.addEventListener\('click', undoLastMove\)/);
+});
+
 test('立体后刚选中且尚未建立当前分步位置时安全使用外层模型', () => {
   const modelBuilder = app.match(/function solidBoardModel\([^)]*\)[\s\S]*?\n}\n\nfunction mapSolidPoint/);
   assert.ok(modelBuilder);

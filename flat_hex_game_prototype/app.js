@@ -81,6 +81,7 @@ const promoteButton = document.getElementById('promoteButton');
 const moveChoiceModal = document.getElementById('moveChoiceModal');
 const moveChoiceQuestion = document.getElementById('moveChoiceQuestion');
 const moveChoiceOptions = document.getElementById('moveChoiceOptions');
+const queenStepUndoChoiceButton = document.getElementById('queenStepUndoChoiceButton');
 const boardShell = document.getElementById('boardShell');
 const faceBadge = document.getElementById('faceBadge');
 const previewButton = document.getElementById('previewButton');
@@ -223,6 +224,10 @@ function cloneGameState(source) {
 }
 
 const undoHistory = createUndoHistory({ cloneState: cloneGameState, limit: 100 });
+const queenStepUndoHistory = createUndoHistory({
+  cloneState: context => structuredClone(context),
+  limit: 3
+});
 
 function lockUndoControls() {
   undoButton.disabled = true;
@@ -790,8 +795,9 @@ function refreshSolidBoard(message = '') {
     Boolean(pendingPromotion || pendingMoveChoice || queenTurn);
   solidAutoButton.disabled = editingSolid || animationLock ||
     Boolean(pendingPromotion || pendingMoveChoice || queenTurn);
+  const canUndoQueenStep = Boolean(queenTurn && queenStepUndoHistory.canUndo);
   solidUndoButton.disabled = editingSolid || animationLock || simulationLock ||
-    Boolean(queenTurn) || !undoHistory.canUndo;
+    (!canUndoQueenStep && (Boolean(queenTurn) || !undoHistory.canUndo));
   renderSolidPanelPreview();
   if (editingSolid) {
     const installedCount = customEditor.solidAssembly.slots.filter(Boolean).length;
@@ -1355,7 +1361,9 @@ function render() {
   stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   resetButton.disabled = editing;
-  undoButton.disabled = previewing || editing || animationLock || simulationLock || Boolean(queenTurn) || !undoHistory.canUndo;
+  const canUndoQueenStep = Boolean(queenTurn && queenStepUndoHistory.canUndo);
+  undoButton.disabled = previewing || editing || animationLock || simulationLock ||
+    (!canUndoQueenStep && (Boolean(queenTurn) || !undoHistory.canUndo));
   previewButton.disabled = editing || Boolean(queenTurn);
   customizeButton.disabled = editing || Boolean(queenTurn);
   customEditorControls.classList.toggle('hidden', !editing);
@@ -1426,6 +1434,7 @@ function clearPortalDetection() {
 
 function resetQueenTurnState() {
   clearPortalDetection();
+  queenStepUndoHistory.clear();
   queenTurn = null;
 }
 
@@ -1524,6 +1533,7 @@ function requestQueenPortalChoice() {
     .find(move => move.portalSelf);
   if (!portalMove) return;
   pendingMoveChoice = { type: 'queen-portal', pieceId: queenTurn.pieceId };
+  queenStepUndoChoiceButton.classList.toggle('hidden', !queenStepUndoHistory.canUndo);
   moveChoiceQuestion.textContent = '后已到达传送点。下一步要穿越，还是继续在当前面移动？';
 
   const transferButton = document.createElement('button');
@@ -1611,6 +1621,7 @@ async function chooseQueenStep(move) {
   const previousContext = queenTurn;
   await animateQueenStep(move);
   if (!operation.isCurrent()) return;
+  queenStepUndoHistory.push(previousContext);
   queenTurn = move.nextQueenContext;
   queenTurn.portalDecision = null;
   queenTurn.detecting = Boolean(previousContext.detecting || move.portalSelf);
@@ -1675,6 +1686,7 @@ function selectPiece(pieceId) {
   simulationPreview = null;
   selectedPieceId = pieceId;
   if (piece.type === 'queen') {
+    queenStepUndoHistory.clear();
     queenTurn = {
       pieceId,
       stepsUsed: 0,
@@ -1965,6 +1977,7 @@ function chooseMove(move) {
 function closeMoveChoice() {
   pendingMoveChoice = null;
   moveChoiceOptions.replaceChildren();
+  queenStepUndoChoiceButton.classList.add('hidden');
   moveChoiceModal.classList.add('hidden');
 }
 
@@ -1986,6 +1999,7 @@ function requestMoveChoice(move) {
   }
 
   pendingMoveChoice = { pieceId: selectedPieceId, choices };
+  queenStepUndoChoiceButton.classList.add('hidden');
   moveChoiceQuestion.textContent = '这个落点既能正常到达，也能通过传送阵到达。请选择本回合使用的路线：';
   let portalIndex = 0;
   const optionButtons = choices.map(choice => {
@@ -2789,8 +2803,42 @@ function beginPanelSwap() {
   render();
 }
 
-function undoLastMove() {
-  if (customEditor || isPreviewing() || animationLock || simulationLock || queenTurn) return;
+async function undoQueenStep() {
+  if (!queenTurn || !queenStepUndoHistory.canUndo || animationLock || simulationLock) return false;
+  const currentContext = queenTurn;
+  moveLifecycle.invalidate();
+  closeMoveChoice();
+  clearPortalDetection();
+  const previousContext = queenStepUndoHistory.undo();
+  if (!previousContext) return false;
+  queenTurn = previousContext;
+  selectedPieceId = queenTurn.pieceId;
+  simulationPreview = null;
+
+  if (currentContext.detecting && !previousContext.detecting && solidBoardViewer) {
+    animationLock = true;
+    lockUndoControls();
+    try {
+      await solidBoardViewer.exchangeLayers(solidBoardModel());
+    } finally {
+      animationLock = false;
+    }
+  }
+
+  if (queenTurn.detecting) showPortalDetection(false);
+  const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
+  updateQueenStepSelection(
+    `已回退后的上一步；当前已走 ${queenTurn.stepsUsed}/3 步，还可走 ${remaining} 步。`
+  );
+  return true;
+}
+
+async function undoLastMove() {
+  if (customEditor || isPreviewing() || animationLock || simulationLock) return;
+  if (queenTurn) {
+    await undoQueenStep();
+    return;
+  }
   stopAutoSimulation();
   const previousState = undoHistory.undo();
   if (!previousState) return;
@@ -2985,6 +3033,7 @@ pieceEditorModal.querySelectorAll('[data-editor-side]').forEach(button => {
 pieceEditorModal.querySelector('[data-editor-action="remove"]').addEventListener('click', removeEditorPiece);
 pieceEditorModal.querySelector('[data-editor-action="close"]').addEventListener('click', closePieceEditor);
 moveChoiceModal.querySelector('[data-move-choice-action="cancel"]').addEventListener('click', closeMoveChoice);
+queenStepUndoChoiceButton.addEventListener('click', undoLastMove);
 finishPortalDetectionButton.addEventListener('click', finishPortalDetection);
 autoButton.addEventListener('click', toggleAutoSimulation);
 
