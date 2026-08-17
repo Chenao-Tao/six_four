@@ -330,6 +330,29 @@ export function createSolidBoardViewer(canvas, initialModel, {
     }
   }
 
+  function drawPortalDetectionAura(renderFaces, now) {
+    if (!model.portalDetecting || !renderFaces.length) return;
+    const points = renderFaces.flatMap(face => face.projected);
+    const minX = Math.min(...points.map(point => point.x));
+    const maxX = Math.max(...points.map(point => point.x));
+    const minY = Math.min(...points.map(point => point.y));
+    const maxY = Math.max(...points.map(point => point.y));
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    const radius = Math.hypot(maxX - minX, maxY - minY) / 2;
+    const pulse = (Math.sin(now / 260) + 1) / 2;
+    context.save();
+    context.globalCompositeOperation = 'destination-over';
+    context.globalAlpha = 0.42 + pulse * 0.24;
+    context.strokeStyle = `rgba(255, 31, 61, ${0.42 + pulse * 0.24})`;
+    context.shadowColor = `rgba(255, 31, 61, ${0.72 + pulse * 0.18})`;
+    context.shadowBlur = 24 + pulse * 16;
+    context.lineWidth = 7 + pulse * 3;
+    context.beginPath();
+    context.arc(center.x, center.y, radius + 20 + pulse * 8, 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+
   function drawOperationLabel(text, position, alpha) {
     context.save();
     context.font = '700 14px "Microsoft YaHei", sans-serif';
@@ -632,6 +655,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
       };
     }).sort((left, right) => left.depth - right.depth);
     lastRenderFaces = renderFaces;
+    drawPortalDetectionAura(renderFaces, now);
     const interactionTargets = [];
     const sharedPieceDraws = [];
 
@@ -656,9 +680,24 @@ export function createSolidBoardViewer(canvas, initialModel, {
       const position = project(add(animatedWorld, scale(normal, 0.055)), width, height);
       const radius = Math.max(12, 17 * position.perspective * zoom);
       const isSelectedPiece = displayedModel.selectedPieceId === piece.id;
+      const isPortalDetectingPiece = displayedModel.portalDetecting &&
+        displayedModel.portalDetectionPieceId === piece.id;
       context.save();
       if (isExchangingRegionPiece && !faceAlreadyAnimated) {
         context.globalAlpha *= regionLayerMotion.alpha;
+      }
+      if (isPortalDetectingPiece) {
+        const pulse = (Math.sin(now / 220) + 1) / 2;
+        context.save();
+        context.globalAlpha *= 0.62 + pulse * 0.26;
+        context.strokeStyle = `rgba(255, 31, 61, ${0.62 + pulse * 0.24})`;
+        context.shadowColor = `rgba(255, 31, 61, ${0.82 + pulse * 0.18})`;
+        context.shadowBlur = 12 + pulse * 12;
+        context.lineWidth = 5 + pulse * 3;
+        context.beginPath();
+        context.arc(position.x, position.y, radius + 8 + pulse * 5, 0, Math.PI * 2);
+        context.stroke();
+        context.restore();
       }
       context.beginPath();
       context.arc(position.x, position.y, radius, 0, Math.PI * 2);

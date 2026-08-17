@@ -39,7 +39,7 @@ import {
   createSolidBoardViewer,
   mapPiecesToPanels,
   portalEndpointDisplayLabel
-} from './solid-board.js?v=solid-queen-hit-1';
+} from './solid-board.js?v=solid-detection-aura-1';
 import {
   assemblyPanelPreview,
   assemblyPortalEndpointLocations,
@@ -557,6 +557,8 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
       selectedPieceId: null,
       moveTargets: [],
       portalTargets,
+      portalDetecting: false,
+      portalDetectionPieceId: null,
       assemblyMode: true
     };
   }
@@ -634,6 +636,8 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
     selectedPieceId: customEditor ? null : selectedPieceId,
     moveTargets,
     portalTargets,
+    portalDetecting: Boolean(queenTurn?.detecting),
+    portalDetectionPieceId: queenTurn?.detecting ? queenTurn.pieceId : null,
     plannedMove
   };
 }
