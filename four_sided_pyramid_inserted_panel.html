@@ -112,7 +112,7 @@
       <div class="heading">
         <div>
           <h1>四棱锥插板模型</h1>
-          <p class="subtitle">1-4 号板围成四个侧面，5 号板覆盖半个底面，6 号板沿底面对角线插入锥体内部。</p>
+          <p class="subtitle">1-4 号板围成四个侧面，5 号板覆盖半个底面，6 号板与侧板等大并从右侧插入。</p>
         </div>
         <button id="resetView" class="icon-button" type="button" title="复位视角" aria-label="复位视角">↺</button>
       </div>
@@ -136,7 +136,7 @@
     <aside class="legend" aria-live="polite">
       <div class="legend-row"><span class="swatch shell-swatch"></span><span>1-4：四棱锥侧面</span></div>
       <div class="legend-row"><span class="swatch base-swatch"></span><span>5：半底面定位板</span></div>
-      <div class="legend-row"><span class="swatch insert-swatch"></span><span>6：沿对角剖面插入</span></div>
+      <div class="legend-row"><span class="swatch insert-swatch"></span><span>6：同尺寸板从右侧插入</span></div>
       <div id="status">第六块已插入到位</div>
     </aside>
   </main>
@@ -294,7 +294,33 @@
     );
     shellPanels.push(basePanel);
 
-    const insertTarget = [apex, base[0], base[2]];
+    const referenceBaseLength = base[0].distanceTo(base[1]);
+    const referenceSideLength = apex.distanceTo(base[0]);
+    const referenceAltitude = Math.sqrt(
+      referenceSideLength ** 2 - (referenceBaseLength / 2) ** 2
+    );
+    const verticalRise = apex.y - base[0].y;
+    const horizontalRun = Math.sqrt(referenceAltitude ** 2 - verticalRise ** 2);
+    const insertBaseDirection = new THREE.Vector3(1, 0, 1).normalize();
+    const insertAltitudeHorizontal = new THREE.Vector3(-1, 0, 1).normalize();
+    const insertAltitude = insertAltitudeHorizontal.multiplyScalar(horizontalRun)
+      .add(new THREE.Vector3(0, verticalRise, 0));
+    const insertBaseCenter = apex.clone().sub(insertAltitude);
+    const insertHalfBase = insertBaseDirection.clone().multiplyScalar(referenceBaseLength / 2);
+    const uncenteredInsertTarget = [
+      apex,
+      insertBaseCenter.clone().sub(insertHalfBase),
+      insertBaseCenter.clone().add(insertHalfBase)
+    ];
+    const uncenteredInsertCenter = uncenteredInsertTarget
+      .reduce((sum, point) => sum.add(point), new THREE.Vector3())
+      .multiplyScalar(1 / 3);
+    const insertCenteringOffset = new THREE.Vector3(
+      -uncenteredInsertCenter.x,
+      0,
+      -uncenteredInsertCenter.z
+    );
+    const insertTarget = uncenteredInsertTarget.map(point => point.clone().add(insertCenteringOffset));
     const insertCenter = insertTarget.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / 3);
     const insertPanel = addPlate(
       6,
@@ -303,7 +329,7 @@
       insertCenter.clone().add(new THREE.Vector3(0.08, 0.1, -0.08)),
       { labelColor: '#ffbd4a', edgeColor: 0xfff0c2, renderOrder: 8 }
     );
-    const insertionOffset = new THREE.Vector3(4.8, 0, 4.8);
+    const insertionOffset = insertBaseDirection.clone().multiplyScalar(6.2);
 
     const pathStart = insertCenter.clone().add(insertionOffset);
     const pathGeometry = new THREE.BufferGeometry().setFromPoints([pathStart, insertCenter]);
@@ -348,7 +374,7 @@
       insertionPath.visible = progress < 0.995;
       if (progress >= 0.995) status.textContent = '第六块已插入到位';
       else if (progress <= 0.005) status.textContent = '第六块位于锥体外侧';
-      else status.textContent = '第六块正在沿底面对角剖面插入';
+      else status.textContent = '第六块正在从右侧沿板面插入';
     }
 
     function stopAnimation() {
