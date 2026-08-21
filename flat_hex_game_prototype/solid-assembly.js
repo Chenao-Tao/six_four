@@ -5,7 +5,13 @@ import {
   portalEndpointLocations,
   solidPointKey,
   verticalMirrorPanelIndex
-} from './game.js?v=separate-layout-storage-1';
+} from './game.js?v=solid-geometry-2';
+import {
+  CLASSIC_SOLID_GEOMETRY,
+  cloneSolidGeometry,
+  normalizeSolidGeometry,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js?v=solid-geometry-2';
 
 const PANEL_IDS = ['1', '2', '3', '4', '5', '6'];
 
@@ -26,7 +32,8 @@ function cloneAssembly(assembly) {
         B: panel.faces.B.map(clonePiece)
       }
     })),
-    slots: assembly.slots.map(slot => slot ? { ...slot } : null)
+    slots: assembly.slots.map(slot => slot ? { ...slot } : null),
+    solidGeometry: cloneSolidGeometry(assembly.solidGeometry)
   };
 }
 
@@ -145,7 +152,7 @@ function collisionError(assembly) {
       const targetSlot = hidden ? verticalMirrorPanelIndex(slotIndex) : slotIndex;
       const pieces = facePiecesAtSlot(panel, face, slot.rotation, slotIndex, hidden);
       for (const piece of pieces) {
-        const key = solidPointKey(piece.position, targetSlot);
+        const key = solidPointKey(piece.position, targetSlot, assembly.solidGeometry);
         const previous = occupied.get(key);
         if (previous) {
           return `棋子位置重合：${previous.panelId}${previous.face} 与 ` +
@@ -198,7 +205,7 @@ export function createSolidAssembly(layout, { installed = false, arrangement = l
       };
     });
   }
-  return { panels, slots };
+  return { panels, slots, solidGeometry: normalizeSolidGeometry(arrangement.solidGeometry) };
 }
 
 export function syncAssemblyPieces(assembly, layout) {
@@ -230,7 +237,12 @@ export function assemblyViewModel(assembly) {
     panelRotations.push(slot.rotation);
     pieces.push(...facePiecesAtSlot(panel, slot.face, slot.rotation, slotIndex));
   });
-  return { pieces, faceLabels, panelRotations };
+  return {
+    pieces,
+    faceLabels,
+    panelRotations,
+    solidGeometry: cloneSolidGeometry(assembly.solidGeometry)
+  };
 }
 
 export function assemblyPanelPreview(assembly, panelId) {
@@ -292,7 +304,8 @@ export function assemblyPortalEndpointLocations(assembly, portalPairs) {
     boardPanelRotations: layout.panelRotations,
     portalPairs,
     solidLayers: { outer: [], inner: [] },
-    solidFaceSides: Array(6).fill('front')
+    solidFaceSides: Array(6).fill('front'),
+    solidGeometry: cloneSolidGeometry(assembly.solidGeometry)
   });
 }
 
@@ -339,9 +352,38 @@ export function removeAssemblyPanel(assembly, slotIndex) {
   return { assembly: next };
 }
 
+export function setAssemblyGeometryType(assembly, type) {
+  const next = cloneAssembly(assembly);
+  next.solidGeometry = normalizeSolidGeometry(
+    type === TETRAHEDRON_SOLID_GEOMETRY_TYPE
+      ? { type: TETRAHEDRON_SOLID_GEOMETRY_TYPE }
+      : CLASSIC_SOLID_GEOMETRY
+  );
+  return validated(next);
+}
+
+export function setInsertedPanelPosition(assembly, panelIndex, position) {
+  if (![4, 5].includes(panelIndex) || assembly.solidGeometry?.type !== TETRAHEDRON_SOLID_GEOMETRY_TYPE) {
+    return { error: '只有四面体结构的 5、6 号插板可以编辑位置' };
+  }
+  if (!['x', 'y', 'z'].every(axis => Number.isFinite(Number(position?.[axis])))) {
+    return { error: '插板位置必须是有效数字' };
+  }
+  const next = cloneAssembly(assembly);
+  next.solidGeometry.insertedPanels[panelIndex - 4].position = {
+    x: Number(position.x),
+    y: Number(position.y),
+    z: Number(position.z)
+  };
+  return validated(next);
+}
+
 export function assemblyToLayout(assembly) {
   if (assembly.slots.some(slot => !slot)) return { error: '请先将六块三角板全部安装到六面体骨架' };
   const collision = collisionError(assembly);
   if (collision) return { error: collision };
-  return assemblyLayoutState(assembly);
+  return {
+    ...assemblyLayoutState(assembly),
+    solidGeometry: cloneSolidGeometry(assembly.solidGeometry)
+  };
 }

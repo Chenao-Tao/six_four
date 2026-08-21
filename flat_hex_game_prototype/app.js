@@ -29,17 +29,17 @@ import {
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
-} from './game.js?v=queen-step-3';
+} from './game.js?v=solid-geometry-2';
 import {
   createBrowserLayoutStore,
   LEGACY_LAYOUT_STORAGE_KEY,
   shouldFallbackToBrowserStorage
-} from './layout-storage.js?v=preset-playability-1';
+} from './layout-storage.js?v=solid-geometry-2';
 import {
   createSolidBoardViewer,
   mapPiecesToPanels,
   portalEndpointDisplayLabel
-} from './solid-board.js?v=solid-detection-aura-1';
+} from './solid-board.js?v=solid-geometry-2';
 import {
   assemblyPanelPreview,
   assemblyPortalEndpointLocations,
@@ -50,15 +50,18 @@ import {
   placeAssemblyPanel,
   removeAssemblyPanel,
   rotateAssemblyPanel,
+  setAssemblyGeometryType,
+  setInsertedPanelPosition,
   syncAssemblyPieces
-} from './solid-assembly.js?v=paired-layouts-5';
+} from './solid-assembly.js?v=solid-geometry-2';
+import { TETRAHEDRON_SOLID_GEOMETRY_TYPE } from './solid-geometry.js?v=solid-geometry-2';
 import {
   flatLayouts,
   resolvePlayableLayout,
   resolveSolidLayout,
   solidLayoutCandidates,
   solidLayouts
-} from './layout-library.js?v=pending-solid-1';
+} from './layout-library.js?v=solid-geometry-2';
 import { moveChoicesAtTarget } from './move-choice.js?v=portal-choice-1';
 import {
   commitWhenCurrent,
@@ -128,6 +131,7 @@ const solidViewer = document.getElementById('solidViewer');
 const solidBoardCanvas = document.getElementById('solidBoardCanvas');
 const solidViewerStatus = document.getElementById('solidViewerStatus');
 const solidPanelSelection = document.getElementById('solidPanelSelection');
+const solidGeometryEditor = document.getElementById('solidGeometryEditor');
 const rotateSolidPanelButton = document.getElementById('rotateSolidPanelButton');
 const flipSolidPanelButton = document.getElementById('flipSolidPanelButton');
 const removeSolidPanelButton = document.getElementById('removeSolidPanelButton');
@@ -148,6 +152,9 @@ const solidPanelPreviewSvg = document.getElementById('solidPanelPreviewSvg');
 const solidPanelPreviewMeta = document.getElementById('solidPanelPreviewMeta');
 const solidSlotPicker = document.getElementById('solidSlotPicker');
 const solidSlotList = document.getElementById('solidSlotList');
+const classicSolidGeometryButton = document.getElementById('classicSolidGeometryButton');
+const tetrahedronSolidGeometryButton = document.getElementById('tetrahedronSolidGeometryButton');
+const insertedPanelPositionEditor = document.getElementById('insertedPanelPositionEditor');
 const size = 72;
 const center = { x: 380, y: 350 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -640,6 +647,7 @@ function solidBoardModel({ closePortalObservation = false } = {}) {
     portalDetectionPieceId: queenTurn?.detecting && !closingPortalObservation
       ? queenTurn.pieceId
       : null,
+    solidGeometry: state.solidGeometry,
     plannedMove
   };
 }
@@ -764,7 +772,10 @@ function renderSolidSlotPicker() {
     button.classList.toggle('occupied', Boolean(slot));
     button.classList.toggle('selected', solidSelectedPanel === slotIndex);
     const label = document.createElement('strong');
-    label.textContent = `槽位 ${slotIndex + 1}`;
+    const tetrahedron = customEditor.solidAssembly.solidGeometry?.type === TETRAHEDRON_SOLID_GEOMETRY_TYPE;
+    label.textContent = tetrahedron
+      ? slotIndex < 4 ? `外壳面 ${slotIndex + 1}` : `插板 ${slotIndex + 1}`
+      : `槽位 ${slotIndex + 1}`;
     const status = document.createElement('small');
     status.textContent = slot
       ? `${slot.panelId}${slot.face} · ${slot.rotation}°`
@@ -775,6 +786,48 @@ function renderSolidSlotPicker() {
   });
 }
 
+function renderSolidGeometryEditor() {
+  if (!customEditor?.solidAssembly) return;
+  const tetrahedron = customEditor.solidAssembly.solidGeometry?.type === TETRAHEDRON_SOLID_GEOMETRY_TYPE;
+  classicSolidGeometryButton.classList.toggle('active', !tetrahedron);
+  tetrahedronSolidGeometryButton.classList.toggle('active', tetrahedron);
+  insertedPanelPositionEditor.classList.toggle('hidden', !tetrahedron);
+  if (!tetrahedron) return;
+  insertedPanelPositionEditor.querySelectorAll('input[data-inserted-panel]').forEach(input => {
+    const panelIndex = Number(input.dataset.insertedPanel);
+    const transform = customEditor.solidAssembly.solidGeometry.insertedPanels[panelIndex - 4];
+    input.value = String(transform.position[input.dataset.axis]);
+  });
+}
+
+function setSolidGeometryType(type) {
+  if (!customEditor?.solidAssembly) return;
+  const result = setAssemblyGeometryType(customEditor.solidAssembly, type);
+  if (result.error) {
+    refreshSolidBoard(`不能切换棋盘结构：${result.error}`);
+    return;
+  }
+  customEditor.solidAssembly = result.assembly;
+  refreshSolidBoard(type === TETRAHEDRON_SOLID_GEOMETRY_TYPE
+    ? '已切换为四面体外壳与两块可调位置插板。'
+    : '已切换为双锥六面体。');
+}
+
+function updateInsertedPanelPosition(input) {
+  if (!customEditor?.solidAssembly) return;
+  const panelIndex = Number(input.dataset.insertedPanel);
+  const transform = customEditor.solidAssembly.solidGeometry?.insertedPanels?.[panelIndex - 4];
+  if (!transform) return;
+  const position = { ...transform.position, [input.dataset.axis]: Number(input.value) };
+  const result = setInsertedPanelPosition(customEditor.solidAssembly, panelIndex, position);
+  if (result.error) {
+    refreshSolidBoard(`不能移动插板：${result.error}`);
+    return;
+  }
+  customEditor.solidAssembly = result.assembly;
+  refreshSolidBoard(`${panelIndex + 1} 号插板位置已更新。`);
+}
+
 function refreshSolidBoard(message = '') {
   if (!solidBoardViewer) return;
   const model = solidBoardModel();
@@ -783,6 +836,7 @@ function refreshSolidBoard(message = '') {
   const editingSolid = Boolean(customEditor);
   const selectedPanel = selectedAssemblyPanel();
   solidPanelSelection.classList.toggle('hidden', !editingSolid);
+  solidGeometryEditor.classList.toggle('hidden', !editingSolid);
   document.querySelector('.solid-panel-actions').classList.toggle('hidden', !editingSolid);
   solidPanelTray.classList.toggle('hidden', !editingSolid);
   solidSlotPicker.classList.toggle('hidden', !editingSolid);
@@ -818,6 +872,7 @@ function refreshSolidBoard(message = '') {
     saveSolidCustomButton.disabled = Boolean(assemblyToLayout(customEditor.solidAssembly).error);
     renderSolidSlotPicker();
     renderSolidPanelTray();
+    renderSolidGeometryEditor();
   }
 }
 
@@ -2074,7 +2129,7 @@ function searchWithWorker(searchId, searchState, onProgress) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const worker = new Worker(
-      new URL('./ai-worker.js?v=delayed-portal-1', import.meta.url),
+      new URL('./ai-worker.js?v=solid-geometry-2', import.meta.url),
       { type: 'module' }
     );
     aiSearchWorker = worker;
@@ -2315,6 +2370,15 @@ async function saveCustomBoard() {
   const name = !enteredName || enteredName === '默认布局' ? nextCustomLayoutName() : enteredName;
   if (customEditor.boardShape === 'solid') solidLayoutNameInput.value = name;
   else layoutNameInput.value = name;
+  if (customEditor.boardShape === 'solid') {
+    const sourceSave = await saveFlatSourceLayout(name);
+    if (sourceSave.error) {
+      boardHelp.textContent = `无法保存同名平面方案：${sourceSave.error}`;
+      solidViewerStatus.textContent = sourceSave.error;
+      selectedInfo.textContent = sourceSave.error;
+      return;
+    }
+  }
   const assembled = customEditor.boardShape === 'solid'
     ? assemblyToLayout(customEditor.solidAssembly)
     : customEditor;
@@ -2329,7 +2393,8 @@ async function saveCustomBoard() {
     assembled.faceLabels,
     assembled.panelRotations,
     customEditor.boardShape,
-    customEditor.portalPairs
+    customEditor.portalPairs,
+    assembled.solidGeometry
   );
   if (result.error) {
     boardHelp.textContent = `无法保存：${result.error}`;
@@ -2403,7 +2468,8 @@ function solidLayoutSnapshot(name, assembled = assemblyToLayout(customEditor.sol
     panelRotations: {
       front: [...assembled.panelRotations.front],
       back: [...assembled.panelRotations.back]
-    }
+    },
+    solidGeometry: assembled.solidGeometry
   };
 }
 
@@ -2411,6 +2477,36 @@ function nextCustomLayoutName() {
   let sequence = 1;
   while (savedLayouts.some(layout => layout.name === `自定义布局 ${sequence}`)) sequence += 1;
   return `自定义布局 ${sequence}`;
+}
+
+async function saveFlatSourceLayout(name) {
+  const validation = createCustomLayout(
+    customEditor.boardStates,
+    customEditor.faceLabels,
+    customEditor.panelRotations,
+    'flat',
+    customEditor.portalPairs
+  );
+  if (validation.error) return { error: validation.error };
+  const snapshot = layoutSnapshotFromEditor(name, { ...validation, boardShape: 'flat' });
+  try {
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: false })
+    });
+    applyLayoutLibrary(library, name);
+    customEditor.sourceFlatLayoutName = name;
+    layoutNameInput.value = name;
+    solidLayoutNameInput.value = name;
+    if (customEditor.solidAssembly) {
+      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, snapshot);
+      customEditor.solidAssembly = synchronized.assembly;
+      if (synchronized.error) return { error: synchronized.error };
+    }
+    return { snapshot };
+  } catch (error) {
+    return { error: error.message };
+  }
 }
 
 async function saveLayoutToLibrary() {
@@ -2462,6 +2558,11 @@ async function saveSolidLayoutToLibrary() {
   const name = customEditor.sourceFlatLayoutName || solidLayoutNameInput.value.trim();
   if (!name) {
     boardHelp.textContent = '请先载入或保存同名平面方案。';
+    return;
+  }
+  const sourceSave = await saveFlatSourceLayout(name);
+  if (sourceSave.error) {
+    boardHelp.textContent = `立体布局不能保存：${sourceSave.error}`;
     return;
   }
   const assembled = assemblyToLayout(customEditor.solidAssembly);
@@ -2592,6 +2693,12 @@ async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardSh
   if (boardShape === 'solid') {
     if (!customEditor.solidAssembly) {
       boardHelp.textContent = '请先载入或完成立体装配。';
+      return;
+    }
+    const sourceSave = await saveFlatSourceLayout(name);
+    if (sourceSave.error) {
+      boardHelp.textContent = `无法启用立体布局：${sourceSave.error}`;
+      solidViewerStatus.textContent = sourceSave.error;
       return;
     }
     const assembled = assemblyToLayout(customEditor.solidAssembly);
@@ -3026,6 +3133,12 @@ panelModeButton.addEventListener('click', () => setEditorMode('panels'));
 portalModeButton.addEventListener('click', () => setEditorMode('portals'));
 flatShapeButton.addEventListener('click', () => setBoardShape('flat'));
 solidShapeButton.addEventListener('click', () => setBoardShape('solid'));
+classicSolidGeometryButton.addEventListener('click', () => setSolidGeometryType('triangular-bipyramid'));
+tetrahedronSolidGeometryButton.addEventListener('click', () =>
+  setSolidGeometryType(TETRAHEDRON_SOLID_GEOMETRY_TYPE));
+insertedPanelPositionEditor.querySelectorAll('input[data-inserted-panel]').forEach(input => {
+  input.addEventListener('change', () => updateInsertedPanelPosition(input));
+});
 flipSelectedPanelButton.addEventListener('click', flipSelectedPanel);
 rotateSelectedPanelButton.addEventListener('click', rotateSelectedPanel);
 swapSelectedPanelButton.addEventListener('click', beginPanelSwap);

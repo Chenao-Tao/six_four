@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
+  <title>四面体双插板可编辑棋盘</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #17202a;
+      background: #ece9e2;
+    }
+
+    * { box-sizing: border-box; }
+    html, body, #app, #scene { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #ece9e2; }
+    #scene { position: absolute; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+    .toolbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 2;
+      width: min(408px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      padding: 14px;
+      border: 1px solid rgba(19, 31, 43, .2);
+      border-radius: 8px;
+      background: rgba(250, 249, 246, .94);
+      box-shadow: 0 16px 38px rgba(41, 47, 52, .14);
+      backdrop-filter: blur(10px);
+    }
+
+    .heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 18px; line-height: 1.35; letter-spacing: 0; }
+    .subtitle { margin: 5px 0 0; color: #596773; font-size: 12px; line-height: 1.55; }
+    .controls { display: grid; gap: 10px; margin-top: 13px; }
+    .control-row { display: grid; grid-template-columns: 58px 1fr; align-items: center; gap: 8px; }
+    .control-label { color: #46535e; font-size: 12px; font-weight: 700; }
+    .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+    button, input { font: inherit; }
+    button {
+      min-width: 38px;
+      min-height: 36px;
+      padding: 7px 10px;
+      border: 1px solid rgba(19, 31, 43, .2);
+      border-radius: 6px;
+      color: #26333e;
+      background: #f4f2ed;
+      cursor: pointer;
+    }
+    button:hover { border-color: rgba(19, 31, 43, .42); background: #fff; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #087db6; outline-offset: 2px; }
+    .segmented button { border-radius: 0; }
+    .segmented button + button { border-left: 0; }
+    .segmented button:first-child { border-radius: 6px 0 0 6px; }
+    .segmented button:last-child { border-radius: 0 6px 6px 0; }
+    .segmented button.active { color: #fff; border-color: #087db6; background: #087db6; }
+    .icon-button { width: 38px; flex: 0 0 38px; padding: 0; font-size: 18px; }
+
+    .transform-grid {
+      display: grid;
+      grid-template-columns: 20px 1fr 64px;
+      align-items: center;
+      gap: 7px;
+    }
+    .axis { font-size: 12px; font-weight: 800; text-align: center; }
+    .axis-x { color: #c94848; }
+    .axis-y { color: #25814b; }
+    .axis-z { color: #2671b7; }
+    input[type="range"] { width: 100%; accent-color: #087db6; }
+    input[type="number"] {
+      width: 64px;
+      height: 32px;
+      padding: 4px 6px;
+      border: 1px solid rgba(19, 31, 43, .2);
+      border-radius: 5px;
+      color: #26333e;
+      background: #fff;
+      text-align: right;
+    }
+    .section-line { height: 1px; background: rgba(19, 31, 43, .12); }
+
+    .legend {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      z-index: 2;
+      display: grid;
+      gap: 7px;
+      width: min(280px, calc(100vw - 32px));
+      padding: 12px 14px;
+      border: 1px solid rgba(19, 31, 43, .18);
+      border-radius: 8px;
+      background: rgba(250, 249, 246, .92);
+      color: #46535e;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+    }
+    .legend-row { display: flex; align-items: center; gap: 9px; }
+    .swatch { width: 20px; height: 4px; flex: 0 0 auto; border-radius: 2px; }
+    .shell-swatch { background: #087db6; }
+    .panel-five-swatch { background: #e28a22; }
+    .panel-six-swatch { background: #b63e7c; }
+    #status { color: #17202a; font-weight: 700; }
+
+    @media (max-width: 640px) {
+      .toolbar { top: 10px; left: 10px; width: calc(100vw - 20px); max-height: 52vh; padding: 12px; }
+      .legend { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+      h1 { font-size: 16px; }
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <main id="app">
+    <div id="scene" aria-label="四面体与两块位置可编辑插板组成的三角棋盘"></div>
+
+    <section class="toolbar" aria-label="插板编辑控制">
+      <div class="heading">
+        <div>
+          <h1>四面体双插板棋盘</h1>
+          <p class="subtitle">四面体保留四等分三角网格，5、6 号板可独立编辑位置和旋转角度。</p>
+        </div>
+        <button id="resetView" class="icon-button" type="button" title="复位视角" aria-label="复位视角">↺</button>
+      </div>
+
+      <div class="controls">
+        <div class="control-row">
+          <span class="control-label">编辑板</span>
+          <div class="segmented" role="group" aria-label="选择插板">
+            <button id="selectFive" class="active" type="button" aria-pressed="true">5 号板</button>
+            <button id="selectSix" type="button" aria-pressed="false">6 号板</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">工具</span>
+          <div class="segmented" role="group" aria-label="变换工具">
+            <button id="translateMode" class="active" type="button" aria-pressed="true">移动</button>
+            <button id="rotateMode" type="button" aria-pressed="false">旋转</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">坐标系</span>
+          <div class="segmented" role="group" aria-label="坐标系">
+            <button id="worldSpace" class="active" type="button" aria-pressed="true">世界</button>
+            <button id="localSpace" type="button" aria-pressed="false">局部</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">外壳</span>
+          <div class="segmented" role="group" aria-label="四面体材质">
+            <button id="solidShell" type="button" aria-pressed="false">实体</button>
+            <button id="xrayShell" class="active" type="button" aria-pressed="true">透视</button>
+          </div>
+        </div>
+
+        <div class="section-line"></div>
+
+        <div class="control-row">
+          <span class="control-label">位置</span>
+          <div id="positionControls"></div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">旋转</span>
+          <div id="rotationControls"></div>
+        </div>
+
+        <div class="section-line"></div>
+
+        <div class="control-row">
+          <span class="control-label">复位</span>
+          <div class="segmented" role="group" aria-label="复位插板">
+            <button id="resetSelected" type="button">当前板</button>
+            <button id="resetAll" type="button">全部板</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="legend" aria-live="polite">
+      <div class="legend-row"><span class="swatch shell-swatch"></span><span>1-4：四面体外壳</span></div>
+      <div class="legend-row"><span class="swatch panel-five-swatch"></span><span>5：可编辑插板</span></div>
+      <div class="legend-row"><span class="swatch panel-six-swatch"></span><span>6：可编辑插板</span></div>
+      <div id="status">正在编辑 5 号板</div>
+    </aside>
+  </main>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+    const sceneHost = document.getElementById('scene');
+    const status = document.getElementById('status');
+    const positionControls = document.getElementById('positionControls');
+    const rotationControls = document.getElementById('rotationControls');
+    const selectFiveButton = document.getElementById('selectFive');
+    const selectSixButton = document.getElementById('selectSix');
+    const translateModeButton = document.getElementById('translateMode');
+    const rotateModeButton = document.getElementById('rotateMode');
+    const worldSpaceButton = document.getElementById('worldSpace');
+    const localSpaceButton = document.getElementById('localSpace');
+    const solidShellButton = document.getElementById('solidShell');
+    const xrayShellButton = document.getElementById('xrayShell');
+    const resetSelectedButton = document.getElementById('resetSelected');
+    const resetAllButton = document.getElementById('resetAll');
+    const resetViewButton = document.getElementById('resetView');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xece9e2);
+    scene.fog = new THREE.Fog(0xece9e2, 18, 38);
+
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    sceneHost.appendChild(renderer.domElement);
+
+    const orbitControls = new OrbitControls(camera, renderer.domElement);
+    orbitControls.enableDamping = true;
+    orbitControls.dampingFactor = 0.07;
+    orbitControls.minDistance = 7;
+    orbitControls.maxDistance = 32;
+
+    const transformControls = new TransformControls(camera, renderer.domElement);
+    transformControls.setMode('translate');
+    transformControls.setSpace('world');
+    transformControls.setTranslationSnap(0.1);
+    transformControls.setRotationSnap(THREE.MathUtils.degToRad(5));
+    transformControls.size = 0.82;
+    scene.add(transformControls.getHelper());
+
+    transformControls.addEventListener('dragging-changed', event => {
+      orbitControls.enabled = !event.value;
+    });
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x7d7368, 2.15));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3.1);
+    keyLight.position.set(6, 8, 7);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x8dcfff, 1.35);
+    fillLight.position.set(-6, 2, -5);
+    scene.add(fillLight);
+
+    const model = new THREE.Group();
+    model.rotation.set(-0.08, -0.22, 0.02);
+    scene.add(model);
+
+    const radius = 2.7;
+    const thickness = 0.055;
+    const tetraVertices = [
+      new THREE.Vector3(-radius, -radius, -radius),
+      new THREE.Vector3(-radius, radius, radius),
+      new THREE.Vector3(radius, -radius, radius),
+      new THREE.Vector3(radius, radius, -radius)
+    ];
+    const faceIndices = [
+      [1, 2, 3],
+      [0, 3, 2],
+      [0, 1, 3],
+      [0, 2, 1]
+    ];
+    const shellFaces = [];
+    const editableMeshes = [];
+
+    function orientOutward(points) {
+      const oriented = points.map(point => point.clone());
+      const normal = new THREE.Vector3()
+        .subVectors(oriented[1], oriented[0])
+        .cross(new THREE.Vector3().subVectors(oriented[2], oriented[0]));
+      const center = oriented.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / 3);
+      if (normal.dot(center) < 0) [oriented[1], oriented[2]] = [oriented[2], oriented[1]];
+      return oriented;
+    }
+
+    function trianglePlateGeometry(points, depth) {
+      const edgeA = new THREE.Vector3().subVectors(points[1], points[0]);
+      const edgeB = new THREE.Vector3().subVectors(points[2], points[0]);
+      const offset = new THREE.Vector3().crossVectors(edgeA, edgeB).normalize().multiplyScalar(depth / 2);
+      const vertices = [];
+      for (const sign of [1, -1]) {
+        points.forEach(point => {
+          const vertex = point.clone().addScaledVector(offset, sign);
+          vertices.push(vertex.x, vertex.y, vertex.z);
+        });
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setIndex([
+        0, 1, 2, 5, 4, 3,
+        0, 3, 4, 0, 4, 1,
+        1, 4, 5, 1, 5, 2,
+        2, 5, 3, 2, 3, 0
+      ]);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function triangleGridGeometry(points, depth, divisions = 4) {
+      const normal = new THREE.Vector3()
+        .subVectors(points[1], points[0])
+        .cross(new THREE.Vector3().subVectors(points[2], points[0]))
+        .normalize();
+      const positions = [];
+
+      function addSegment(from, to, offset) {
+        const start = from.clone().add(offset);
+        const end = to.clone().add(offset);
+        positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
+      }
+
+      for (const sign of [1, -1]) {
+        const offset = normal.clone().multiplyScalar(sign * (depth / 2 + 0.012));
+        for (let index = 1; index < divisions; index += 1) {
+          const t = index / divisions;
+          addSegment(points[0].clone().lerp(points[2], t), points[1].clone().lerp(points[2], t), offset);
+          addSegment(points[1].clone().lerp(points[0], t), points[2].clone().lerp(points[0], t), offset);
+          addSegment(points[2].clone().lerp(points[1], t), points[0].clone().lerp(points[1], t), offset);
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      return geometry;
+    }
+
+    function labelSprite(text, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 192;
+      canvas.height = 192;
+      const context = canvas.getContext('2d');
+      context.beginPath();
+      context.arc(96, 96, 54, 0, Math.PI * 2);
+      context.fillStyle = 'rgba(250, 249, 246, .96)';
+      context.fill();
+      context.lineWidth = 8;
+      context.strokeStyle = color;
+      context.stroke();
+      context.fillStyle = '#17202a';
+      context.font = '700 72px "Segoe UI", sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(text, 96, 101);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+      sprite.scale.set(0.68, 0.68, 0.68);
+      sprite.renderOrder = 20;
+      return sprite;
+    }
+
+    function createPlate(points, colors, options = {}) {
+      const group = new THREE.Group();
+      const geometry = trianglePlateGeometry(points, thickness);
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshPhysicalMaterial({
+        color: colors.face,
+        roughness: 0.46,
+        metalness: 0.04,
+        clearcoat: 0.2,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: options.opacity ?? 0.78,
+        depthWrite: options.depthWrite ?? true
+      }));
+      mesh.renderOrder = options.renderOrder ?? 1;
+      group.add(mesh);
+
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geometry, 12),
+        new THREE.LineBasicMaterial({ color: colors.edge, transparent: true, opacity: 0.9 })
+      );
+      edges.renderOrder = (options.renderOrder ?? 1) + 2;
+      group.add(edges);
+
+      const grid = new THREE.LineSegments(
+        triangleGridGeometry(points, thickness),
+        new THREE.LineBasicMaterial({ color: colors.grid, transparent: true, opacity: 0.92 })
+      );
+      grid.renderOrder = (options.renderOrder ?? 1) + 3;
+      group.add(grid);
+
+      return { group, mesh, edges, grid };
+    }
+
+    faceIndices.forEach(indices => {
+      const points = orientOutward(indices.map(index => tetraVertices[index]));
+      const face = createPlate(points, {
+        face: 0x168ec2,
+        edge: 0x075c91,
+        grid: 0xe9f8ff
+      }, { opacity: 0.2, depthWrite: false });
+      shellFaces.push(face);
+      model.add(face.group);
+    });
+
+    tetraVertices.forEach((vertex, index) => {
+      const label = labelSprite(String(index + 1), '#087db6');
+      label.position.copy(vertex).add(vertex.clone().normalize().multiplyScalar(0.34));
+      model.add(label);
+    });
+
+    const faceSide = tetraVertices[0].distanceTo(tetraVertices[1]);
+    const triangleHeight = faceSide * Math.sqrt(3) / 2;
+    const insertPoints = [
+      new THREE.Vector3(-faceSide / 2, -triangleHeight / 3, 0),
+      new THREE.Vector3(faceSide / 2, -triangleHeight / 3, 0),
+      new THREE.Vector3(0, triangleHeight * 2 / 3, 0)
+    ];
+
+    function createEditablePanel(number, colors, defaultTransform) {
+      const plate = createPlate(insertPoints, colors, { opacity: 0.82, renderOrder: 8 });
+      plate.group.userData.panelNumber = number;
+      plate.mesh.userData.panelNumber = number;
+      const label = labelSprite(String(number), colors.label);
+      label.position.set(0, 0, 0.14);
+      plate.group.add(label);
+      plate.group.position.copy(defaultTransform.position);
+      plate.group.rotation.copy(defaultTransform.rotation);
+      model.add(plate.group);
+      editableMeshes.push(plate.mesh);
+      return { ...plate, number, defaultTransform };
+    }
+
+    const panelFive = createEditablePanel(5, {
+      face: 0xe28a22,
+      edge: 0x9d5210,
+      grid: 0xfff1c9,
+      label: '#d47713'
+    }, {
+      position: new THREE.Vector3(0, 0, 0),
+      rotation: new THREE.Euler(0, Math.PI / 2, 0)
+    });
+
+    const panelSix = createEditablePanel(6, {
+      face: 0xb63e7c,
+      edge: 0x74204c,
+      grid: 0xffd9ec,
+      label: '#a52d6c'
+    }, {
+      position: new THREE.Vector3(0, 0, 0),
+      rotation: new THREE.Euler(Math.PI / 2, 0, Math.PI / 4)
+    });
+
+    const panels = [panelFive, panelSix];
+    let selectedPanel = panelFive;
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let pointerDown = null;
+    const inputBindings = [];
+
+    function addAxisControls(host, type, min, max, step) {
+      ['x', 'y', 'z'].forEach(axis => {
+        const row = document.createElement('div');
+        row.className = 'transform-grid';
+        const label = document.createElement('span');
+        label.className = `axis axis-${axis}`;
+        label.textContent = axis.toUpperCase();
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = String(min);
+        range.max = String(max);
+        range.step = String(step);
+        const number = document.createElement('input');
+        number.type = 'number';
+        number.min = String(min);
+        number.max = String(max);
+        number.step = String(step);
+        number.setAttribute('aria-label', `${type === 'position' ? '位置' : '旋转'} ${axis.toUpperCase()}`);
+        row.append(label, range, number);
+        host.appendChild(row);
+        const binding = { type, axis, range, number };
+        inputBindings.push(binding);
+
+        function applyValue(rawValue) {
+          const value = THREE.MathUtils.clamp(Number(rawValue), min, max);
+          if (!Number.isFinite(value)) return;
+          if (type === 'position') selectedPanel.group.position[axis] = value;
+          else selectedPanel.group.rotation[axis] = THREE.MathUtils.degToRad(value);
+          range.value = String(value);
+          number.value = String(value);
+          status.textContent = `已更新 ${selectedPanel.number} 号板${type === 'position' ? '位置' : '旋转'}`;
+        }
+
+        range.addEventListener('input', () => applyValue(range.value));
+        number.addEventListener('change', () => applyValue(number.value));
+      });
+    }
+
+    addAxisControls(positionControls, 'position', -4.5, 4.5, 0.1);
+    addAxisControls(rotationControls, 'rotation', -180, 180, 1);
+
+    function syncInputs() {
+      inputBindings.forEach(binding => {
+        const value = binding.type === 'position'
+          ? selectedPanel.group.position[binding.axis]
+          : THREE.MathUtils.radToDeg(selectedPanel.group.rotation[binding.axis]);
+        const rounded = Math.round(value * 10) / 10;
+        binding.range.value = String(rounded);
+        binding.number.value = String(rounded);
+      });
+    }
+
+    function selectPanel(panel) {
+      selectedPanel = panel;
+      transformControls.attach(panel.group);
+      const fiveSelected = panel === panelFive;
+      selectFiveButton.classList.toggle('active', fiveSelected);
+      selectSixButton.classList.toggle('active', !fiveSelected);
+      selectFiveButton.setAttribute('aria-pressed', String(fiveSelected));
+      selectSixButton.setAttribute('aria-pressed', String(!fiveSelected));
+      panelFive.mesh.material.emissive.setHex(fiveSelected ? 0x2a1604 : 0x000000);
+      panelSix.mesh.material.emissive.setHex(fiveSelected ? 0x000000 : 0x220614);
+      syncInputs();
+      status.textContent = `正在编辑 ${panel.number} 号板`;
+    }
+
+    function setTransformMode(mode) {
+      transformControls.setMode(mode);
+      const translate = mode === 'translate';
+      translateModeButton.classList.toggle('active', translate);
+      rotateModeButton.classList.toggle('active', !translate);
+      translateModeButton.setAttribute('aria-pressed', String(translate));
+      rotateModeButton.setAttribute('aria-pressed', String(!translate));
+    }
+
+    function setTransformSpace(space) {
+      transformControls.setSpace(space);
+      const world = space === 'world';
+      worldSpaceButton.classList.toggle('active', world);
+      localSpaceButton.classList.toggle('active', !world);
+      worldSpaceButton.setAttribute('aria-pressed', String(world));
+      localSpaceButton.setAttribute('aria-pressed', String(!world));
+    }
+
+    function setShellMode(xray) {
+      shellFaces.forEach(face => {
+        face.mesh.material.opacity = xray ? 0.2 : 0.82;
+        face.mesh.material.depthWrite = !xray;
+        face.edges.material.opacity = xray ? 0.65 : 0.9;
+        face.grid.material.opacity = xray ? 0.72 : 0.92;
+      });
+      solidShellButton.classList.toggle('active', !xray);
+      xrayShellButton.classList.toggle('active', xray);
+      solidShellButton.setAttribute('aria-pressed', String(!xray));
+      xrayShellButton.setAttribute('aria-pressed', String(xray));
+    }
+
+    function resetPanel(panel) {
+      panel.group.position.copy(panel.defaultTransform.position);
+      panel.group.rotation.copy(panel.defaultTransform.rotation);
+      if (panel === selectedPanel) syncInputs();
+    }
+
+    function resetView() {
+      const mobile = window.innerWidth <= 640;
+      camera.position.set(mobile ? 15 : 11.5, mobile ? 10.2 : 7.7, mobile ? 15.8 : 12.2);
+      orbitControls.target.set(0, 0, 0);
+      orbitControls.update();
+    }
+
+    function resize() {
+      const width = sceneHost.clientWidth;
+      const height = sceneHost.clientHeight;
+      camera.fov = width <= 640 ? 58 : 40;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    function updatePointer(event) {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', event => {
+      pointerDown = { x: event.clientX, y: event.clientY };
+    });
+
+    renderer.domElement.addEventListener('pointerup', event => {
+      if (!pointerDown || Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 5) {
+        pointerDown = null;
+        return;
+      }
+      pointerDown = null;
+      updatePointer(event);
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(editableMeshes, false)[0];
+      if (!hit) return;
+      selectPanel(hit.object.userData.panelNumber === 5 ? panelFive : panelSix);
+    });
+
+    transformControls.addEventListener('objectChange', () => {
+      selectedPanel.group.position.clampScalar(-4.5, 4.5);
+      syncInputs();
+      status.textContent = `已拖动 ${selectedPanel.number} 号板`;
+    });
+
+    selectFiveButton.addEventListener('click', () => selectPanel(panelFive));
+    selectSixButton.addEventListener('click', () => selectPanel(panelSix));
+    translateModeButton.addEventListener('click', () => setTransformMode('translate'));
+    rotateModeButton.addEventListener('click', () => setTransformMode('rotate'));
+    worldSpaceButton.addEventListener('click', () => setTransformSpace('world'));
+    localSpaceButton.addEventListener('click', () => setTransformSpace('local'));
+    solidShellButton.addEventListener('click', () => setShellMode(false));
+    xrayShellButton.addEventListener('click', () => setShellMode(true));
+    resetSelectedButton.addEventListener('click', () => {
+      resetPanel(selectedPanel);
+      status.textContent = `${selectedPanel.number} 号板已复位`;
+    });
+    resetAllButton.addEventListener('click', () => {
+      panels.forEach(resetPanel);
+      status.textContent = '两块插板均已复位';
+    });
+    resetViewButton.addEventListener('click', resetView);
+    window.addEventListener('resize', resize);
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(7.2, 96),
+      new THREE.MeshStandardMaterial({ color: 0xded9cf, roughness: 0.96, metalness: 0.01 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -4.75;
+    scene.add(ground);
+    const groundGrid = new THREE.GridHelper(14, 14, 0xaaa49b, 0xc9c3b9);
+    groundGrid.position.y = -4.73;
+    groundGrid.material.transparent = true;
+    groundGrid.material.opacity = 0.45;
+    scene.add(groundGrid);
+
+    resetView();
+    resize();
+    setShellMode(true);
+    selectPanel(panelFive);
+
+    renderer.setAnimationLoop(() => {
+      orbitControls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>

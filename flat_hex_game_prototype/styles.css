@@ -140,6 +140,15 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .solid-tray-panel.active { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(255,201,106,.18); }
 .solid-tray-panel.installed { color: #a9bbc8; background: rgba(31,47,60,.72); }
 .solid-panel-selection { margin: 12px 0 9px; padding: 9px 10px; color: var(--gold); border: 1px solid rgba(255,201,106,.28); border-radius: 9px; background: rgba(20,20,16,.7); font-size: 13px; }
+.solid-geometry-editor { margin-bottom: 10px; padding: 9px; border: 1px solid rgba(97,231,255,.2); border-radius: 8px; background: rgba(5,16,24,.62); }
+.solid-geometry-editor.hidden, .inserted-panel-position-editor.hidden { display: none; }
+.solid-geometry-editor > span { display: block; margin-bottom: 7px; color: #9fb4c5; font-size: 12px; font-weight: 700; }
+.solid-geometry-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.solid-geometry-modes button.active { color: #071015; background: var(--cyan); }
+.inserted-panel-position-editor { display: grid; gap: 6px; margin-top: 8px; }
+.inserted-panel-position-editor label { display: grid; grid-template-columns: 76px repeat(3, minmax(0, 1fr)); align-items: center; gap: 5px; color: #dceaf5; font-size: 11px; }
+.inserted-panel-position-editor input { min-width: 0; width: 100%; padding: 5px; }
+.inserted-panel-position-editor small { margin: 0; text-align: right; }
 .solid-slot-picker { margin-bottom: 10px; padding: 9px; border: 1px solid rgba(97,231,255,.2); border-radius: 8px; background: rgba(5,16,24,.62); }
 .solid-slot-picker.hidden { display: none; }
 .solid-slot-picker > span { display: block; margin-bottom: 7px; color: #9fb4c5; font-size: 12px; font-weight: 700; }

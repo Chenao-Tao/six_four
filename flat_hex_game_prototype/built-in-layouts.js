@@ -1,13 +1,15 @@
-import { createInitialState } from './game.js?v=separate-layout-storage-1';
+import { createInitialState } from './game.js?v=solid-geometry-2';
 
 export const DEFAULT_LAYOUT_NAME = '默认布局';
 export const LEGACY_SOLID_SOURCE_LAYOUT_NAME = '预设·立体升沉测试 · 棋子来源';
 export const SOLID_TEST_LAYOUT_NAME = '预设·立体升沉测试';
+export const TETRAHEDRON_BOARD_LAYOUT_NAME = '预设·四面体插板棋盘';
 export const BUILT_IN_LAYOUT_NAMES = new Set([
   DEFAULT_LAYOUT_NAME,
   '预设·平面快速吃子',
   '预设·平面双层对局',
-  SOLID_TEST_LAYOUT_NAME
+  SOLID_TEST_LAYOUT_NAME,
+  TETRAHEDRON_BOARD_LAYOUT_NAME
 ]);
 
 export function isBuiltInLayoutName(name) {
@@ -88,6 +90,22 @@ export function builtInLayouts() {
       piece('preset-solid-up-wq', 'white', 'queen', 0, 2),
       piece('preset-solid-up-bq', 'black', 'queen', 0, -2)
     ]
+    }, state),
+    snapshot(TETRAHEDRON_BOARD_LAYOUT_NAME, 'flat', {
+      front: [
+        piece('tetra-wk', 'white', 'king', -4, 0),
+        piece('tetra-bk', 'black', 'king', 4, 0),
+        piece('tetra-wp', 'white', 'pawn', 3, 0),
+        piece('tetra-bp', 'black', 'pawn', 0, -2),
+        piece('tetra-wb', 'white', 'bishop', -2, 1),
+        piece('tetra-bb', 'black', 'bishop', 2, -1)
+      ],
+      back: [
+        piece('tetra-up-wq', 'white', 'queen', 1, 1),
+        piece('tetra-up-bp', 'black', 'pawn', -1, 1),
+        piece('tetra-up-wb', 'white', 'bishop', -1, 0),
+        piece('tetra-up-bb', 'black', 'bishop', 0, 4)
+      ]
     }, state)
   ];
   const solidStructures = {
@@ -120,6 +138,17 @@ export function builtInLayouts() {
         front: [120, 240, 120, 0, 240, 0],
         back: [240, 120, 240, 0, 120, 0]
       }
+    },
+    [TETRAHEDRON_BOARD_LAYOUT_NAME]: {
+      faceLabels: {
+        front: [...state.boardFaceLabels.front],
+        back: [...state.boardFaceLabels.back]
+      },
+      panelRotations: {
+        front: [...state.boardPanelRotations.front],
+        back: [...state.boardPanelRotations.back]
+      },
+      solidGeometry: { type: 'tetrahedron-inserted-panels' }
     }
   };
   const solidLayouts = flatLayouts.filter(layout => !layout.isDefault).map(layout => ({
@@ -134,7 +163,10 @@ export function builtInLayouts() {
       panelRotations: {
         front: [...solidStructures[layout.name].panelRotations.front],
         back: [...solidStructures[layout.name].panelRotations.back]
-      }
+      },
+      ...(solidStructures[layout.name].solidGeometry
+        ? { solidGeometry: structuredClone(solidStructures[layout.name].solidGeometry) }
+        : {})
     }));
   const solidByName = new Map(solidLayouts.map(layout => [layout.name, layout]));
   return flatLayouts.flatMap(layout => {
@@ -146,7 +178,10 @@ export function builtInLayouts() {
 export function mergeBuiltInLayouts(layouts) {
   const builtIns = builtInLayouts();
   const userLayouts = layouts.filter(layout => !layout.builtIn);
-  const identity = layout => `${layout.boardShape === 'solid' ? 'solid' : 'flat'}:${layout.name}`;
+  const identity = layout => `${layout.boardShape === 'solid' ? 'solid' : 'flat'}:${layout.name}` +
+    (layout.boardShape === 'solid'
+      ? `:${layout.solidGeometry?.type ?? 'triangular-bipyramid'}`
+      : '');
   const builtInIdentities = new Set(builtIns.map(identity));
   const userOverrides = new Map(userLayouts.map(layout => [identity(layout), layout]));
   return [

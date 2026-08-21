@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
+  <title>穿插四面体三角棋盘模型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #17202a;
+      background: #ece9e2;
+    }
+
+    * { box-sizing: border-box; }
+    html, body, #app, #scene { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #ece9e2; }
+    #scene { position: absolute; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+    .toolbar {
+      position: absolute;
+      top: 18px;
+      left: 18px;
+      z-index: 2;
+      width: min(374px, calc(100vw - 36px));
+      padding: 14px;
+      border: 1px solid rgba(19, 31, 43, .2);
+      border-radius: 8px;
+      background: rgba(250, 249, 246, .92);
+      box-shadow: 0 16px 38px rgba(41, 47, 52, .14);
+      backdrop-filter: blur(10px);
+    }
+
+    .heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 18px; line-height: 1.35; letter-spacing: 0; }
+    .subtitle { margin: 5px 0 0; color: #596773; font-size: 12px; line-height: 1.55; }
+    .controls { display: grid; gap: 9px; margin-top: 13px; }
+    .control-row { display: flex; align-items: center; gap: 8px; }
+    .control-label { width: 58px; flex: 0 0 auto; color: #46535e; font-size: 12px; font-weight: 700; }
+    .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; flex: 1; }
+    button { font: inherit; }
+    button {
+      min-width: 38px;
+      min-height: 36px;
+      padding: 7px 10px;
+      border: 1px solid rgba(19, 31, 43, .2);
+      border-radius: 6px;
+      color: #26333e;
+      background: #f4f2ed;
+      cursor: pointer;
+    }
+    button:hover { border-color: rgba(19, 31, 43, .42); background: #fff; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    button:focus-visible { outline: 2px solid #087db6; outline-offset: 2px; }
+    .segmented button { border-radius: 0; }
+    .segmented button + button { border-left: 0; }
+    .segmented button:first-child { border-radius: 6px 0 0 6px; }
+    .segmented button:last-child { border-radius: 0 6px 6px 0; }
+    .segmented button.active { color: #fff; border-color: #087db6; background: #087db6; }
+    .icon-button { width: 38px; flex: 0 0 38px; padding: 0; font-size: 18px; }
+
+    .legend {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      z-index: 2;
+      display: grid;
+      gap: 7px;
+      width: min(260px, calc(100vw - 36px));
+      padding: 12px 14px;
+      border: 1px solid rgba(19, 31, 43, .18);
+      border-radius: 8px;
+      background: rgba(250, 249, 246, .9);
+      color: #46535e;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+    }
+    .legend-row { display: flex; align-items: center; gap: 9px; }
+    .swatch { width: 20px; height: 4px; flex: 0 0 auto; border-radius: 2px; }
+    .blue-swatch { background: #087db6; }
+    .black-swatch { background: #252a2e; }
+    #status { color: #17202a; font-weight: 700; }
+
+    @media (max-width: 640px) {
+      .toolbar { top: 10px; left: 10px; width: calc(100vw - 20px); padding: 12px; }
+      .legend { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+      h1 { font-size: 16px; }
+      .subtitle { max-width: 285px; }
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <main id="app">
+    <div id="scene" aria-label="两个反向穿插的正四面体三角棋盘模型"></div>
+
+    <section class="toolbar" aria-label="模型控制">
+      <div class="heading">
+        <div>
+          <h1>穿插四面体棋盘</h1>
+          <p class="subtitle">顶点 1-4 与 5-8 分属两个反向正四面体，八个三角面组成四对平行面。</p>
+        </div>
+        <button id="resetView" class="icon-button" type="button" title="复位视角" aria-label="复位视角">↺</button>
+      </div>
+
+      <div class="controls">
+        <div class="control-row">
+          <span class="control-label">显示</span>
+          <div class="segmented" role="group" aria-label="四面体显示">
+            <button id="showBoth" class="active" type="button" aria-pressed="true">全部</button>
+            <button id="showBlue" type="button" aria-pressed="false">1-4</button>
+            <button id="showBlack" type="button" aria-pressed="false">5-8</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">材质</span>
+          <div class="segmented" role="group" aria-label="材质显示方式">
+            <button id="solidMode" type="button" aria-pressed="false">实体</button>
+            <button id="xrayMode" class="active" type="button" aria-pressed="true">透视</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">平行面</span>
+          <div id="pairButtons" class="segmented" role="group" aria-label="平行面组"></div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">蓝色面</span>
+          <div id="blueFaceButtons" class="segmented" role="group" aria-label="蓝色四面体装卸"></div>
+        </div>
+        <div class="control-row">
+          <span class="control-label">全部</span>
+          <div class="segmented" role="group" aria-label="蓝色面批量装卸">
+            <button id="installAll" type="button">装上</button>
+            <button id="removeAll" type="button">拆下</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="legend" aria-live="polite">
+      <div class="legend-row"><span class="swatch blue-swatch"></span><span>蓝色四面体：顶点 1-4</span></div>
+      <div class="legend-row"><span class="swatch black-swatch"></span><span>黑色四面体：顶点 5-8</span></div>
+      <div id="status">四对对应三角面互相平行</div>
+    </aside>
+  </main>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const sceneHost = document.getElementById('scene');
+    const resetButton = document.getElementById('resetView');
+    const showBothButton = document.getElementById('showBoth');
+    const showBlueButton = document.getElementById('showBlue');
+    const showBlackButton = document.getElementById('showBlack');
+    const solidModeButton = document.getElementById('solidMode');
+    const xrayModeButton = document.getElementById('xrayMode');
+    const pairButtons = document.getElementById('pairButtons');
+    const blueFaceButtons = document.getElementById('blueFaceButtons');
+    const installAllButton = document.getElementById('installAll');
+    const removeAllButton = document.getElementById('removeAll');
+    const status = document.getElementById('status');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xece9e2);
+    scene.fog = new THREE.Fog(0xece9e2, 20, 42);
+
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    sceneHost.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.07;
+    controls.minDistance = 7;
+    controls.maxDistance = 48;
+    controls.target.set(0, 0, 0);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x7d7368, 2.2));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
+    keyLight.position.set(6, 8, 7);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x8dcfff, 1.5);
+    fillLight.position.set(-6, 2, -5);
+    scene.add(fillLight);
+
+    const model = new THREE.Group();
+    model.rotation.set(-0.08, -0.28, 0.02);
+    scene.add(model);
+
+    const radius = 2.7;
+    const thickness = 0.055;
+    const detachDuration = 520;
+    const storageBase = new THREE.Vector3(7.6, 1.1, 0.15);
+    const blueVertices = [
+      new THREE.Vector3(-radius, -radius, -radius),
+      new THREE.Vector3(-radius, radius, radius),
+      new THREE.Vector3(radius, -radius, radius),
+      new THREE.Vector3(radius, radius, -radius)
+    ];
+    const blackVertices = blueVertices.map(vertex => vertex.clone().multiplyScalar(-1));
+    const faceIndices = [
+      [1, 2, 3],
+      [0, 3, 2],
+      [0, 1, 3],
+      [0, 2, 1]
+    ];
+    const tetrahedra = [];
+    const parallelPairs = [];
+
+    function orientOutward(points) {
+      const oriented = points.map(point => point.clone());
+      const normal = new THREE.Vector3()
+        .subVectors(oriented[1], oriented[0])
+        .cross(new THREE.Vector3().subVectors(oriented[2], oriented[0]));
+      const center = oriented.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / 3);
+      if (normal.dot(center) < 0) [oriented[1], oriented[2]] = [oriented[2], oriented[1]];
+      return oriented;
+    }
+
+    function trianglePlateGeometry(points, depth) {
+      const edgeA = new THREE.Vector3().subVectors(points[1], points[0]);
+      const edgeB = new THREE.Vector3().subVectors(points[2], points[0]);
+      const offset = new THREE.Vector3().crossVectors(edgeA, edgeB).normalize().multiplyScalar(depth / 2);
+      const vertices = [];
+      for (const sign of [1, -1]) {
+        points.forEach(point => {
+          const vertex = point.clone().addScaledVector(offset, sign);
+          vertices.push(vertex.x, vertex.y, vertex.z);
+        });
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setIndex([
+        0, 1, 2, 5, 4, 3,
+        0, 3, 4, 0, 4, 1,
+        1, 4, 5, 1, 5, 2,
+        2, 5, 3, 2, 3, 0
+      ]);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function triangleGridGeometry(points, depth, divisions = 4) {
+      const normal = new THREE.Vector3()
+        .subVectors(points[1], points[0])
+        .cross(new THREE.Vector3().subVectors(points[2], points[0]))
+        .normalize();
+      const positions = [];
+
+      function addSegment(from, to, offset) {
+        const start = from.clone().add(offset);
+        const end = to.clone().add(offset);
+        positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
+      }
+
+      for (const sign of [1, -1]) {
+        const offset = normal.clone().multiplyScalar(sign * (depth / 2 + 0.012));
+        for (let index = 1; index < divisions; index += 1) {
+          const t = index / divisions;
+          addSegment(points[0].clone().lerp(points[2], t), points[1].clone().lerp(points[2], t), offset);
+          addSegment(points[1].clone().lerp(points[0], t), points[2].clone().lerp(points[0], t), offset);
+          addSegment(points[2].clone().lerp(points[1], t), points[0].clone().lerp(points[1], t), offset);
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      return geometry;
+    }
+
+    function labelSprite(text, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 192;
+      canvas.height = 192;
+      const context = canvas.getContext('2d');
+      context.beginPath();
+      context.arc(96, 96, 54, 0, Math.PI * 2);
+      context.fillStyle = 'rgba(250, 249, 246, .96)';
+      context.fill();
+      context.lineWidth = 8;
+      context.strokeStyle = color;
+      context.stroke();
+      context.fillStyle = '#17202a';
+      context.font = '700 72px "Segoe UI", sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(text, 96, 101);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+      sprite.scale.set(0.68, 0.68, 0.68);
+      sprite.renderOrder = 20;
+      return sprite;
+    }
+
+    function createTetrahedron(vertices, vertexOffset, colors, detachable = false) {
+      const group = new THREE.Group();
+      const faces = faceIndices.map((indices, faceIndex) => {
+        const points = orientOutward(indices.map(index => vertices[index]));
+        const assembly = new THREE.Group();
+        group.add(assembly);
+        const geometry = trianglePlateGeometry(points, thickness);
+        const material = new THREE.MeshPhysicalMaterial({
+          color: colors.face,
+          roughness: 0.48,
+          metalness: 0.04,
+          clearcoat: 0.18,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.22,
+          depthWrite: false
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.renderOrder = 1;
+        mesh.userData.detachableFaceIndex = detachable ? faceIndex : null;
+        assembly.add(mesh);
+
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry, 12),
+          new THREE.LineBasicMaterial({ color: colors.edge, transparent: true, opacity: 0.82 })
+        );
+        edges.renderOrder = 4;
+        assembly.add(edges);
+
+        const grid = new THREE.LineSegments(
+          triangleGridGeometry(points, thickness),
+          new THREE.LineBasicMaterial({ color: colors.grid, transparent: true, opacity: 0.88 })
+        );
+        grid.renderOrder = 5;
+        assembly.add(grid);
+
+        const normal = new THREE.Vector3()
+          .subVectors(points[1], points[0])
+          .cross(new THREE.Vector3().subVectors(points[2], points[0]))
+          .normalize();
+        const xAxis = new THREE.Vector3().subVectors(points[1], points[0]).normalize();
+        const center = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / 3);
+        return {
+          faceIndex,
+          assembly,
+          mesh,
+          edges,
+          grid,
+          normal,
+          xAxis,
+          center,
+          detachable,
+          detached: false,
+          animating: false,
+          fromPosition: new THREE.Vector3(),
+          targetPosition: new THREE.Vector3(),
+          fromQuaternion: new THREE.Quaternion(),
+          targetQuaternion: new THREE.Quaternion(),
+          storagePosition: new THREE.Vector3(),
+          storageQuaternion: new THREE.Quaternion(),
+          animationStartedAt: 0
+        };
+      });
+
+      vertices.forEach((vertex, index) => {
+        const label = labelSprite(String(vertexOffset + index + 1), colors.label);
+        label.position.copy(vertex).add(vertex.clone().normalize().multiplyScalar(0.34));
+        group.add(label);
+      });
+
+      model.add(group);
+      return { group, faces };
+    }
+
+    const blueTetrahedron = createTetrahedron(blueVertices, 0, {
+      face: 0x168ec2,
+      edge: 0x075c91,
+      grid: 0xe9f8ff,
+      label: '#087db6'
+    }, true);
+    const blackTetrahedron = createTetrahedron(blackVertices, 4, {
+      face: 0x30363b,
+      edge: 0x14181b,
+      grid: 0xf6c65b,
+      label: '#252a2e'
+    });
+    tetrahedra.push(blueTetrahedron, blackTetrahedron);
+
+    const storageBasis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(0, 1, 0)
+    );
+    const storageBasisQuaternion = new THREE.Quaternion().setFromRotationMatrix(storageBasis);
+    blueTetrahedron.faces.forEach((face, index) => {
+      const faceYAxis = new THREE.Vector3().crossVectors(face.normal, face.xAxis).normalize();
+      const faceBasis = new THREE.Matrix4().makeBasis(face.xAxis, faceYAxis, face.normal);
+      const faceBasisQuaternion = new THREE.Quaternion().setFromRotationMatrix(faceBasis);
+      face.storageQuaternion.copy(storageBasisQuaternion).multiply(faceBasisQuaternion.invert());
+      const storageCenter = storageBase.clone().add(new THREE.Vector3(index * 0.12, index * 0.09, index * 0.1));
+      face.storagePosition.copy(storageCenter).sub(face.center.clone().applyQuaternion(face.storageQuaternion));
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      parallelPairs.push([blueTetrahedron.faces[index], blackTetrahedron.faces[index]]);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = String(index + 1);
+      button.setAttribute('aria-pressed', 'false');
+      button.addEventListener('click', () => highlightPair(index));
+      pairButtons.appendChild(button);
+
+      const faceButton = document.createElement('button');
+      faceButton.type = 'button';
+      faceButton.textContent = String(index + 1);
+      faceButton.title = `拆卸蓝色面 ${index + 1}`;
+      faceButton.setAttribute('aria-label', `拆卸蓝色面 ${index + 1}`);
+      faceButton.setAttribute('aria-pressed', 'false');
+      faceButton.addEventListener('click', () => toggleBlueFace(index));
+      blueFaceButtons.appendChild(faceButton);
+    }
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(7.2, 96),
+      new THREE.MeshStandardMaterial({ color: 0xded9cf, roughness: 0.96, metalness: 0.01 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -4.75;
+    scene.add(ground);
+
+    const groundGrid = new THREE.GridHelper(14, 14, 0xaaa49b, 0xc9c3b9);
+    groundGrid.position.y = -4.73;
+    groundGrid.material.transparent = true;
+    groundGrid.material.opacity = 0.45;
+    scene.add(groundGrid);
+
+    let xrayMode = true;
+    let selectedPair = -1;
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let pointerDown = null;
+
+    function setVisibility(mode) {
+      blueTetrahedron.group.visible = mode !== 'black';
+      blackTetrahedron.group.visible = mode !== 'blue';
+      const buttons = [showBothButton, showBlueButton, showBlackButton];
+      const activeButton = mode === 'both' ? showBothButton : mode === 'blue' ? showBlueButton : showBlackButton;
+      buttons.forEach(button => {
+        const active = button === activeButton;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      const blueControlsDisabled = mode === 'black';
+      [...blueFaceButtons.children, installAllButton, removeAllButton].forEach(button => {
+        button.disabled = blueControlsDisabled;
+      });
+      status.textContent = mode === 'both'
+        ? '四对对应三角面互相平行'
+        : mode === 'blue' ? '显示蓝色四面体：顶点 1-4' : '显示黑色四面体：顶点 5-8';
+    }
+
+    function easeInOut(value) {
+      return value < 0.5
+        ? 4 * value * value * value
+        : 1 - ((-2 * value + 2) ** 3) / 2;
+    }
+
+    function setBlueFaceDetached(index, detached) {
+      const face = blueTetrahedron.faces[index];
+      if (!face || face.detached === detached) return;
+      face.detached = detached;
+      face.animating = true;
+      face.fromPosition.copy(face.assembly.position);
+      face.fromQuaternion.copy(face.assembly.quaternion);
+      face.targetPosition.copy(detached ? face.storagePosition : new THREE.Vector3());
+      face.targetQuaternion.copy(detached ? face.storageQuaternion : new THREE.Quaternion());
+      face.animationStartedAt = performance.now();
+
+      const button = blueFaceButtons.children[index];
+      button.classList.toggle('active', detached);
+      button.setAttribute('aria-pressed', String(detached));
+      button.title = `${detached ? '装回' : '拆卸'}蓝色面 ${index + 1}`;
+      button.setAttribute('aria-label', button.title);
+    }
+
+    function toggleBlueFace(index) {
+      const face = blueTetrahedron.faces[index];
+      setBlueFaceDetached(index, !face.detached);
+      status.textContent = `蓝色面 ${index + 1} 正在${face.detached ? '拆下' : '装回'}`;
+    }
+
+    function setAllBlueFaces(detached) {
+      blueTetrahedron.faces.forEach((face, index) => setBlueFaceDetached(index, detached));
+      status.textContent = detached ? '四个蓝色面正在全部拆下' : '四个蓝色面正在全部装回';
+    }
+
+    function updateDetachableFaces(now) {
+      let completedAnimation = false;
+      blueTetrahedron.faces.forEach(face => {
+        if (!face.animating) return;
+        const elapsed = now - face.animationStartedAt;
+        const progress = Math.min(1, elapsed / detachDuration);
+        const easedProgress = easeInOut(progress);
+        face.assembly.position.lerpVectors(face.fromPosition, face.targetPosition, easedProgress);
+        face.assembly.quaternion.slerpQuaternions(face.fromQuaternion, face.targetQuaternion, easedProgress);
+        if (progress === 1) {
+          face.assembly.position.copy(face.targetPosition);
+          face.assembly.quaternion.copy(face.targetQuaternion);
+          face.animating = false;
+          completedAnimation = true;
+        }
+      });
+      if (!completedAnimation) return;
+      const detachedCount = blueTetrahedron.faces.filter(face => face.detached).length;
+      if (detachedCount === 0) status.textContent = '四个蓝色面均已装上';
+      else if (detachedCount === 4) status.textContent = '四个蓝色面均已拆下';
+      else status.textContent = `已拆下 ${detachedCount} 个蓝色面`;
+    }
+
+    function applyFaceStyle(face, highlighted) {
+      face.mesh.material.opacity = highlighted ? 0.72 : xrayMode ? 0.22 : 0.86;
+      face.mesh.material.depthWrite = highlighted || !xrayMode;
+      face.edges.material.opacity = highlighted ? 1 : 0.82;
+      face.grid.material.opacity = highlighted ? 1 : 0.88;
+    }
+
+    function highlightPair(index) {
+      selectedPair = selectedPair === index ? -1 : index;
+      tetrahedra.forEach(tetrahedron => {
+        tetrahedron.faces.forEach(face => applyFaceStyle(face, face.faceIndex === selectedPair));
+      });
+      [...pairButtons.children].forEach((button, buttonIndex) => {
+        const active = buttonIndex === selectedPair;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      status.textContent = selectedPair < 0
+        ? '四对对应三角面互相平行'
+        : `已突出显示第 ${selectedPair + 1} 对平行面`;
+    }
+
+    function setMaterialMode(useXray) {
+      xrayMode = useXray;
+      tetrahedra.forEach(tetrahedron => {
+        tetrahedron.faces.forEach(face => applyFaceStyle(face, face.faceIndex === selectedPair));
+      });
+      solidModeButton.classList.toggle('active', !useXray);
+      xrayModeButton.classList.toggle('active', useXray);
+      solidModeButton.setAttribute('aria-pressed', String(!useXray));
+      xrayModeButton.setAttribute('aria-pressed', String(useXray));
+    }
+
+    function resetView() {
+      const mobile = window.innerWidth <= 640;
+      if (mobile) camera.position.set(21, 14.3, 21.8);
+      else camera.position.set(14.8, 10.1, 15.3);
+      controls.target.set(1.5, mobile ? 0.2 : 0, 0);
+      controls.update();
+    }
+
+    function resize() {
+      const width = sceneHost.clientWidth;
+      const height = sceneHost.clientHeight;
+      camera.fov = width <= 640 ? 60 : 38;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    function updatePointer(event) {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', event => {
+      pointerDown = { x: event.clientX, y: event.clientY };
+    });
+
+    renderer.domElement.addEventListener('pointerup', event => {
+      if (!pointerDown || Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 5) {
+        pointerDown = null;
+        return;
+      }
+      pointerDown = null;
+      updatePointer(event);
+      raycaster.setFromCamera(pointer, camera);
+      const faceMeshes = tetrahedra.flatMap(tetrahedron => tetrahedron.faces.map(face => face.mesh));
+      const hit = raycaster.intersectObjects(faceMeshes, false)[0];
+      const faceIndex = hit?.object.userData.detachableFaceIndex;
+      if (Number.isInteger(faceIndex) && blueTetrahedron.group.visible) toggleBlueFace(faceIndex);
+    });
+
+    showBothButton.addEventListener('click', () => setVisibility('both'));
+    showBlueButton.addEventListener('click', () => setVisibility('blue'));
+    showBlackButton.addEventListener('click', () => setVisibility('black'));
+    solidModeButton.addEventListener('click', () => setMaterialMode(false));
+    xrayModeButton.addEventListener('click', () => setMaterialMode(true));
+    installAllButton.addEventListener('click', () => setAllBlueFaces(false));
+    removeAllButton.addEventListener('click', () => setAllBlueFaces(true));
+    resetButton.addEventListener('click', resetView);
+    window.addEventListener('resize', resize);
+
+    resetView();
+    resize();
+    setMaterialMode(true);
+
+    renderer.setAnimationLoop(now => {
+      updateDetachableFaces(now);
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>

@@ -1,3 +1,13 @@
+import {
+  CLASSIC_SOLID_GEOMETRY,
+  normalizeSolidGeometry,
+  solidGeometryEdgeKey,
+  solidGeometryEdges,
+  solidGeometryPointKey,
+  solidGeometryVertexKey,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js?v=solid-geometry-2';
+
 export const BOARD_RADIUS = 4;
 export const DIRECTIONS = [
   [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]
@@ -59,7 +69,7 @@ const SOLID_EDGE_IDS = new Set(SOLID_SLOT_VERTICES.flatMap(vertices => [
   [vertices[1], vertices[2]].sort().join(':'),
   [vertices[2], vertices[0]].sort().join(':')
 ]));
-let cachedSolidSurfaceGraph = null;
+const cachedSolidSurfaceGraphs = new Map();
 
 // 顺序与 UI 六个扇区一致：右下、下、左下、左上、上、右上。
 // 布局三当前朝上面使用 1A/2A/3A/5A/6A/4B，翻面后是实体板互补面。
@@ -250,8 +260,24 @@ function panelCoordinates(point, panelIndex) {
   };
 }
 
-export function solidPointKey(position, panelIndex) {
+function solidLocalCoordinates(position, panelIndex) {
+  const coordinates = panelCoordinates(position, panelIndex);
+  return {
+    center: 1 - coordinates.first - coordinates.second,
+    u: coordinates.first,
+    v: coordinates.second
+  };
+}
+
+function usesEditableSolidGeometry(solidGeometry) {
+  return solidGeometry?.type === TETRAHEDRON_SOLID_GEOMETRY_TYPE;
+}
+
+export function solidPointKey(position, panelIndex, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
   if (!validatePanelIndex(panelIndex) || !pointIsOnPanel(position, panelIndex)) return null;
+  if (usesEditableSolidGeometry(solidGeometry)) {
+    return solidGeometryPointKey(solidGeometry, panelIndex, solidLocalCoordinates(position, panelIndex));
+  }
   const coordinates = panelCoordinates(position, panelIndex);
   const weights = { top: 0, bottom: 0, a: 0, b: 0, c: 0 };
   const vertices = SOLID_SLOT_VERTICES[panelIndex];
@@ -262,26 +288,36 @@ export function solidPointKey(position, panelIndex) {
   return `${weights.top},${weights.bottom},${weights.a},${weights.b},${weights.c}`;
 }
 
-export function solidEdgeKey(position, panelIndex) {
-  const pointKey = solidPointKey(position, panelIndex);
+export function solidEdgeKey(position, panelIndex, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
+  if (usesEditableSolidGeometry(solidGeometry)) {
+    return solidGeometryEdgeKey(solidGeometry, panelIndex, solidLocalCoordinates(position, panelIndex));
+  }
+  const pointKey = solidPointKey(position, panelIndex, solidGeometry);
   if (!pointKey) return null;
   const vertices = solidPointVertices(pointKey);
   return vertices.length === 2 ? vertices.sort().join(':') : null;
 }
 
-export function solidVertexKey(position, panelIndex) {
-  const pointKey = solidPointKey(position, panelIndex);
+export function solidVertexKey(position, panelIndex, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
+  if (usesEditableSolidGeometry(solidGeometry)) {
+    return solidGeometryVertexKey(solidGeometry, panelIndex, solidLocalCoordinates(position, panelIndex));
+  }
+  const pointKey = solidPointKey(position, panelIndex, solidGeometry);
   if (!pointKey) return null;
   const vertices = solidPointVertices(pointKey);
   return vertices.length === 1 ? vertices[0] : null;
 }
 
-export function solidPointBelongsToVertex(position, panelIndex, vertexKey) {
-  if (!SOLID_VERTEX_NAMES.includes(vertexKey)) return false;
-  return solidVertexKey(position, panelIndex) === vertexKey;
+export function solidPointBelongsToVertex(position, panelIndex, vertexKey, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
+  return solidVertexKey(position, panelIndex, solidGeometry) === vertexKey;
 }
 
-export function solidPointBelongsToEdge(position, panelIndex, edgeKey) {
+export function solidPointBelongsToEdge(position, panelIndex, edgeKey, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
+  if (usesEditableSolidGeometry(solidGeometry)) {
+    return solidEdgeKey(position, panelIndex, solidGeometry) === edgeKey ||
+      solidVertexKey(position, panelIndex, solidGeometry) && edgeKey.split('|').includes(
+        solidVertexKey(position, panelIndex, solidGeometry));
+  }
   const edgeVertices = typeof edgeKey === 'string' ? edgeKey.split(':') : [];
   if (edgeVertices.length !== 2) return false;
   const pointKey = solidPointKey(position, panelIndex);
@@ -290,9 +326,15 @@ export function solidPointBelongsToEdge(position, panelIndex, edgeKey) {
   return pointVertices.length > 0 && pointVertices.every(vertex => edgeVertices.includes(vertex));
 }
 
-export function solidPointBelongsToFace(position, panelIndex, facePanelIndex) {
+export function solidPointBelongsToFace(position, panelIndex, facePanelIndex, solidGeometry = CLASSIC_SOLID_GEOMETRY) {
   if (!validatePanelIndex(facePanelIndex)) return false;
-  const pointKey = solidPointKey(position, panelIndex);
+  if (usesEditableSolidGeometry(solidGeometry)) {
+    if (panelIndex === facePanelIndex) return true;
+    const pointKey = solidPointKey(position, panelIndex, solidGeometry);
+    const faceAliases = solidSurfaceGraph(solidGeometry).get(pointKey)?.aliases ?? [];
+    return faceAliases.some(alias => alias.panelIndex === facePanelIndex);
+  }
+  const pointKey = solidPointKey(position, panelIndex, solidGeometry);
   if (!pointKey) return false;
   const faceVertices = SOLID_SLOT_VERTICES[facePanelIndex];
   const pointVertices = solidPointVertices(pointKey);
@@ -322,13 +364,15 @@ function solidPointsShareEdge(firstPointKey, secondPointKey) {
   return solidIncidentEdges(firstPointKey).some(edge => secondEdges.has(edge));
 }
 
-function solidSurfaceGraph() {
-  if (cachedSolidSurfaceGraph) return cachedSolidSurfaceGraph;
+export function solidSurfaceGraph(solidGeometry = CLASSIC_SOLID_GEOMETRY) {
+  const geometry = normalizeSolidGeometry(solidGeometry);
+  const cacheKey = JSON.stringify(geometry);
+  if (cachedSolidSurfaceGraphs.has(cacheKey)) return cachedSolidSurfaceGraphs.get(cacheKey);
   const nodes = new Map();
   for (let panelIndex = 0; panelIndex < 6; panelIndex += 1) {
     for (const position of BOARD_POINTS) {
       if (!pointIsOnPanel(position, panelIndex)) continue;
-      const pointKey = solidPointKey(position, panelIndex);
+      const pointKey = solidPointKey(position, panelIndex, geometry);
       if (!nodes.has(pointKey)) nodes.set(pointKey, { aliases: [], step: [], bishop: [] });
       nodes.get(pointKey).aliases.push({ position: { ...position }, panelIndex });
     }
@@ -341,7 +385,7 @@ function solidSurfaceGraph() {
         for (const direction of DIRECTIONS) {
           const target = add(alias.position, direction);
           if (!isOnBoard(target) || !pointIsOnPanel(target, alias.panelIndex)) continue;
-          const targetPointKey = solidPointKey(target, alias.panelIndex);
+          const targetPointKey = solidPointKey(target, alias.panelIndex, geometry);
           const transitionKey = `${targetPointKey}:${alias.panelIndex}`;
           if (targetPointKey === pointKey || seen.has(transitionKey)) continue;
           seen.add(transitionKey);
@@ -368,7 +412,12 @@ function solidSurfaceGraph() {
       }
     }
     for (const [targetPointKey, count] of commonNeighborCounts) {
-      if (count < 2 || solidPointsShareEdge(pointKey, targetPointKey)) continue;
+      const sharesPhysicalEdge = node.aliases.some(firstAlias =>
+        nodes.get(targetPointKey)?.aliases.some(secondAlias => {
+          const firstEdge = solidEdgeKey(firstAlias.position, firstAlias.panelIndex, geometry);
+          return firstEdge && firstEdge === solidEdgeKey(secondAlias.position, secondAlias.panelIndex, geometry);
+        }));
+      if (count < 2 || sharesPhysicalEdge) continue;
       const targetNode = nodes.get(targetPointKey);
       const alias = targetNode.aliases.find(candidate =>
         node.aliases.some(source => source.panelIndex === candidate.panelIndex)) ?? targetNode.aliases[0];
@@ -379,7 +428,7 @@ function solidSurfaceGraph() {
       });
     }
   }
-  cachedSolidSurfaceGraph = nodes;
+  cachedSolidSurfaceGraphs.set(cacheKey, nodes);
   return nodes;
 }
 
@@ -782,7 +831,7 @@ export function positionSignature(state) {
   const serializePieces = pieces => pieces
     .map(item => {
       const positionKey = state.boardShape === 'solid'
-        ? solidPointKey(item.position, piecePanelIndex(item))
+        ? solidPointKey(item.position, piecePanelIndex(item), state.solidGeometry)
         : keyOf(item.position);
       return `${item.id}:${item.side}:${item.type}:${item.portalTurns ?? 0}:${positionKey}`;
     })
@@ -816,7 +865,7 @@ const VALID_PIECE_SIDES = new Set(['white', 'black']);
 const VALID_PIECE_TYPES = new Set(Object.keys(PIECE_NAMES));
 const KING_POINT_KEYS = new Set(KING_POINTS.map(keyOf));
 
-function normalizeCustomFace(face, pieces, boardShape) {
+function normalizeCustomFace(face, pieces, boardShape, solidGeometry) {
   const faceName = face === 'front' ? 'A 面' : 'B 面';
   if (!Array.isArray(pieces)) return { error: `${faceName}棋子数据无效` };
   const occupied = new Set();
@@ -836,11 +885,11 @@ function normalizeCustomFace(face, pieces, boardShape) {
       ? item.panelIndex
       : panelIndexForPoint(position);
     const occupiedKey = boardShape === 'solid'
-      ? solidPointKey(position, panelIndex)
+      ? solidPointKey(position, panelIndex, solidGeometry)
       : positionKey;
     if (occupied.has(occupiedKey)) return { error: `${faceName}同一交点只能放一枚棋子` };
     const kingIsOnVertex = boardShape === 'solid'
-      ? solidPointVertices(occupiedKey).length === 1
+      ? Boolean(solidVertexKey(position, panelIndex, solidGeometry))
       : KING_POINT_KEYS.has(positionKey);
     if (item.type === 'king' && !kingIsOnVertex) {
       return {
@@ -869,12 +918,14 @@ function normalizeCustomBoard(
   panelRotations,
   requireKings,
   boardShape,
-  portalPairs
+  portalPairs,
+  solidGeometry
 ) {
   const migrated = migrateLegacyHorizontalMirrorLayout(boardStates, faceLabels, panelRotations);
-  const front = normalizeCustomFace('front', migrated.boardStates?.front, boardShape);
+  const normalizedSolidGeometry = normalizeSolidGeometry(solidGeometry);
+  const front = normalizeCustomFace('front', migrated.boardStates?.front, boardShape, normalizedSolidGeometry);
   if (front.error) return { error: front.error };
-  const back = normalizeCustomFace('back', migrated.boardStates?.back, boardShape);
+  const back = normalizeCustomFace('back', migrated.boardStates?.back, boardShape, normalizedSolidGeometry);
   if (back.error) return { error: back.error };
   for (const side of ['white', 'black']) {
     const kingCount = front.kingCounts[side] + back.kingCounts[side];
@@ -903,7 +954,8 @@ export function createCustomLayout(
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
   boardShape = 'flat',
-  portalPairs = undefined
+  portalPairs = undefined,
+  solidGeometry = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
   return normalizeCustomBoard(
@@ -912,7 +964,8 @@ export function createCustomLayout(
     panelRotations,
     false,
     normalizedBoardShape,
-    portalPairs
+    portalPairs,
+    solidGeometry
   );
 }
 
@@ -921,7 +974,8 @@ export function createCustomState(
   faceLabels = BOARD_FACE_LABELS,
   panelRotations = BOARD_PANEL_ROTATIONS,
   boardShape = 'flat',
-  portalPairs = undefined
+  portalPairs = undefined,
+  solidGeometry = undefined
 ) {
   const normalizedBoardShape = boardShape === 'solid' ? 'solid' : 'flat';
   const layout = normalizeCustomBoard(
@@ -930,7 +984,8 @@ export function createCustomState(
     panelRotations,
     true,
     normalizedBoardShape,
-    portalPairs
+    portalPairs,
+    solidGeometry
   );
   if (layout.error) return { error: layout.error };
   const solidExtra = normalizedBoardShape === 'solid'
@@ -939,7 +994,8 @@ export function createCustomState(
           outer: layout.boardStates.front,
           inner: physicalBackPieces(layout.boardStates.back)
         },
-        solidFaceSides: Array(6).fill('front')
+        solidFaceSides: Array(6).fill('front'),
+        solidGeometry: normalizeSolidGeometry(solidGeometry)
       }
     : {};
   return {
@@ -981,7 +1037,7 @@ export function createCaptureDemoState() {
 
 function boardPointKey(state, position, panelIndex) {
   return state.boardShape === 'solid'
-    ? solidPointKey(position, panelIndex)
+    ? solidPointKey(position, panelIndex, state.solidGeometry)
     : keyOf(position);
 }
 
@@ -1097,7 +1153,7 @@ function layerOccupants(state, layer) {
 function stepTransitions(state, position, panelIndex, movement = 'step') {
   if (state.boardShape === 'solid') {
     const pointKey = boardPointKey(state, position, panelIndex);
-    return (solidSurfaceGraph().get(pointKey)?.[movement] ?? []).map(item => ({ ...item }));
+    return (solidSurfaceGraph(state.solidGeometry).get(pointKey)?.[movement] ?? []).map(item => ({ ...item }));
   }
   const directions = movement === 'bishop' ? BISHOP_DIRECTIONS : DIRECTIONS;
   return directions.map(direction => add(position, direction))
@@ -1181,7 +1237,7 @@ function pawnMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   if (state.boardShape === 'solid') {
     const pointKey = boardPointKey(state, pieceToMove.position, piecePanelIndex(pieceToMove));
-    for (const transition of solidSurfaceGraph().get(pointKey)?.step ?? []) {
+    for (const transition of solidSurfaceGraph(state.solidGeometry).get(pointKey)?.step ?? []) {
       addMove(
         state,
         moves,
@@ -1208,7 +1264,7 @@ function bishopMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   if (state.boardShape === 'solid') {
     const pointKey = boardPointKey(state, pieceToMove.position, piecePanelIndex(pieceToMove));
-    for (const transition of solidSurfaceGraph().get(pointKey)?.bishop ?? []) {
+    for (const transition of solidSurfaceGraph(state.solidGeometry).get(pointKey)?.bishop ?? []) {
       addMove(
         state,
         moves,
@@ -1277,7 +1333,7 @@ function solidQueenMoves(state, pieceToMove, occupied) {
     const current = queue.shift();
     const depth = current.path.length - 1;
     if (depth === 3) continue;
-    for (const transition of solidSurfaceGraph().get(current.pointKey)?.step ?? []) {
+    for (const transition of solidSurfaceGraph(state.solidGeometry).get(current.pointKey)?.step ?? []) {
       const occupant = occupantExcludingMover(occupied, transition.pointKey, pieceToMove.id);
       const path = [...current.path, transition.position];
       const nextDepth = depth + 1;
@@ -1747,28 +1803,33 @@ function solidKingMoves(state, pieceToMove, occupied) {
   const moves = new Map();
   const startPanel = piecePanelIndex(pieceToMove);
   const startPointKey = boardPointKey(state, pieceToMove.position, startPanel);
-  const startVertices = solidPointVertices(startPointKey);
-  if (startVertices.length !== 1) return moves;
-  const startVertex = startVertices[0];
-  const graph = solidSurfaceGraph();
-  for (const edgeId of [...SOLID_EDGE_IDS].filter(edge => edge.split(':').includes(startVertex))) {
-    const targetVertex = edgeId.split(':').find(vertex => vertex !== startVertex);
-    const targetEntry = [...graph.entries()].find(([pointKey]) => {
-      const vertices = solidPointVertices(pointKey);
-      return vertices.length === 1 && vertices[0] === targetVertex;
-    });
+  const startVertex = solidVertexKey(pieceToMove.position, startPanel, state.solidGeometry);
+  if (!startVertex) return moves;
+  const graph = solidSurfaceGraph(state.solidGeometry);
+  const edges = usesEditableSolidGeometry(state.solidGeometry)
+    ? solidGeometryEdges(state.solidGeometry)
+    : new Map([...SOLID_EDGE_IDS].map(edge => [edge, { key: edge, endpointKeys: edge.split(':') }]));
+  for (const edge of [...edges.values()].filter(item => item.endpointKeys.includes(startVertex))) {
+    const targetVertex = edge.endpointKeys.find(vertex => vertex !== startVertex);
+    const targetEntry = [...graph.entries()].find(([, node]) => node.aliases.some(alias =>
+      solidVertexKey(alias.position, alias.panelIndex, state.solidGeometry) === targetVertex));
     if (!targetEntry) continue;
     const [targetPointKey, targetNode] = targetEntry;
-    const edgeNodes = [...graph.entries()]
-      .filter(([pointKey]) => {
-        const vertices = solidPointVertices(pointKey);
-        return vertices.every(vertex => edgeId.split(':').includes(vertex));
-      })
-      .sort(([leftKey], [rightKey]) =>
-        solidPointWeights(rightKey)[startVertex] - solidPointWeights(leftKey)[startVertex]);
     const alias = targetNode.aliases.find(item => item.panelIndex === startPanel) ?? targetNode.aliases[0];
-    const path = edgeNodes.map(([, node]) =>
-      (node.aliases.find(item => item.panelIndex === alias.panelIndex) ?? node.aliases[0]).position);
+    const path = [{ ...pieceToMove.position }];
+    let cursorKey = startPointKey;
+    const visited = new Set([cursorKey]);
+    while (cursorKey !== targetPointKey) {
+      const cursor = graph.get(cursorKey);
+      const next = cursor?.step.find(transition => !visited.has(transition.pointKey) &&
+        graph.get(transition.pointKey)?.aliases.some(candidate =>
+          solidPointBelongsToEdge(candidate.position, candidate.panelIndex, edge.key, state.solidGeometry)));
+      if (!next) break;
+      path.push({ ...next.position });
+      cursorKey = next.pointKey;
+      visited.add(cursorKey);
+    }
+    if (cursorKey !== targetPointKey) continue;
     addMove(
       state,
       moves,
@@ -1840,25 +1901,25 @@ function exchangeSolidRegionLayers(nextOuterPieces, nextInnerPieces, belongsToRe
   };
 }
 
-function solidCaptureRegion(captured) {
+function solidCaptureRegion(captured, solidGeometry) {
   const panelIndex = piecePanelIndex(captured);
-  const vertexKey = solidVertexKey(captured.position, panelIndex);
+  const vertexKey = solidVertexKey(captured.position, panelIndex, solidGeometry);
   if (vertexKey) return { type: 'solid-vertex', vertexKey };
-  const edgeKey = solidEdgeKey(captured.position, panelIndex);
+  const edgeKey = solidEdgeKey(captured.position, panelIndex, solidGeometry);
   if (edgeKey) return { type: 'solid-edge', edgeKey };
   return { type: 'solid-face', panelIndex };
 }
 
-function exchangeSolidCaptureRegion(nextOuterPieces, nextInnerPieces, region) {
+function exchangeSolidCaptureRegion(nextOuterPieces, nextInnerPieces, region, solidGeometry) {
   const belongsToRegion = item => {
     const panelIndex = piecePanelIndex(item);
     if (region.type === 'solid-vertex') {
-      return solidPointBelongsToVertex(item.position, panelIndex, region.vertexKey);
+      return solidPointBelongsToVertex(item.position, panelIndex, region.vertexKey, solidGeometry);
     }
     if (region.type === 'solid-edge') {
-      return solidPointBelongsToEdge(item.position, panelIndex, region.edgeKey);
+      return solidPointBelongsToEdge(item.position, panelIndex, region.edgeKey, solidGeometry);
     }
-    return solidPointBelongsToFace(item.position, panelIndex, region.panelIndex);
+    return solidPointBelongsToFace(item.position, panelIndex, region.panelIndex, solidGeometry);
   };
   return exchangeSolidRegionLayers(nextOuterPieces, nextInnerPieces, belongsToRegion);
 }
@@ -1977,7 +2038,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     captured && state.boardShape === 'solid' && state.solidLayers
   );
   const solidRegion = shouldExchangeSolidLayers
-    ? solidCaptureRegion(captured)
+    ? solidCaptureRegion(captured, state.solidGeometry)
     : null;
   const layerExchange = shouldExchangeLayers
     ? shouldExchangeSolidLayers
@@ -1987,7 +2048,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
   const nextBoardSide = state.boardSide;
   const solidLayers = state.solidLayers
     ? shouldExchangeSolidLayers
-      ? exchangeSolidCaptureRegion(nextActivePieces, nextDormantPieces, solidRegion)
+      ? exchangeSolidCaptureRegion(nextActivePieces, nextDormantPieces, solidRegion, state.solidGeometry)
       : { ...state.solidLayers, outer: nextActivePieces, inner: nextDormantPieces }
     : undefined;
   const flatLayerExchange = shouldExchangeLayers && !shouldExchangeSolidLayers

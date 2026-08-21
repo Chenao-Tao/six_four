@@ -3,12 +3,14 @@ import {
   LEGACY_SOLID_SOURCE_LAYOUT_NAME,
   SOLID_TEST_LAYOUT_NAME,
   mergeBuiltInLayouts
-} from './built-in-layouts.js?v=preset-playability-1';
+} from './built-in-layouts.js?v=solid-geometry-2';
 import {
+  activeLayoutMatches,
   migrateLegacySolidLayouts,
   normalizeLayoutForStorage,
   resolvePlayableLayout
-} from './layout-library.js?v=paired-layouts-5';
+} from './layout-library.js?v=solid-geometry-2';
+import { solidGeometryTypeOf } from './solid-geometry.js?v=solid-geometry-2';
 
 export const LEGACY_LAYOUT_STORAGE_KEY = 'flat-hex-layouts-v1';
 export const LAYOUT_LIBRARY_STORAGE_KEY = 'flat-hex-layout-library-v2';
@@ -61,14 +63,23 @@ export function createBrowserLayoutStore(storage) {
       library.layouts = migrateLegacySolidLayouts(mergeBuiltInLayouts(library.layouts));
       library.version = 2;
       library.activeBoardShape ??= legacyActiveShape ?? 'flat';
-      const activeLayout = library.layouts.find(layout =>
-        layout.name === library.activeLayoutName &&
-        (!library.activeBoardShape || layout.boardShape === library.activeBoardShape));
+      if (library.activeBoardShape === 'solid' && typeof library.activeSolidGeometryType !== 'string') {
+        const matchingSolids = library.layouts.filter(layout =>
+          layout.name === library.activeLayoutName && layout.boardShape === 'solid');
+        if (matchingSolids.length === 1) {
+          library.activeSolidGeometryType = solidGeometryTypeOf(matchingSolids[0]);
+        }
+      }
+      const activeLayout = library.layouts.find(layout => activeLayoutMatches(layout, library));
       if (!activeLayout) {
         library.activeLayoutName = DEFAULT_LAYOUT_NAME;
         library.activeBoardShape = 'flat';
+        delete library.activeSolidGeometryType;
       } else {
         library.activeBoardShape = activeLayout.boardShape;
+        if (activeLayout.boardShape === 'solid') {
+          library.activeSolidGeometryType = solidGeometryTypeOf(activeLayout);
+        }
       }
       return library;
     }
@@ -92,13 +103,15 @@ export function createBrowserLayoutStore(storage) {
     if (path === '/api/layouts' && method === 'POST') {
       const layout = normalizedLayout(body.layout, library.layouts, Boolean(body.activate));
       const index = library.layouts.findIndex(item =>
-        item.name === layout.name && item.boardShape === layout.boardShape);
+        item.name === layout.name &&
+        item.boardShape === layout.boardShape &&
+        (layout.boardShape !== 'solid' ||
+          solidGeometryTypeOf(item) === solidGeometryTypeOf(layout)));
       const nextLayouts = [...library.layouts];
       if (index >= 0) nextLayouts[index] = layout;
       else nextLayouts.push(layout);
       if (!body.activate) {
-        const activeLayout = nextLayouts.find(item =>
-          item.name === library.activeLayoutName && item.boardShape === library.activeBoardShape);
+        const activeLayout = nextLayouts.find(item => activeLayoutMatches(item, library));
         const playable = resolvePlayableLayout(activeLayout, nextLayouts);
         if (playable.error) throw new Error(`当前启用布局必须保持可开局：${playable.error}`);
       }
@@ -107,6 +120,11 @@ export function createBrowserLayoutStore(storage) {
       if (body.activate) {
         library.activeLayoutName = layout.name;
         library.activeBoardShape = layout.boardShape;
+        if (layout.boardShape === 'solid') {
+          library.activeSolidGeometryType = solidGeometryTypeOf(layout);
+        } else {
+          delete library.activeSolidGeometryType;
+        }
       }
       write(library);
       return library;

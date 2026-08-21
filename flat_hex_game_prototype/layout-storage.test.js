@@ -85,23 +85,47 @@ function solidLayout(name, sourceFlatLayoutName) {
   };
 }
 
-test('新平面布局自动提供同名待组装立体入口', () => {
+test('新平面布局自动提供每种棋盘结构的同名待组装立体入口', () => {
   const candidates = solidLayoutCandidates([flatLayout('布局1')]);
 
-  assert.deepEqual(candidates, [{
-    name: '布局1',
-    boardShape: 'solid',
-    sourceFlatLayoutName: '布局1',
-    pendingAssembly: true,
-    displayName: '布局1（待组装）'
-  }]);
+  assert.deepEqual(candidates, [
+    {
+      name: '布局1',
+      boardShape: 'solid',
+      sourceFlatLayoutName: '布局1',
+      pendingAssembly: true,
+      geometryType: 'triangular-bipyramid',
+      optionValue: '布局1::triangular-bipyramid',
+      displayName: '布局1 · 双锥六面体（待组装）'
+    },
+    {
+      name: '布局1',
+      boardShape: 'solid',
+      sourceFlatLayoutName: '布局1',
+      pendingAssembly: true,
+      geometryType: 'tetrahedron-inserted-panels',
+      optionValue: '布局1::tetrahedron-inserted-panels',
+      displayName: '布局1 · 四面体插板（待组装）'
+    }
+  ]);
 });
 
-test('已保存立体布局替代同名待组装入口且不重复显示', () => {
+test('已保存立体布局只替代同结构待组装入口且不重复显示', () => {
   const flat = flatLayout('布局1');
   const solid = solidLayout('布局1', '布局1');
 
-  assert.deepEqual(solidLayoutCandidates([flat, solid]), [solid]);
+  const candidates = solidLayoutCandidates([flat, solid]);
+  assert.deepEqual(candidates.map(candidate => candidate.optionValue), [
+    '布局1::triangular-bipyramid',
+    '布局1::tetrahedron-inserted-panels'
+  ]);
+  assert.deepEqual(candidates[0], {
+    ...solid,
+    geometryType: 'triangular-bipyramid',
+    optionValue: '布局1::triangular-bipyramid',
+    displayName: '布局1 · 双锥六面体'
+  });
+  assert.equal(candidates[1].pendingAssembly, true);
 });
 
 test('平面布局持久化成对传送阵且立体布局实时同步', () => {
@@ -283,9 +307,9 @@ test('浏览器布局存储提供默认布局并持久化保存与启用状态',
   const initial = store.request();
   assert.equal(initial.activeLayoutName, DEFAULT_LAYOUT_NAME);
   assert.equal(initial.layouts[0].builtIn, true);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn).length, 7);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'solid').length, 3);
-  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'flat').length, 4);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn).length, 9);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'solid').length, 4);
+  assert.equal(initial.layouts.filter(layout => layout.builtIn && layout.boardShape === 'flat').length, 5);
 
   const saved = store.request('/api/layouts', {
     method: 'POST',
@@ -312,11 +336,11 @@ test('已有浏览器布局库会自动补齐内置可玩布局且保留用户�
 
   assert.equal(library.activeLayoutName, '用户布局');
   assert.ok(library.layouts.some(layout => layout.name === '用户布局'));
-  assert.equal(library.layouts.filter(layout => layout.builtIn).length, 7);
+  assert.equal(library.layouts.filter(layout => layout.builtIn).length, 9);
   const solidBuiltInNames = new Set(library.layouts
     .filter(layout => layout.builtIn && layout.boardShape === 'solid')
     .map(layout => layout.name));
-  assert.equal(solidBuiltInNames.size, 3);
+  assert.equal(solidBuiltInNames.size, 4);
   for (const name of solidBuiltInNames) {
     assert.ok(library.layouts.some(layout => layout.name === name && layout.boardShape === 'flat'));
     assert.ok(library.layouts.some(layout => layout.name === name && layout.boardShape === 'solid'));
