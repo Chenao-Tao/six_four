@@ -745,3 +745,33 @@ test('立体装配的旋转和翻面操作会触发对应特效', () => {
   assert.match(app, /playEffect\('rotate', \[solidSelectedPanel\]\)/);
   assert.match(app, /playEffect\('flip', \[solidSelectedPanel\]\)/);
 });
+
+test('盲棋模式按钮存在且开关状态持久化到浏览器', () => {
+  assert.match(html, /id="blindModeButton"[^>]*>盲棋</);
+  assert.match(app, /blindModeButton\.addEventListener\('click', toggleBlindMode\)/);
+  assert.match(app, /const BLIND_MODE_STORAGE_KEY = 'flat-hex-blind-mode-v1';/);
+  assert.match(app, /blindMode = loadBlindModePreference\(\);/);
+  assert.match(app, /localStorage\.setItem\(BLIND_MODE_STORAGE_KEY, blindMode \? '1' : '0'\)/);
+  assert.match(app, /blindModeButton\.setAttribute\('aria-pressed', String\(blindMode\)\)/);
+});
+
+test('盲棋模式下平面与立体棋子表面只显示阵营文字并隐藏传送角标', () => {
+  assert.match(solidBoard, /BLIND_MODE_SIDE_LABELS = \{ white: '恒', black: '秦' \};/);
+  assert.match(app, /import \{\s*BLIND_MODE_SIDE_LABELS,/);
+  assert.match(app, /label\.textContent = blindMode && !customEditor[\s\S]*?BLIND_MODE_SIDE_LABELS\[piece\.side\][\s\S]*?pieceSymbol\(piece\.type\);/);
+  assert.match(app, /if \(!blindMode && piece\.type === 'queen' && piece\.portalTurns > 0\)/);
+  assert.match(solidBoard, /const symbol = blindMode[\s\S]*?BLIND_MODE_SIDE_LABELS\[piece\.side\][\s\S]*?PIECE_SYMBOLS\[piece\.type\] \?\? '\?'/);
+  assert.match(solidBoard, /if \(!blindMode && piece\.type === 'queen' && piece\.portalTurns > 0\)/);
+  assert.match(solidBoard, /setBlindMode\(enabled\) \{\s*blindMode = Boolean\(enabled\);/);
+  assert.match(app, /solidBoardViewer\?\.setBlindMode\(blindMode\);/);
+  assert.match(app, /solidBoardViewer\.setBlindMode\(blindMode\);/);
+});
+
+test('盲棋模式下选中、移动、升级与历史提示不泄露棋子身份', () => {
+  assert.match(app, /function pieceNameFor\(piece\) \{\s*return blindMode && !customEditor \? '棋子' : PIECE_NAMES\[piece\.type\];\s*\}/);
+  assert.match(app, /function blindPrompt\(text\) \{\s*return blindMode \? text\.replace\(\/后\/g, '棋子'\) : text;\s*\}/);
+  assert.match(app, /line\.textContent = blindMode \? item\.replace\(\/\[王后象兵\]\/g, '棋子'\) : item;/);
+  assert.match(app, /\$\{piece\.side === 'white' \? '白' : '黑'\}方\$\{pieceNameFor\(piece\)\}/);
+  assert.match(app, /promotionTitle\.textContent = blindMode \? '吃子成功' :/);
+  assert.match(app, /promotionQuestion\.textContent = blindMode[\s\S]*?是否升级？/);
+});

@@ -12,6 +12,7 @@ import {
 } from './solid-geometry.js?v=solid-geometry-2';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
+export const BLIND_MODE_SIDE_LABELS = { white: '恒', black: '秦' };
 const EPSILON = 1e-9;
 const EFFECT_DURATIONS = { rotate: 720, flip: 780, swap: 900 };
 
@@ -398,6 +399,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let portalEffect = null;
   let cameraMotion = null;
   let layerExchange = null;
+  let blindMode = false;
 
   function regionVertexPoint(vertexKey) {
     if (vertexPoints[vertexKey]) return vertexPoints[vertexKey];
@@ -868,9 +870,11 @@ export function createSolidBoardViewer(canvas, initialModel, {
       context.stroke();
       context.fillStyle = piece.side === 'white' ? '#101820' : '#f3f9fd';
       context.font = `700 ${Math.max(12, radius * 1.05)}px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`;
-      const symbol = PIECE_SYMBOLS[piece.type] ?? '?';
+      const symbol = blindMode
+        ? BLIND_MODE_SIDE_LABELS[piece.side]
+        : PIECE_SYMBOLS[piece.type] ?? '?';
       drawCenteredGlyph(context, symbol, { x: position.x, y: position.y });
-      if (piece.type === 'queen' && piece.portalTurns > 0) {
+      if (!blindMode && piece.type === 'queen' && piece.portalTurns > 0) {
         const badgeX = position.x + radius * 0.72;
         const badgeY = position.y - radius * 0.72;
         context.beginPath();
@@ -1188,6 +1192,9 @@ export function createSolidBoardViewer(canvas, initialModel, {
   return {
     update(nextModel) {
       model = nextModel;
+    },
+    setBlindMode(enabled) {
+      blindMode = Boolean(enabled);
     },
     cancelAnimations(nextModel) {
       cancelPendingAnimations(nextModel);
