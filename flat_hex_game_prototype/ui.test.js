@@ -773,7 +773,7 @@ test('盲棋模式按钮存在且开关状态持久化到浏览器', () => {
 });
 
 test('盲棋模式下平面与立体棋子表面只显示阵营文字并隐藏传送角标', () => {
-  assert.match(solidBoard, /BLIND_MODE_SIDE_LABELS = \{ white: '恒', black: '秦' \};/);
+  assert.match(solidBoard, /BLIND_MODE_SIDE_LABELS = \{ white: '衡', black: '秦' \};/);
   assert.match(app, /import \{\s*BLIND_MODE_SIDE_LABELS,/);
   assert.match(app, /label\.textContent = blindMode && !customEditor[\s\S]*?BLIND_MODE_SIDE_LABELS\[piece\.side\][\s\S]*?pieceSymbol\(piece\.type\);/);
   assert.match(app, /if \(!blindMode && piece\.type === 'queen' && piece\.portalTurns > 0\)/);
