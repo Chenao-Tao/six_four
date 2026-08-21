@@ -479,3 +479,98 @@ test('删除当前浏览器活动布局后回到默认布局', () => {
   assert.equal(deleted.activeLayoutName, DEFAULT_LAYOUT_NAME);
   assert.ok(!deleted.layouts.some(layout => layout.name === '待删除布局'));
 });
+
+test('同名两种棋盘结构的立体记录独立保存并按结构激活', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('双结构方案'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('双结构方案', '双结构方案'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: {
+        ...solidLayout('双结构方案', '双结构方案'),
+        solidGeometry: { type: 'tetrahedron-inserted-panels', insertedPanels: [
+          { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+          { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } }
+        ] }
+      },
+      activate: false
+    })
+  });
+
+  const activated = store.request('/api/layouts/active', {
+    method: 'PUT',
+    body: JSON.stringify({
+      name: '双结构方案',
+      boardShape: 'solid',
+      solidGeometryType: 'tetrahedron-inserted-panels'
+    })
+  });
+  assert.equal(activated.activeBoardShape, 'solid');
+  assert.equal(activated.activeSolidGeometryType, 'tetrahedron-inserted-panels');
+  const stillSaved = activated.layouts.filter(layout =>
+    layout.name === '双结构方案' && layout.boardShape === 'solid');
+  assert.equal(stillSaved.length, 2);
+
+  assert.throws(() => store.request('/api/layouts/active', {
+    method: 'PUT',
+    body: JSON.stringify({ name: '双结构方案', boardShape: 'solid', solidGeometryType: 'unknown-type' })
+  }), /布局不存在/);
+});
+
+test('删除立体记录时按棋盘结构定位且不影响另一种结构', () => {
+  const store = createBrowserLayoutStore(memoryStorage());
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: flatLayout('删除结构方案'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({ layout: solidLayout('删除结构方案', '删除结构方案'), activate: false })
+  });
+  store.request('/api/layouts', {
+    method: 'POST',
+    body: JSON.stringify({
+      layout: {
+        ...solidLayout('删除结构方案', '删除结构方案'),
+        solidGeometry: { type: 'tetrahedron-inserted-panels', insertedPanels: [
+          { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } },
+          { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } }
+        ] }
+      },
+      activate: false
+    })
+  });
+  store.request('/api/layouts/active', {
+    method: 'PUT',
+    body: JSON.stringify({
+      name: '删除结构方案',
+      boardShape: 'solid',
+      solidGeometryType: 'triangular-bipyramid'
+    })
+  });
+
+  const name = encodeURIComponent('删除结构方案');
+  const deleted = store.request(
+    `/api/layouts/${name}?boardShape=solid&solidGeometryType=tetrahedron-inserted-panels`,
+    { method: 'DELETE' }
+  );
+  const remainingSolids = deleted.layouts.filter(layout =>
+    layout.name === '删除结构方案' && layout.boardShape === 'solid');
+  assert.equal(remainingSolids.length, 1);
+  assert.equal(
+    remainingSolids[0].solidGeometry?.type ?? 'triangular-bipyramid',
+    'triangular-bipyramid');
+  assert.equal(deleted.activeLayoutName, '删除结构方案');
+  assert.equal(deleted.activeSolidGeometryType, 'triangular-bipyramid');
+
+  const flatSource = deleted.layouts.find(layout =>
+    layout.name === '删除结构方案' && layout.boardShape !== 'solid');
+  assert.ok(flatSource);
+});

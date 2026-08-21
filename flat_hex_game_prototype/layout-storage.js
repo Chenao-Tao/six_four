@@ -67,7 +67,7 @@ export function createBrowserLayoutStore(storage) {
         const matchingSolids = library.layouts.filter(layout =>
           layout.name === library.activeLayoutName && layout.boardShape === 'solid');
         if (matchingSolids.length === 1) {
-          library.activeSolidGeometryType = solidGeometryTypeOf(matchingSolids[0]);
+          library.activeSolidGeometryType = solidGeometryTypeOf(matchingSolids[0].solidGeometry);
         }
       }
       const activeLayout = library.layouts.find(layout => activeLayoutMatches(layout, library));
@@ -78,7 +78,7 @@ export function createBrowserLayoutStore(storage) {
       } else {
         library.activeBoardShape = activeLayout.boardShape;
         if (activeLayout.boardShape === 'solid') {
-          library.activeSolidGeometryType = solidGeometryTypeOf(activeLayout);
+          library.activeSolidGeometryType = solidGeometryTypeOf(activeLayout.solidGeometry);
         }
       }
       return library;
@@ -106,7 +106,7 @@ export function createBrowserLayoutStore(storage) {
         item.name === layout.name &&
         item.boardShape === layout.boardShape &&
         (layout.boardShape !== 'solid' ||
-          solidGeometryTypeOf(item) === solidGeometryTypeOf(layout)));
+          solidGeometryTypeOf(item.solidGeometry) === solidGeometryTypeOf(layout.solidGeometry)));
       const nextLayouts = [...library.layouts];
       if (index >= 0) nextLayouts[index] = layout;
       else nextLayouts.push(layout);
@@ -121,7 +121,7 @@ export function createBrowserLayoutStore(storage) {
         library.activeLayoutName = layout.name;
         library.activeBoardShape = layout.boardShape;
         if (layout.boardShape === 'solid') {
-          library.activeSolidGeometryType = solidGeometryTypeOf(layout);
+          library.activeSolidGeometryType = solidGeometryTypeOf(layout.solidGeometry);
         } else {
           delete library.activeSolidGeometryType;
         }
@@ -131,7 +131,10 @@ export function createBrowserLayoutStore(storage) {
     }
     if (path === '/api/layouts/active' && method === 'PUT') {
       const layout = library.layouts.find(item =>
-        item.name === body.name && (!body.boardShape || item.boardShape === body.boardShape));
+        item.name === body.name &&
+        (!body.boardShape || item.boardShape === body.boardShape) &&
+        (item.boardShape !== 'solid' || !body.solidGeometryType ||
+          solidGeometryTypeOf(item.solidGeometry) === body.solidGeometryType));
       if (!layout) throw new Error('布局不存在');
       if (!layout.isDefault) {
         const validation = resolvePlayableLayout(layout, library.layouts);
@@ -139,6 +142,11 @@ export function createBrowserLayoutStore(storage) {
       }
       library.activeLayoutName = layout.name;
       library.activeBoardShape = layout.boardShape;
+      if (layout.boardShape === 'solid') {
+        library.activeSolidGeometryType = solidGeometryTypeOf(layout.solidGeometry);
+      } else {
+        delete library.activeSolidGeometryType;
+      }
       write(library);
       return library;
     }
@@ -146,8 +154,12 @@ export function createBrowserLayoutStore(storage) {
       const requestUrl = new URL(path, 'http://layout.local');
       const name = decodeURIComponent(requestUrl.pathname.slice('/api/layouts/'.length));
       const boardShape = requestUrl.searchParams.get('boardShape');
+      const solidGeometryType = requestUrl.searchParams.get('solidGeometryType');
       const selected = library.layouts.find(layout =>
-        layout.name === name && (!boardShape || layout.boardShape === boardShape));
+        layout.name === name &&
+        (!boardShape || layout.boardShape === boardShape) &&
+        (layout.boardShape !== 'solid' || !solidGeometryType ||
+          solidGeometryTypeOf(layout.solidGeometry) === solidGeometryType));
       if (!name || selected?.builtIn) throw new Error('内置布局不能删除');
       if (selected?.boardShape !== 'solid') {
         const dependent = library.layouts.find(layout =>
@@ -157,9 +169,10 @@ export function createBrowserLayoutStore(storage) {
       const originalLength = library.layouts.length;
       library.layouts = library.layouts.filter(layout => layout !== selected);
       if (library.layouts.length === originalLength) throw new Error('布局不存在');
-      if (library.activeLayoutName === name && library.activeBoardShape === selected?.boardShape) {
+      if (selected && activeLayoutMatches(selected, library)) {
         library.activeLayoutName = DEFAULT_LAYOUT_NAME;
         library.activeBoardShape = 'flat';
+        delete library.activeSolidGeometryType;
       }
       library.layouts = mergeBuiltInLayouts(library.layouts);
       write(library);

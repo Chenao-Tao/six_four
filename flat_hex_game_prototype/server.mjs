@@ -64,7 +64,7 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
       const matchingSolids = library.layouts.filter(layout =>
         layout.name === library.activeLayoutName && layout.boardShape === 'solid');
       if (matchingSolids.length === 1) {
-        library.activeSolidGeometryType = solidGeometryTypeOf(matchingSolids[0]);
+        library.activeSolidGeometryType = solidGeometryTypeOf(matchingSolids[0].solidGeometry);
       }
     }
     const activeLayout = library.layouts.find(layout => activeLayoutMatches(layout, library));
@@ -75,7 +75,7 @@ async function readLibrary(layoutFile, persistLibrary = writeLibrary) {
     } else {
       library.activeBoardShape = activeLayout.boardShape;
       if (activeLayout.boardShape === 'solid') {
-        library.activeSolidGeometryType = solidGeometryTypeOf(activeLayout);
+        library.activeSolidGeometryType = solidGeometryTypeOf(activeLayout.solidGeometry);
       }
     }
     return library;
@@ -167,7 +167,8 @@ export function createAppServer({
             layout.name === normalized.layout.name &&
             layout.boardShape === normalized.layout.boardShape &&
             (normalized.layout.boardShape !== 'solid' ||
-              solidGeometryTypeOf(layout) === solidGeometryTypeOf(normalized.layout)));
+              solidGeometryTypeOf(layout.solidGeometry) ===
+                solidGeometryTypeOf(normalized.layout.solidGeometry)));
           const nextLayouts = [...next.layouts];
           if (index >= 0) nextLayouts[index] = normalized.layout;
           else nextLayouts.push(normalized.layout);
@@ -184,7 +185,7 @@ export function createAppServer({
             next.activeLayoutName = normalized.layout.name;
             next.activeBoardShape = normalized.layout.boardShape;
             if (normalized.layout.boardShape === 'solid') {
-              next.activeSolidGeometryType = solidGeometryTypeOf(normalized.layout);
+              next.activeSolidGeometryType = solidGeometryTypeOf(normalized.layout.solidGeometry);
             } else {
               delete next.activeSolidGeometryType;
             }
@@ -204,7 +205,7 @@ export function createAppServer({
             item.name === body.name &&
             (!body.boardShape || item.boardShape === body.boardShape) &&
             (item.boardShape !== 'solid' || !body.solidGeometryType ||
-              solidGeometryTypeOf(item) === body.solidGeometryType));
+              solidGeometryTypeOf(item.solidGeometry) === body.solidGeometryType));
           if (!layout) return { error: '布局不存在', status: 404 };
           if (!layout.isDefault) {
             const validation = resolvePlayableLayout(layout, next.layouts);
@@ -213,7 +214,7 @@ export function createAppServer({
           next.activeLayoutName = layout.name;
           next.activeBoardShape = layout.boardShape;
           if (layout.boardShape === 'solid') {
-            next.activeSolidGeometryType = solidGeometryTypeOf(layout);
+            next.activeSolidGeometryType = solidGeometryTypeOf(layout.solidGeometry);
           } else {
             delete next.activeSolidGeometryType;
           }
@@ -239,7 +240,7 @@ export function createAppServer({
             layout.name === name &&
             (!boardShape || layout.boardShape === boardShape) &&
             (layout.boardShape !== 'solid' || !solidGeometryType ||
-              solidGeometryTypeOf(layout) === solidGeometryType));
+              solidGeometryTypeOf(layout.solidGeometry) === solidGeometryType));
           if (selected?.builtIn) return { error: '内置布局不能删除', status: 400 };
           if (selected?.boardShape !== 'solid') {
             const dependent = next.layouts.find(layout =>
