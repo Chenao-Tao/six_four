@@ -96,6 +96,22 @@ test('成功落子保存走前状态，非法动作和重新开局不保留撤�
   assert.match(saveAndStart[0], /state = cloneGameState\(activeInitialState\);\s*undoHistory\.clear\(\)/);
 });
 
+test('四面体立体编辑保存开局时使用当前装配几何校验', () => {
+  const saveAndStart = app.match(/async function saveCustomBoard\(\)[\s\S]*?\n}\n\nfunction layoutSnapshotFromEditor/);
+
+  assert.ok(saveAndStart);
+  assert.match(saveAndStart[0], /createCustomState\([\s\S]*?customEditor\.portalPairs,\s*assembled\.solidGeometry\s*\)/);
+});
+
+test('立体编辑保存开局会先保存同名平面来源', () => {
+  const saveAndStart = app.match(/async function saveCustomBoard\(\)[\s\S]*?\n}\n\nfunction layoutSnapshotFromEditor/);
+
+  assert.ok(saveAndStart);
+  assert.match(saveAndStart[0], /if \(customEditor\.boardShape === 'solid'\) \{[\s\S]*?saveFlatSourceLayout\(name\)/);
+  assert.ok(saveAndStart[0].indexOf('saveFlatSourceLayout(name)') <
+    saveAndStart[0].indexOf('solidLayoutSnapshot(name, assembled)'));
+});
+
 test('回退恢复完整状态并清除算法、选子、升级和路线选择状态', () => {
   const undo = app.match(/function undoLastMove\(\)[\s\S]*?\n}\n\nfunction resetGame/);
 

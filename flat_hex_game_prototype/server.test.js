@@ -33,6 +33,17 @@ async function close(server) {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }
 
+test('静态资源禁止浏览器缓存旧模块', async t => {
+  const server = createAppServer();
+  const baseUrl = await listen(server);
+  t.after(() => close(server));
+
+  const response = await fetch(`${baseUrl}/index.html`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+
 test('布局保存到本地文件并在服务重启后保持启用状态', async t => {
   const tempDirectory = await mkdtemp(join(tmpdir(), 'flat-hex-layouts-'));
   const layoutFile = join(tempDirectory, 'layouts.json');
@@ -50,8 +61,8 @@ test('布局保存到本地文件并在服务重启后保持启用状态', async
 
   const stored = JSON.parse(await readFile(layoutFile, 'utf8'));
   assert.equal(stored.activeLayoutName, '测试布局');
-  assert.equal(stored.layouts.length, 8);
-  assert.equal(stored.layouts.filter(item => item.builtIn).length, 7);
+  assert.equal(stored.layouts.length, 10);
+  assert.equal(stored.layouts.filter(item => item.builtIn).length, 9);
 
   const secondServer = createAppServer({ layoutFile });
   const secondBaseUrl = await listen(secondServer);

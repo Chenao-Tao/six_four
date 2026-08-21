@@ -5,7 +5,11 @@ import {
   solidPointBelongsToEdge,
   solidPointBelongsToFace,
   solidPointBelongsToVertex
-} from './game.js?v=separate-layout-storage-1';
+} from './game.js?v=solid-geometry-2';
+import {
+  solidGeometryFaces,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js?v=solid-geometry-2';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
 const EPSILON = 1e-9;
@@ -79,7 +83,7 @@ function triangleContainsPoint(vertices, point) {
 
 export function findPanelAtPoint(renderFaces, point) {
   for (let index = renderFaces.length - 1; index >= 0; index -= 1) {
-    if (triangleContainsPoint(renderFaces[index].projected, point)) {
+    if (triangleContainsPoint(renderFaces[index].clipProjected ?? renderFaces[index].projected, point)) {
       return renderFaces[index].panelIndex;
     }
   }
@@ -146,6 +150,62 @@ function cross(left, right) {
 function normalize(vector) {
   const length = Math.hypot(vector.x, vector.y, vector.z) || 1;
   return scale(vector, 1 / length);
+}
+
+function dot(left, right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+function clipPolygonToPlaneHalfSpace(polygon, planePoint, planeNormal, keepPositive) {
+  const clipped = [];
+  const signedDistance = point => dot(subtract(point, planePoint), planeNormal);
+  const isInside = distance => keepPositive ? distance >= -EPSILON : distance <= EPSILON;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    const startDistance = signedDistance(start);
+    const endDistance = signedDistance(end);
+    const startInside = isInside(startDistance);
+    const endInside = isInside(endDistance);
+    if (startInside) clipped.push(start);
+    if (startInside === endInside) continue;
+    const ratio = startDistance / (startDistance - endDistance);
+    clipped.push(add(start, scale(subtract(end, start), ratio)));
+  }
+  return clipped;
+}
+
+function splitPolygonByPlane(polygon, plane) {
+  const distances = polygon.map(point => dot(subtract(point, plane.point), plane.normal));
+  if (!distances.some(distance => distance > EPSILON) ||
+    !distances.some(distance => distance < -EPSILON)) {
+    return [polygon];
+  }
+  return [
+    clipPolygonToPlaneHalfSpace(polygon, plane.point, plane.normal, true),
+    clipPolygonToPlaneHalfSpace(polygon, plane.point, plane.normal, false)
+  ].filter(fragment => fragment.length >= 3);
+}
+
+export function splitSolidRenderFaces(faces = []) {
+  const planes = faces.map(vertices => ({
+    point: vertices[0],
+    normal: normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])))
+  }));
+  return faces.flatMap((vertices, panelIndex) => {
+    let polygons = [vertices];
+    planes.forEach((plane, cutterIndex) => {
+      if (cutterIndex === panelIndex) return;
+      polygons = polygons.flatMap(polygon => splitPolygonByPlane(polygon, plane));
+    });
+    return polygons.flatMap(polygon => {
+      const fragments = [];
+      for (let index = 1; index < polygon.length - 1; index += 1) {
+        fragments.push({ panelIndex, vertices: [polygon[0], polygon[index], polygon[index + 1]] });
+      }
+      return fragments;
+    });
+  });
 }
 
 function barycentricPoint(vertices, local) {
@@ -322,7 +382,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   onMoveSelect = () => {}
 } = {}) {
   const context = canvas.getContext('2d');
-  const faces = modelFaces();
+  let faces = solidGeometryFaces(initialModel?.solidGeometry);
   const vertexPoints = modelVertexPoints();
   let model = initialModel;
   let rotationX = -0.35;
@@ -338,6 +398,14 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let portalEffect = null;
   let cameraMotion = null;
   let layerExchange = null;
+
+  function regionVertexPoint(vertexKey) {
+    if (vertexPoints[vertexKey]) return vertexPoints[vertexKey];
+    const coordinates = String(vertexKey).split(',').map(Number);
+    return coordinates.length === 3 && coordinates.every(Number.isFinite)
+      ? { x: coordinates[0], y: coordinates[1], z: coordinates[2] }
+      : null;
+  }
 
   function project(point, width, height) {
     const rotated = rotatePoint(point, rotationX, rotationY);
@@ -643,6 +711,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   }
 
   function render(now = performance.now()) {
+    faces = solidGeometryFaces(model.solidGeometry);
     if (cameraMotion) {
       const progress = Math.max(0, Math.min(1, (now - cameraMotion.startedAt) / cameraMotion.duration));
       const eased = 1 - (1 - progress) ** 3;
@@ -698,28 +767,42 @@ export function createSolidBoardViewer(canvas, initialModel, {
       }
     }
     const mappedPieces = mapPiecesToPanels(displayedModel.pieces);
-    const renderFaces = faces.map((vertices, panelIndex) => {
+    const animatedFaces = faces.map((vertices, panelIndex) => {
       const isExchangingFace = regionLayerMotion?.type === 'face' &&
         regionLayerMotion.panelIndex === panelIndex;
-      const animatedVertices = boardLayerMotion || isExchangingFace
+      return boardLayerMotion || isExchangingFace
         ? vertices.map(vertex => scale(vertex, boardLayerMotion?.scale ?? regionLayerMotion.scale))
         : vertices;
-      const projected = animatedVertices.map(vertex => project(vertex, width, height));
+    });
+    const surfaceRenderFaces = animatedFaces.map((vertices, panelIndex) => {
+      const projected = vertices.map(vertex => project(vertex, width, height));
       const normal = normalize(cross(
-        subtract(animatedVertices[1], animatedVertices[0]),
-        subtract(animatedVertices[2], animatedVertices[0])
+        subtract(vertices[1], vertices[0]),
+        subtract(vertices[2], vertices[0])
       ));
       return {
         panelIndex,
-        vertices: animatedVertices,
+        vertices,
         projected,
         depth: projected.reduce((sum, point) => sum + point.z, 0) / 3,
         frontFacing: rotatePoint(normal, rotationX, rotationY).z >= -EPSILON
       };
+    });
+    const renderFaces = splitSolidRenderFaces(animatedFaces).map(fragment => {
+      const surface = surfaceRenderFaces[fragment.panelIndex];
+      const clipProjected = fragment.vertices.map(vertex => project(vertex, width, height));
+      return {
+        ...surface,
+        clipVertices: fragment.vertices,
+        clipProjected,
+        depth: clipProjected.reduce((sum, point) => sum + point.z, 0) / 3
+      };
     }).sort((left, right) => left.depth - right.depth);
     lastRenderFaces = renderFaces;
     const interactionTargets = [];
+    const interactionTargetKeys = new Set();
     const sharedPieceDraws = [];
+    const sharedPieceDrawKeys = new Set();
 
     function drawPiece(face, piece) {
       const normal = normalize(cross(
@@ -729,10 +812,25 @@ export function createSolidBoardViewer(canvas, initialModel, {
       const world = barycentricPoint(face.vertices, piece.local);
       const isExchangingRegionPiece = regionLayerMotion && (
         regionLayerMotion.type === 'vertex'
-          ? solidPointBelongsToVertex(piece.position, piece.panelIndex, regionLayerMotion.vertexKey)
+          ? solidPointBelongsToVertex(
+              piece.position,
+              piece.panelIndex,
+              regionLayerMotion.vertexKey,
+              displayedModel.solidGeometry
+            )
           : regionLayerMotion.type === 'edge'
-            ? solidPointBelongsToEdge(piece.position, piece.panelIndex, regionLayerMotion.edgeKey)
-            : solidPointBelongsToFace(piece.position, piece.panelIndex, regionLayerMotion.panelIndex)
+            ? solidPointBelongsToEdge(
+                piece.position,
+                piece.panelIndex,
+                regionLayerMotion.edgeKey,
+                displayedModel.solidGeometry
+              )
+            : solidPointBelongsToFace(
+                piece.position,
+                piece.panelIndex,
+                regionLayerMotion.panelIndex,
+                displayedModel.solidGeometry
+              )
       );
       const faceAlreadyAnimated = regionLayerMotion?.type === 'face' &&
         face.panelIndex === regionLayerMotion.panelIndex;
@@ -788,14 +886,18 @@ export function createSolidBoardViewer(canvas, initialModel, {
         context.textBaseline = 'middle';
         context.fillText(String(piece.portalTurns), badgeX, badgeY + 1);
       }
-      interactionTargets.push({
-        type: 'piece',
-        pieceId: piece.id,
-        x: position.x,
-        y: position.y,
-        radius: radius + 7,
-        depth: position.z
-      });
+      const interactionKey = `piece:${piece.id}`;
+      if (!interactionTargetKeys.has(interactionKey)) {
+        interactionTargetKeys.add(interactionKey);
+        interactionTargets.push({
+          type: 'piece',
+          pieceId: piece.id,
+          x: position.x,
+          y: position.y,
+          radius: radius + 7,
+          depth: position.z
+        });
+      }
       context.restore();
     }
 
@@ -804,9 +906,12 @@ export function createSolidBoardViewer(canvas, initialModel, {
     renderFaces.forEach(face => {
       context.save();
       const { panelIndex, vertices, projected } = face;
+      const clipProjected = face.clipProjected ?? projected;
       if (regionLayerMotion?.type === 'face' && regionLayerMotion.panelIndex === panelIndex) {
         context.globalAlpha *= regionLayerMotion.alpha;
       }
+      drawPath(clipProjected, null, null);
+      context.clip();
       const label = displayedModel.faceLabels[panelIndex];
       const isEmptySlot = displayedModel.assemblyMode && !label;
       const normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
@@ -814,13 +919,23 @@ export function createSolidBoardViewer(canvas, initialModel, {
       const light = Math.max(0, viewNormal.z) * 24;
       const isBackFace = label?.endsWith('B');
       const base = isBackFace ? 190 + light : 25 + light;
-      const fill = `rgb(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18})`;
+      const shellAlpha = displayedModel.assemblyMode &&
+        displayedModel.solidGeometry?.type === TETRAHEDRON_SOLID_GEOMETRY_TYPE &&
+        panelIndex < 4
+        ? 0.34
+        : 1;
+      const fill = `rgba(${base}, ${isBackFace ? base + 6 : base + 10}, ${isBackFace ? base + 12 : base + 18}, ${shellAlpha})`;
       const lineColor = isBackFace ? 'rgba(15,28,38,.55)' : 'rgba(190,235,255,.52)';
       const isSelected = displayedModel.selectedPanel === panelIndex;
       if (isEmptySlot) context.setLineDash([10, 8]);
       drawPath(
-        projected,
+        clipProjected,
         isEmptySlot ? 'rgba(13, 25, 35, .16)' : fill,
+        null
+      );
+      drawPath(
+        projected,
+        null,
         isSelected ? '#ffc96a' : isEmptySlot ? 'rgba(144, 192, 216, .58)' : isBackFace ? '#263d4d' : '#a8d8ee',
         isSelected ? 5 : 2
       );
@@ -881,7 +996,13 @@ export function createSolidBoardViewer(canvas, initialModel, {
         });
 
       mappedPieces.filter(piece => piece.panelIndex === panelIndex).forEach(piece => {
-        if (isSharedSolidPoint(piece.local)) sharedPieceDraws.push({ face, piece });
+        if (isSharedSolidPoint(piece.local)) {
+          const drawKey = `${panelIndex}:${piece.id}`;
+          if (!sharedPieceDrawKeys.has(drawKey)) {
+            sharedPieceDrawKeys.add(drawKey);
+            sharedPieceDraws.push({ face, piece });
+          }
+        }
         else drawPiece(face, piece);
       });
 
@@ -913,16 +1034,20 @@ export function createSolidBoardViewer(canvas, initialModel, {
           radius: radius + 8,
           depth: position.z
         };
-        if (move.usesPortal) interactionTargets.unshift(interactionTarget);
-        else interactionTargets.push(interactionTarget);
+        const interactionKey = `move:${move.targetKey}`;
+        if (!interactionTargetKeys.has(interactionKey)) {
+          interactionTargetKeys.add(interactionKey);
+          if (move.usesPortal) interactionTargets.unshift(interactionTarget);
+          else interactionTargets.push(interactionTarget);
+        }
       });
       context.restore();
     });
-    drawPortalDetectionEdgeGlow(renderFaces, now);
+    drawPortalDetectionEdgeGlow(surfaceRenderFaces, now);
     drawPlannedMove(renderFaces);
     sharedPieceDraws.forEach(({ face, piece }) => drawPiece(face, piece));
     if (regionLayerMotion?.type === 'vertex') {
-      const vertex = vertexPoints[regionLayerMotion.vertexKey];
+      const vertex = regionVertexPoint(regionLayerMotion.vertexKey);
       if (vertex) {
         const point = project(scale(vertex, regionLayerMotion.scale), width, height);
         context.save();
@@ -942,9 +1067,10 @@ export function createSolidBoardViewer(canvas, initialModel, {
         );
       }
     } else if (regionLayerMotion?.type === 'edge') {
-      const [firstName, secondName] = regionLayerMotion.edgeKey.split(':');
-      const first = vertexPoints[firstName];
-      const second = vertexPoints[secondName];
+      const separator = regionLayerMotion.edgeKey.includes('|') ? '|' : ':';
+      const [firstName, secondName] = regionLayerMotion.edgeKey.split(separator);
+      const first = regionVertexPoint(firstName);
+      const second = regionVertexPoint(secondName);
       if (first && second) {
         const start = project(scale(first, regionLayerMotion.scale), width, height);
         const end = project(scale(second, regionLayerMotion.scale), width, height);

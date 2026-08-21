@@ -3,8 +3,14 @@ import {
   createCustomLayout,
   createCustomState,
   createInitialState
-} from './game.js?v=portal-editor-1';
-import { assemblyToLayout, createSolidAssembly } from './solid-assembly.js?v=paired-layouts-5';
+} from './game.js?v=solid-geometry-2';
+import { assemblyToLayout, createSolidAssembly } from './solid-assembly.js?v=solid-geometry-2';
+import {
+  CLASSIC_SOLID_GEOMETRY,
+  cloneSolidGeometry,
+  solidGeometryTypeOf,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js?v=solid-geometry-2';
 
 function clonePiecesByFace(boardStates) {
   return {
@@ -30,6 +36,10 @@ function cloneLayoutPortals(source) {
   return { portalPairs: clonePortalPairs(source.portalPairs) };
 }
 
+function cloneLayoutGeometry(source) {
+  return source.solidGeometry ? { solidGeometry: cloneSolidGeometry(source.solidGeometry) } : {};
+}
+
 export function flatLayouts(layouts) {
   const pairedSolidNames = new Set(layouts
     .filter(layout => layout.boardShape === 'solid' && layout.sourceFlatLayoutName === layout.name)
@@ -45,22 +55,86 @@ export function solidLayouts(layouts) {
   return layouts.filter(layout => layout.boardShape === 'solid');
 }
 
+export const SOLID_GEOMETRY_TYPE_LABELS = Object.freeze({
+  [CLASSIC_SOLID_GEOMETRY.type]: '双锥六面体',
+  [TETRAHEDRON_SOLID_GEOMETRY_TYPE]: '四面体插板'
+});
+
+export const SOLID_GEOMETRY_TYPES = Object.freeze([
+  CLASSIC_SOLID_GEOMETRY.type,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+]);
+
+export function solidLayoutIdentity(layout) {
+  return layout.boardShape === 'solid'
+    ? `solid:${layout.name}:${solidGeometryTypeOf(layout)}`
+    : `flat:${layout.name}`;
+}
+
+export function solidLayoutOptionValue(name, geometryType) {
+  return `${name}::${geometryType}`;
+}
+
+export function activeLayoutMatches(layout, library) {
+  return Boolean(layout) &&
+    layout.name === library.activeLayoutName &&
+    layout.boardShape === library.activeBoardShape &&
+    (layout.boardShape !== 'solid' ||
+      solidGeometryTypeOf(layout) ===
+        (library.activeSolidGeometryType ?? CLASSIC_SOLID_GEOMETRY.type));
+}
+
 export function solidLayoutCandidates(layouts) {
   const savedSolids = solidLayouts(layouts);
-  const solidByName = new Map(savedSolids.map(layout => [layout.name, layout]));
-  const flatNames = new Set();
-  const candidates = flatLayouts(layouts).map(layout => {
-    flatNames.add(layout.name);
-    return solidByName.get(layout.name) ?? {
-      name: layout.name,
-      boardShape: 'solid',
-      sourceFlatLayoutName: layout.name,
-      pendingAssembly: true,
-      displayName: `${layout.name}（待组装）`
-    };
+  const savedByKey = new Map(savedSolids.map(layout => [
+    solidLayoutOptionValue(layout.name, solidGeometryTypeOf(layout)),
+    layout
+  ]));
+  const candidates = [];
+  const pendingByKey = new Set();
+  const push = candidate => {
+    const key = solidLayoutOptionValue(candidate.name, candidate.geometryType);
+    if (pendingByKey.has(key)) return;
+    pendingByKey.add(key);
+    candidates.push(candidate);
+  };
+
+  flatLayouts(layouts).forEach(flat => {
+    SOLID_GEOMETRY_TYPES.forEach(geometryType => {
+      const optionValue = solidLayoutOptionValue(flat.name, geometryType);
+      const saved = savedByKey.get(optionValue);
+      if (saved) {
+        push({
+          ...saved,
+          geometryType,
+          optionValue,
+          displayName: `${flat.name} · ${SOLID_GEOMETRY_TYPE_LABELS[geometryType]}`
+        });
+      } else {
+        push({
+          name: flat.name,
+          boardShape: 'solid',
+          sourceFlatLayoutName: flat.name,
+          pendingAssembly: true,
+          geometryType,
+          optionValue,
+          displayName: `${flat.name} · ${SOLID_GEOMETRY_TYPE_LABELS[geometryType]}（待组装）`
+        });
+      }
+    });
   });
 
-  return candidates.concat(savedSolids.filter(layout => !flatNames.has(layout.name)));
+  savedSolids.forEach(saved => {
+    const geometryType = solidGeometryTypeOf(saved);
+    push({
+      ...saved,
+      geometryType,
+      optionValue: solidLayoutOptionValue(saved.name, geometryType),
+      displayName: `${saved.name} · ${SOLID_GEOMETRY_TYPE_LABELS[geometryType]}`
+    });
+  });
+
+  return candidates;
 }
 
 export function resolveSolidLayout(layout, layouts) {
@@ -69,7 +143,8 @@ export function resolveSolidLayout(layout, layouts) {
     return {
       boardStates: clonePiecesByFace(layout.boardStates),
       ...cloneBoardConfiguration(layout),
-      ...cloneLayoutPortals(layout)
+      ...cloneLayoutPortals(layout),
+      ...cloneLayoutGeometry(layout)
     };
   }
   const source = flatLayouts(layouts)
@@ -77,7 +152,9 @@ export function resolveSolidLayout(layout, layouts) {
   if (!source) return { error: `立体布局引用的平面布局“${layout.sourceFlatLayoutName}”不存在` };
   const assembly = createSolidAssembly(source, { installed: true, arrangement: layout });
   const assembled = assemblyToLayout(assembly);
-  return assembled.error ? assembled : { ...assembled, ...cloneLayoutPortals(source) };
+  return assembled.error
+    ? assembled
+    : { ...assembled, ...cloneLayoutPortals(source), ...cloneLayoutGeometry(layout) };
 }
 
 export function resolvePlayableLayout(layout, layouts) {
@@ -92,7 +169,8 @@ export function resolvePlayableLayout(layout, layouts) {
     source.faceLabels,
     source.panelRotations,
     layout.boardShape,
-    source.portalPairs
+    source.portalPairs,
+    source.solidGeometry
   );
 }
 
@@ -117,14 +195,16 @@ export function normalizeLayoutForStorage(layout, layouts, requirePlayable = fal
           resolved.faceLabels,
           resolved.panelRotations,
           'solid',
-          resolved.portalPairs
+          resolved.portalPairs,
+          resolved.solidGeometry
         )
       : createCustomLayout(
           resolved.boardStates,
           resolved.faceLabels,
           resolved.panelRotations,
           'solid',
-          resolved.portalPairs
+          resolved.portalPairs,
+          resolved.solidGeometry
         );
     if (validation.error) return validation;
     const configuration = requirePlayable
@@ -138,7 +218,8 @@ export function normalizeLayoutForStorage(layout, layouts, requirePlayable = fal
         name: layout.name,
         boardShape: 'solid',
         sourceFlatLayoutName: sourceName,
-        ...cloneBoardConfiguration(configuration)
+        ...cloneBoardConfiguration(configuration),
+        solidGeometry: cloneSolidGeometry(candidate.solidGeometry)
       }
     };
   }

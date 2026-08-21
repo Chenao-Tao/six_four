@@ -36,6 +36,18 @@
             <h2 id="solidViewerTitle">立体棋盘</h2>
             <p id="solidViewerStatus">点击己方棋子查看合法落点。</p>
             <div class="solid-panel-selection" id="solidPanelSelection">请选择一块待安装三角板</div>
+            <div class="solid-geometry-editor hidden" id="solidGeometryEditor">
+              <span>棋盘结构</span>
+              <div class="solid-geometry-modes" role="group" aria-label="立体棋盘结构">
+                <button id="classicSolidGeometryButton" type="button">双锥六面体</button>
+                <button id="tetrahedronSolidGeometryButton" type="button">四面体插板</button>
+              </div>
+              <div class="inserted-panel-position-editor hidden" id="insertedPanelPositionEditor">
+                <label>5 号插板 <input type="number" step="0.1" data-inserted-panel="4" data-axis="x" aria-label="5号插板X位置"><input type="number" step="0.1" data-inserted-panel="4" data-axis="y" aria-label="5号插板Y位置"><input type="number" step="0.1" data-inserted-panel="4" data-axis="z" aria-label="5号插板Z位置"></label>
+                <label>6 号插板 <input type="number" step="0.1" data-inserted-panel="5" data-axis="x" aria-label="6号插板X位置"><input type="number" step="0.1" data-inserted-panel="5" data-axis="y" aria-label="6号插板Y位置"><input type="number" step="0.1" data-inserted-panel="5" data-axis="z" aria-label="6号插板Z位置"></label>
+                <small>X / Y / Z</small>
+              </div>
+            </div>
             <div class="solid-slot-picker hidden" id="solidSlotPicker" aria-label="六面体骨架槽位">
               <span>骨架槽位</span>
               <div id="solidSlotList"></div>
@@ -217,6 +229,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=queen-step-4"></script>
+  <script type="module" src="app.js?v=solid-geometry-2"></script>
 </body>
 </html>

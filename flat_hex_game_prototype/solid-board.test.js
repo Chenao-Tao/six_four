@@ -16,8 +16,35 @@ import {
   solidVertexPieceIds,
   solidCameraAngles,
   solidEffectFrame,
+  splitSolidRenderFaces,
   solidWireframeSegments
 } from './solid-board.js';
+
+test('相交插板按交线切片后不再跨越另一面的前后两侧', () => {
+  const horizontal = [
+    { x: -2, y: -2, z: 0 },
+    { x: 2, y: -2, z: 0 },
+    { x: 0, y: 2, z: 0 }
+  ];
+  const vertical = [
+    { x: 0, y: -2, z: -2 },
+    { x: 0, y: 2, z: -2 },
+    { x: 0, y: 0, z: 2 }
+  ];
+
+  const fragments = splitSolidRenderFaces([horizontal, vertical]);
+  const horizontalFragments = fragments.filter(fragment => fragment.panelIndex === 0);
+
+  assert.ok(horizontalFragments.length > 1, '相交三角面必须沿交线拆分');
+  horizontalFragments.forEach(fragment => {
+    const sides = fragment.vertices.map(point => Math.sign(point.x));
+    assert.equal(
+      sides.some(side => side < 0) && sides.some(side => side > 0),
+      false,
+      '单个渲染片段不能同时跨越另一面的前后两侧'
+    );
+  });
+});
 
 test('立体线框按物理棱去重并排除完全背向视角的隐藏棱', () => {
   const top = { x: 0, y: 0, z: 1 };
