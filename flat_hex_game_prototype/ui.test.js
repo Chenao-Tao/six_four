@@ -281,7 +281,7 @@ test('平面布局管理可以新建自带默认传送阵的双面空棋盘', ()
 
 test('启用使用当前编辑覆盖所选存档且不会立即开局或退出编辑', () => {
   const activation = app.match(
-    /async function activateLayoutFromLibrary[\s\S]*?\n}\n\nfunction activateSolidLayoutFromLibrary/
+    /async function activateLayoutFromLibrary[\s\S]*?\n}\n\nasync function activateSolidLayoutFromLibrary/
   );
   assert.ok(activation);
   assert.match(html, /id="activateLayoutButton" disabled>启用<\/button>/);
@@ -322,18 +322,19 @@ test('自定义棋盘可以选择平面或立体保存形态', () => {
   assert.match(app, /function setBoardShape\(boardShape\)/);
   assert.match(app, /saveSolidCustomButton\.addEventListener\('click', saveCustomBoard\)/);
   assert.match(app, /solidLayoutSnapshot/);
-  assert.match(app, /customEditor\.solidAssembly = createSolidAssembly\(/);
-  assert.match(app, /syncAssemblyPieces\(customEditor\.solidAssembly, sourceLayout\)/);
+  assert.match(app, /setSolidAssemblyDraft\(\s*customEditor,\s*CLASSIC_SOLID_GEOMETRY\.type,\s*createSolidAssembly\(customEditor\)/);
+  assert.match(app, /syncAssemblyPieces\(customEditor\.assemblyDrafts\[targetType\], sourceLayout\)/);
   assert.match(app, /pieces: renderedPieces\.map/);
 });
 
-test('从立体对局进入自定义时载入当前同名棋子并保持立体形态', () => {
-  assert.match(app, /function loadSolidLayoutFromLibrary\(name = savedSolidLayoutSelect\.value\)/);
+test('从立体对局进入自定义时载入当前同名棋子并保持立体形态与结构', () => {
+  assert.match(app, /function loadSolidLayoutFromLibrary\(optionValue = savedSolidLayoutSelect\.value\)/);
   assert.match(app, /loadSolidLayoutButton\.addEventListener\('click', \(\) => loadSolidLayoutFromLibrary\(\)\)/);
   const handler = app.match(/solidCustomizeButton\.addEventListener\('click',[\s\S]*?\n}\);/);
   assert.ok(handler);
   assert.match(handler[0], /const layoutName = activeLayoutName/);
-  assert.match(handler[0], /closeSolidBoard\(\);[\s\S]*enterCustomEditor\(\);[\s\S]*loadSolidLayoutFromLibrary\(layoutName\)/);
+  assert.match(handler[0], /const geometryType = activeSolidGeometryType \?\? CLASSIC_SOLID_GEOMETRY\.type/);
+  assert.match(handler[0], /closeSolidBoard\(\);[\s\S]*enterCustomEditor\(\);[\s\S]*loadSolidLayoutFromLibrary\(solidLayoutOptionValue\(layoutName, geometryType\)\)/);
 });
 
 test('平面与立体结构按同名方案配对且只显示当前形态的存档区', () => {
@@ -363,19 +364,63 @@ test('新平面方案在立体列表显示为待组装且只能载入装配', ()
 
 test('载入待组装入口会创建空骨架且平面方案可直接切换到立体装配', () => {
   const loader = app.match(
-    /function loadSolidLayoutFromLibrary\(name = savedSolidLayoutSelect\.value\)[\s\S]*?\n}\n\nasync function activateLayoutFromLibrary/
+    /function loadSolidLayoutFromLibrary\(optionValue = savedSolidLayoutSelect\.value\)[\s\S]*?\n}\n\nasync function activateLayoutFromLibrary/
   );
   const switcher = app.match(/function setBoardShape\(boardShape\)[\s\S]*?\n}\n\nfunction selectEditorPanel/);
 
   assert.ok(loader);
   assert.ok(switcher);
-  assert.match(loader[0], /solidLayoutCandidates\(savedLayouts\)/);
+  assert.match(loader[0], /findSolidCandidate\(optionValue\)/);
   assert.match(loader[0], /layout\.pendingAssembly/);
   assert.match(loader[0], /createSolidAssembly\(sourceLayout\)/);
+  assert.match(loader[0], /setAssemblyGeometryType\(assembly, layout\.geometryType\)/);
+  assert.match(loader[0], /setSolidAssemblyDraft\(customEditor, solidGeometryTypeOf\(assembly\.solidGeometry\), assembly\)/);
   assert.match(loader[0], /待组装状态/);
   assert.match(switcher[0], /const schemeName = enteredName \|\| selectedFlatName \|\| selectedSolidName/);
   assert.doesNotMatch(switcher[0], /solidLayouts\(savedLayouts\)\.some\(layout => layout\.name === selectedFlatName\)/);
+  assert.match(switcher[0], /solidLayouts\(savedLayouts\)\.find\(layout =>\s*\n?\s*layout\.name === schemeName && solidGeometryTypeOf\(layout\.solidGeometry\) === targetType\)/);
   assert.match(app, /saveSolidLayoutButton\.disabled = Boolean\(assemblyToLayout\(customEditor\.solidAssembly\)\.error\)/);
+});
+
+test('立体下拉按棋盘结构区分条目且启用状态比较几何类型', () => {
+  const options = app.match(/function replaceLayoutOptions\(select, layouts, emptyLabel, selectedValue = ''\)[\s\S]*?\n}\n\nfunction preferredSolidGeometryType/);
+  assert.ok(options);
+  assert.match(options[0], /option\.value = layout\.optionValue \?\? layout\.name/);
+  assert.match(app, /function findSolidCandidate\(optionValue\)/);
+  const refresh = app.match(/function refreshSolidLayoutOptions\(selectedName = ''\)[\s\S]*?\n}\n\nfunction preferredSolidGeometryTypeForActive/);
+  assert.ok(refresh);
+  assert.match(refresh[0], /solidLayoutOptionValue\(selectedName, preferredSolidGeometryType\(\)\)/);
+  assert.match(refresh[0], /candidate\.optionValue === selectedValue/);
+  assert.match(refresh[0], /selectedLayout\.geometryType === preferredSolidGeometryTypeForActive\(\)/);
+  assert.match(app, /const activeLayout = savedLayouts\.find\(layout => activeLayoutMatches\(layout, library\)\)/);
+  assert.match(app, /activeSolidGeometryType = activeBoardShape === 'solid'/);
+});
+
+test('双锥与四面体装配编辑使用独立草稿互不覆盖', () => {
+  const attach = app.match(/function attachSolidAssemblyDrafts\(editor\)[\s\S]*?\n}\n\nfunction setSolidAssemblyDraft/);
+  assert.ok(attach);
+  assert.match(attach[0], /Object\.defineProperty\(editor, 'solidAssembly'/);
+  assert.match(attach[0], /this\.assemblyDrafts\[this\.solidGeometryType\]/);
+  const switcher = app.match(/function setSolidGeometryType\(type\)[\s\S]*?\n}\n\nfunction updateInsertedPanelPosition/);
+  assert.ok(switcher);
+  assert.match(switcher[0], /const existingDraft = customEditor\.assemblyDrafts\[type\]/);
+  assert.match(switcher[0], /setSolidAssemblyDraft\(customEditor, type, converted\.assembly\)/);
+  assert.match(switcher[0], /customEditor\.solidGeometryType = type/);
+  assert.match(app, /function syncAssemblyDrafts\(editor, snapshot\)/);
+  assert.match(app, /enterCustomEditor\(\)[\s\S]*?attachSolidAssemblyDrafts\(customEditor\)/);
+  assert.match(app, /if \(previousPairName && previousPairName !== layout\.name\) resetSolidAssemblyDrafts\(customEditor\)/);
+});
+
+test('启用立体条目前校验当前装配结构一致且删除按结构定位', () => {
+  const activator = app.match(/async function activateSolidLayoutFromLibrary\(\)[\s\S]*?\n}\n\nasync function deleteLayoutFromLibrary/);
+  assert.ok(activator);
+  assert.match(activator[0], /findSolidCandidate\(savedSolidLayoutSelect\.value\)/);
+  assert.match(activator[0], /assemblyType !== candidate\.geometryType/);
+  assert.match(activator[0], /请先载入该条目或切换结构/);
+  const deleter = app.match(/async function deleteLayoutFromLibrary\(\s*name = savedLayoutSelect\.value,\s*boardShape = 'flat',\s*solidGeometryType = ''\s*\)[\s\S]*?\n}\n\nfunction deleteSolidLayoutFromLibrary/);
+  assert.ok(deleter);
+  assert.match(deleter[0], /solidGeometryType=\$\{encodeURIComponent\(solidGeometryType\)\}/);
+  assert.match(app, /deleteLayoutFromLibrary\(candidate\.name, 'solid', candidate\.geometryType\)/);
 });
 
 test('立体装配编辑显示同名平面布局的传送阵但不开放传送阵编辑', () => {

@@ -67,7 +67,7 @@ export const SOLID_GEOMETRY_TYPES = Object.freeze([
 
 export function solidLayoutIdentity(layout) {
   return layout.boardShape === 'solid'
-    ? `solid:${layout.name}:${solidGeometryTypeOf(layout)}`
+    ? `solid:${layout.name}:${solidGeometryTypeOf(layout.solidGeometry)}`
     : `flat:${layout.name}`;
 }
 
@@ -80,14 +80,14 @@ export function activeLayoutMatches(layout, library) {
     layout.name === library.activeLayoutName &&
     layout.boardShape === library.activeBoardShape &&
     (layout.boardShape !== 'solid' ||
-      solidGeometryTypeOf(layout) ===
+      solidGeometryTypeOf(layout.solidGeometry) ===
         (library.activeSolidGeometryType ?? CLASSIC_SOLID_GEOMETRY.type));
 }
 
 export function solidLayoutCandidates(layouts) {
   const savedSolids = solidLayouts(layouts);
   const savedByKey = new Map(savedSolids.map(layout => [
-    solidLayoutOptionValue(layout.name, solidGeometryTypeOf(layout)),
+    solidLayoutOptionValue(layout.name, solidGeometryTypeOf(layout.solidGeometry)),
     layout
   ]));
   const candidates = [];
@@ -125,7 +125,7 @@ export function solidLayoutCandidates(layouts) {
   });
 
   savedSolids.forEach(saved => {
-    const geometryType = solidGeometryTypeOf(saved);
+    const geometryType = solidGeometryTypeOf(saved.solidGeometry);
     push({
       ...saved,
       geometryType,

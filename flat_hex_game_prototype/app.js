@@ -54,13 +54,20 @@ import {
   setInsertedPanelPosition,
   syncAssemblyPieces
 } from './solid-assembly.js?v=solid-geometry-2';
-import { TETRAHEDRON_SOLID_GEOMETRY_TYPE } from './solid-geometry.js?v=solid-geometry-2';
 import {
+  CLASSIC_SOLID_GEOMETRY,
+  solidGeometryTypeOf,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js?v=solid-geometry-2';
+import {
+  activeLayoutMatches,
   flatLayouts,
   resolvePlayableLayout,
   resolveSolidLayout,
   solidLayoutCandidates,
-  solidLayouts
+  solidLayoutOptionValue,
+  solidLayouts,
+  SOLID_GEOMETRY_TYPE_LABELS
 } from './layout-library.js?v=solid-geometry-2';
 import { moveChoicesAtTarget } from './move-choice.js?v=portal-choice-1';
 import {
@@ -183,6 +190,7 @@ let savedLayouts = [];
 let activeLayoutName = '默认布局';
 let activeInitialState = createInitialState();
 let activeBoardShape = 'flat';
+let activeSolidGeometryType = null;
 let solidBoardViewer = null;
 let solidSelectedPanel = null;
 let solidSelectedPanelId = null;
@@ -276,14 +284,17 @@ function layoutStorageLabel() {
 function applyLayoutLibrary(library, selectedName = '') {
   savedLayouts = library.layouts;
   activeLayoutName = library.activeLayoutName;
-  const activeLayout = savedLayouts.find(layout =>
-    layout.name === activeLayoutName &&
-    (!library.activeBoardShape || layout.boardShape === library.activeBoardShape));
+  const activeLayout = savedLayouts.find(layout => activeLayoutMatches(layout, library));
   activeBoardShape = activeLayout?.boardShape === 'solid' ? 'solid' : 'flat';
+  activeSolidGeometryType = activeBoardShape === 'solid'
+    ? solidGeometryTypeOf(activeLayout.solidGeometry)
+    : null;
   const result = resolvePlayableLayout(activeLayout, savedLayouts);
   activeInitialState = result.error ? createInitialState() : result.state;
   activeLayoutStatus.textContent = `当前启用布局：${activeLayoutName} · ` +
-    `${activeBoardShape === 'solid' ? '立体棋盘' : '平面棋盘'} · 保存位置：${layoutStorageLabel()}`;
+    `${activeBoardShape === 'solid'
+      ? `立体棋盘 · ${SOLID_GEOMETRY_TYPE_LABELS[activeSolidGeometryType]}`
+      : '平面棋盘'} · 保存位置：${layoutStorageLabel()}`;
   refreshSavedLayoutOptions(selectedName || activeLayoutName);
 }
 
@@ -355,7 +366,7 @@ function refreshSavedLayoutOptions(selectedName = '') {
   refreshSolidLayoutOptions(selectedName);
 }
 
-function replaceLayoutOptions(select, layouts, emptyLabel, selectedName = '') {
+function replaceLayoutOptions(select, layouts, emptyLabel, selectedValue = '') {
   select.replaceChildren();
   if (!layouts.length) {
     const option = document.createElement('option');
@@ -366,29 +377,55 @@ function replaceLayoutOptions(select, layouts, emptyLabel, selectedName = '') {
   }
   layouts.forEach(layout => {
     const option = document.createElement('option');
-    option.value = layout.name;
+    option.value = layout.optionValue ?? layout.name;
     option.textContent = layout.displayName ?? layout.name;
     select.appendChild(option);
   });
-  select.value = layouts.some(layout => layout.name === selectedName) ? selectedName : layouts[0].name;
+  const valueOf = layout => layout.optionValue ?? layout.name;
+  select.value = layouts.some(layout => valueOf(layout) === selectedValue)
+    ? selectedValue
+    : valueOf(layouts[0]);
+}
+
+function preferredSolidGeometryType() {
+  if (customEditor?.boardShape === 'solid' && customEditor.solidGeometryType) {
+    return customEditor.solidGeometryType;
+  }
+  return activeSolidGeometryType ?? CLASSIC_SOLID_GEOMETRY.type;
+}
+
+function findSolidCandidate(optionValue) {
+  return solidLayoutCandidates(savedLayouts)
+    .find(candidate => candidate.optionValue === optionValue);
 }
 
 function refreshSolidLayoutOptions(selectedName = '') {
   const solidCandidates = solidLayoutCandidates(savedLayouts);
-  replaceLayoutOptions(savedSolidLayoutSelect, solidCandidates, '暂无可装配的立体布局', selectedName);
-  const selectedLayout = solidCandidates.find(layout => layout.name === savedSolidLayoutSelect.value);
+  let selectedValue = selectedName
+    ? solidLayoutOptionValue(selectedName, preferredSolidGeometryType())
+    : '';
+  if (selectedValue && !solidCandidates.some(candidate => candidate.optionValue === selectedValue)) {
+    selectedValue = solidCandidates.find(candidate => candidate.name === selectedName)?.optionValue ?? '';
+  }
+  replaceLayoutOptions(savedSolidLayoutSelect, solidCandidates, '暂无可装配的立体布局', selectedValue);
+  const selectedLayout = solidCandidates.find(layout => layout.optionValue === savedSolidLayoutSelect.value);
   if (customEditor?.boardShape === 'solid') {
     solidLayoutNameInput.value = selectedLayout?.name ?? customEditor.sourceFlatLayoutName ?? '';
   }
   const solidIsActive = Boolean(selectedLayout) &&
     !selectedLayout.pendingAssembly &&
-    selectedLayout.name === activeLayoutName && activeBoardShape === 'solid';
+    selectedLayout.name === activeLayoutName && activeBoardShape === 'solid' &&
+    selectedLayout.geometryType === preferredSolidGeometryTypeForActive();
   activateSolidLayoutButton.disabled = !selectedLayout || Boolean(selectedLayout.pendingAssembly);
   activateSolidLayoutButton.textContent = solidIsActive ? '覆盖并启用' : '启用';
   activateSolidLayoutButton.classList.toggle('active', solidIsActive);
   loadSolidLayoutButton.disabled = !selectedLayout;
   deleteSolidLayoutButton.disabled = !selectedLayout ||
     Boolean(selectedLayout.pendingAssembly) || Boolean(selectedLayout.builtIn);
+}
+
+function preferredSolidGeometryTypeForActive() {
+  return activeSolidGeometryType ?? CLASSIC_SOLID_GEOMETRY.type;
 }
 
 function toPixel(point) {
@@ -802,15 +839,23 @@ function renderSolidGeometryEditor() {
 
 function setSolidGeometryType(type) {
   if (!customEditor?.solidAssembly) return;
-  const result = setAssemblyGeometryType(customEditor.solidAssembly, type);
-  if (result.error) {
-    refreshSolidBoard(`不能切换棋盘结构：${result.error}`);
-    return;
+  const currentType = customEditor.solidGeometryType;
+  if (!currentType || type === currentType) return;
+  const existingDraft = customEditor.assemblyDrafts[type];
+  if (!existingDraft) {
+    const converted = setAssemblyGeometryType(customEditor.solidAssembly, type);
+    if (converted.error) {
+      refreshSolidBoard(`不能切换棋盘结构：${converted.error}`);
+      return;
+    }
+    setSolidAssemblyDraft(customEditor, type, converted.assembly);
+    refreshSolidBoard(
+      `已切换为「${SOLID_GEOMETRY_TYPE_LABELS[type]}」编辑，排布沿用当前装配；两种结构各自保留独立编辑进度。`);
+  } else {
+    customEditor.solidGeometryType = type;
+    refreshSolidBoard(`已切换回「${SOLID_GEOMETRY_TYPE_LABELS[type]}」的编辑进度。`);
   }
-  customEditor.solidAssembly = result.assembly;
-  refreshSolidBoard(type === TETRAHEDRON_SOLID_GEOMETRY_TYPE
-    ? '已切换为四面体外壳与两块可调位置插板。'
-    : '已切换为双锥六面体。');
+  refreshSolidLayoutOptions(customEditor.sourceFlatLayoutName);
 }
 
 function updateInsertedPanelPosition(input) {
@@ -988,7 +1033,11 @@ function openSolidBoard() {
   solidSelectedPanel = null;
   solidSelectedPanelId = null;
   if (customEditor && !customEditor.solidAssembly) {
-    customEditor.solidAssembly = createSolidAssembly(customEditor);
+    setSolidAssemblyDraft(
+      customEditor,
+      CLASSIC_SOLID_GEOMETRY.type,
+      createSolidAssembly(customEditor)
+    );
   }
   const model = solidBoardModel();
   solidViewer.classList.remove('hidden');
@@ -2267,6 +2316,43 @@ function removeEditorPiece() {
   render();
 }
 
+function attachSolidAssemblyDrafts(editor) {
+  editor.assemblyDrafts = {};
+  editor.solidGeometryType = null;
+  Object.defineProperty(editor, 'solidAssembly', {
+    configurable: true,
+    get() {
+      return this.solidGeometryType ? this.assemblyDrafts[this.solidGeometryType] ?? null : null;
+    },
+    set(assembly) {
+      if (!this.solidGeometryType) return;
+      this.assemblyDrafts[this.solidGeometryType] = assembly;
+    }
+  });
+}
+
+function setSolidAssemblyDraft(editor, geometryType, assembly) {
+  if (!geometryType) return;
+  editor.solidGeometryType = geometryType;
+  editor.assemblyDrafts[geometryType] = assembly;
+}
+
+function resetSolidAssemblyDrafts(editor) {
+  editor.assemblyDrafts = {};
+  editor.solidGeometryType = null;
+}
+
+function syncAssemblyDrafts(editor, snapshot) {
+  const activeType = editor.solidGeometryType;
+  let activeError = null;
+  Object.keys(editor.assemblyDrafts ?? {}).forEach(type => {
+    const synchronized = syncAssemblyPieces(editor.assemblyDrafts[type], snapshot);
+    editor.assemblyDrafts[type] = synchronized.assembly;
+    if (type === activeType && synchronized.error) activeError = synchronized.error;
+  });
+  return { error: activeError };
+}
+
 function enterCustomEditor() {
   if (animationLock || simulationLock || pendingPromotion || pendingMoveChoice || customEditor) return;
   stopAutoSimulation();
@@ -2292,6 +2378,7 @@ function enterCustomEditor() {
       back: [...(state.boardPanelRotations?.back ?? BOARD_PANEL_ROTATIONS.back)]
     }
   };
+  attachSolidAssemblyDrafts(customEditor);
   boardHelp.textContent = '已进入空白棋盘编辑：点击交点设置棋子，A、B 两面分别编辑。';
   render();
 }
@@ -2317,6 +2404,7 @@ function createNewFlatLayout() {
       back: [...BOARD_PANEL_ROTATIONS.back]
     }
   };
+  attachSolidAssemblyDrafts(customEditor);
   editorPoint = null;
   draftPieceSequence = 0;
   layoutNameInput.value = nextCustomLayoutName();
@@ -2498,9 +2586,8 @@ async function saveFlatSourceLayout(name) {
     customEditor.sourceFlatLayoutName = name;
     layoutNameInput.value = name;
     solidLayoutNameInput.value = name;
-    if (customEditor.solidAssembly) {
-      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, snapshot);
-      customEditor.solidAssembly = synchronized.assembly;
+    if (customEditor.assemblyDrafts && customEditor.solidGeometryType) {
+      const synchronized = syncAssemblyDrafts(customEditor, snapshot);
       if (synchronized.error) return { error: synchronized.error };
     }
     return { snapshot };
@@ -2541,9 +2628,8 @@ async function saveLayoutToLibrary() {
     applyLayoutLibrary(library, name);
     customEditor.sourceFlatLayoutName = name;
     solidLayoutNameInput.value = name;
-    if (customEditor.solidAssembly) {
-      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, snapshot);
-      customEditor.solidAssembly = synchronized.assembly;
+    if (customEditor.assemblyDrafts && customEditor.solidGeometryType) {
+      syncAssemblyDrafts(customEditor, snapshot);
     }
     boardHelp.textContent = existed
       ? `已覆盖${layoutStorageLabel()}中的布局“${name}”。`
@@ -2618,7 +2704,7 @@ function loadLayoutFromLibrary() {
   customEditor.portalPairs = clonePortalPairs(validation.portalPairs);
   customEditor.pendingPortalEndpoint = null;
   customEditor.boardShape = 'flat';
-  if (previousPairName && previousPairName !== layout.name) customEditor.solidAssembly = null;
+  if (previousPairName && previousPairName !== layout.name) resetSolidAssemblyDrafts(customEditor);
   customEditor.sourceFlatLayoutName = layout.name;
   customEditor.side = 'front';
   customEditor.selectedPanel = null;
@@ -2629,9 +2715,9 @@ function loadLayoutFromLibrary() {
   render();
 }
 
-function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
-  if (!customEditor || !name) return;
-  const layout = solidLayoutCandidates(savedLayouts).find(item => item.name === name);
+function loadSolidLayoutFromLibrary(optionValue = savedSolidLayoutSelect.value) {
+  if (!customEditor || !optionValue) return;
+  const layout = findSolidCandidate(optionValue);
   if (!layout) {
     boardHelp.textContent = '选择的立体布局入口不存在。';
     return;
@@ -2671,63 +2757,52 @@ function loadSolidLayoutFromLibrary(name = savedSolidLayoutSelect.value) {
   customEditor.sourceFlatLayoutName = sourceLayout.name;
   layoutNameInput.value = sourceLayout.name;
   solidLayoutNameInput.value = sourceLayout.name;
-  customEditor.solidAssembly = layout.pendingAssembly
+  let assembly = layout.pendingAssembly
     ? createSolidAssembly(sourceLayout)
     : createSolidAssembly(sourceLayout, { installed: true, arrangement: layout });
+  if (layout.pendingAssembly && layout.geometryType !== CLASSIC_SOLID_GEOMETRY.type) {
+    const converted = setAssemblyGeometryType(assembly, layout.geometryType);
+    if (converted.error) {
+      boardHelp.textContent = `不能以「${SOLID_GEOMETRY_TYPE_LABELS[layout.geometryType]}」结构开始装配：${converted.error}`;
+      return;
+    }
+    assembly = converted.assembly;
+  }
+  resetSolidAssemblyDrafts(customEditor);
+  setSolidAssemblyDraft(customEditor, solidGeometryTypeOf(assembly.solidGeometry), assembly);
   if (solidBoardViewer) closeSolidBoard();
   openSolidBoard();
   const message = layout.pendingAssembly
-    ? `方案“${layout.name}”当前为待组装状态；完成六块板安装后才能保存、启用或开局。`
-    : `已载入方案“${layout.name}”的立体结构，棋子同步自同名平面结构。`;
+    ? `方案“${layout.name}”当前为待组装状态（${SOLID_GEOMETRY_TYPE_LABELS[layout.geometryType]}）；完成六块板安装后才能保存、启用或开局。`
+    : `已载入方案“${layout.name}”的${SOLID_GEOMETRY_TYPE_LABELS[layout.geometryType]}结构，棋子同步自同名平面结构。`;
   boardHelp.textContent = message;
   solidViewerStatus.textContent = message;
 }
 
-async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardShape = 'flat') {
+async function activateLayoutFromLibrary(name = savedLayoutSelect.value) {
   if (!customEditor || !name) return;
-  if (customEditor.boardShape !== boardShape) {
+  if (customEditor.boardShape !== 'flat') {
     boardHelp.textContent = '当前编辑形态与所选布局形态不一致。';
     return;
   }
-  let snapshot;
-  if (boardShape === 'solid') {
-    if (!customEditor.solidAssembly) {
-      boardHelp.textContent = '请先载入或完成立体装配。';
-      return;
-    }
-    const sourceSave = await saveFlatSourceLayout(name);
-    if (sourceSave.error) {
-      boardHelp.textContent = `无法启用立体布局：${sourceSave.error}`;
-      solidViewerStatus.textContent = sourceSave.error;
-      return;
-    }
-    const assembled = assemblyToLayout(customEditor.solidAssembly);
-    if (assembled.error) {
-      boardHelp.textContent = `无法启用立体布局：${assembled.error}`;
-      solidViewerStatus.textContent = assembled.error;
-      return;
-    }
-    snapshot = solidLayoutSnapshot(name, assembled);
-  } else {
-    const validation = createCustomState(
-      customEditor.boardStates,
-      customEditor.faceLabels,
-      customEditor.panelRotations,
-      'flat',
-      customEditor.portalPairs
-    );
-    if (validation.error) {
-      boardHelp.textContent = `无法启用平面布局：${validation.error}`;
-      return;
-    }
-    snapshot = layoutSnapshotFromEditor(name, {
-      boardShape: 'flat',
-      boardStates: validation.state.boardStates,
-      faceLabels: validation.state.boardFaceLabels,
-      panelRotations: validation.state.boardPanelRotations,
-      portalPairs: validation.state.portalPairs
-    });
+  const validation = createCustomState(
+    customEditor.boardStates,
+    customEditor.faceLabels,
+    customEditor.panelRotations,
+    'flat',
+    customEditor.portalPairs
+  );
+  if (validation.error) {
+    boardHelp.textContent = `无法启用平面布局：${validation.error}`;
+    return;
   }
+  const snapshot = layoutSnapshotFromEditor(name, {
+    boardShape: 'flat',
+    boardStates: validation.state.boardStates,
+    faceLabels: validation.state.boardFaceLabels,
+    panelRotations: validation.state.boardPanelRotations,
+    portalPairs: validation.state.portalPairs
+  });
   if (snapshot.error) {
     boardHelp.textContent = `无法启用布局：${snapshot.error}`;
     return;
@@ -2738,25 +2813,82 @@ async function activateLayoutFromLibrary(name = savedLayoutSelect.value, boardSh
       body: JSON.stringify({ layout: snapshot, activate: true })
     });
     applyLayoutLibrary(library, name);
-    const button = boardShape === 'solid' ? activateSolidLayoutButton : activateLayoutButton;
-    button.textContent = '已覆盖并启用';
-    button.classList.add('active');
+    activateLayoutButton.textContent = '已覆盖并启用';
+    activateLayoutButton.classList.add('active');
     boardHelp.textContent = `已覆盖并启用布局“${name}”；当前棋局未改变，下次重新开局时生效。`;
-    if (boardShape === 'solid') solidViewerStatus.textContent = boardHelp.textContent;
   } catch (error) {
     boardHelp.textContent = `无法启用布局：${error.message}`;
   }
 }
 
-function activateSolidLayoutFromLibrary() {
-  return activateLayoutFromLibrary(savedSolidLayoutSelect.value, 'solid');
+async function activateSolidLayoutFromLibrary() {
+  if (!customEditor || !savedSolidLayoutSelect.value) return;
+  if (customEditor.boardShape !== 'solid') {
+    boardHelp.textContent = '当前编辑形态与所选布局形态不一致。';
+    return;
+  }
+  const candidate = findSolidCandidate(savedSolidLayoutSelect.value);
+  if (!candidate) {
+    boardHelp.textContent = '选择的立体布局入口不存在。';
+    return;
+  }
+  if (!customEditor.solidAssembly) {
+    boardHelp.textContent = '请先载入或完成立体装配。';
+    return;
+  }
+  const assemblyType = solidGeometryTypeOf(customEditor.solidAssembly.solidGeometry);
+  if (assemblyType !== candidate.geometryType) {
+    const message = `当前编辑的是「${SOLID_GEOMETRY_TYPE_LABELS[assemblyType]}」结构，` +
+      `与所选「${SOLID_GEOMETRY_TYPE_LABELS[candidate.geometryType]}」条目不一致；请先载入该条目或切换结构。`;
+    boardHelp.textContent = message;
+    solidViewerStatus.textContent = message;
+    return;
+  }
+  const name = candidate.name;
+  const sourceSave = await saveFlatSourceLayout(name);
+  if (sourceSave.error) {
+    boardHelp.textContent = `无法启用立体布局：${sourceSave.error}`;
+    solidViewerStatus.textContent = sourceSave.error;
+    return;
+  }
+  const assembled = assemblyToLayout(customEditor.solidAssembly);
+  if (assembled.error) {
+    boardHelp.textContent = `无法启用立体布局：${assembled.error}`;
+    solidViewerStatus.textContent = assembled.error;
+    return;
+  }
+  const snapshot = solidLayoutSnapshot(name, assembled);
+  if (snapshot.error) {
+    boardHelp.textContent = `无法启用布局：${snapshot.error}`;
+    return;
+  }
+  try {
+    const library = await requestLayoutLibrary('/api/layouts', {
+      method: 'POST',
+      body: JSON.stringify({ layout: snapshot, activate: true })
+    });
+    applyLayoutLibrary(library, name);
+    activateSolidLayoutButton.textContent = '已覆盖并启用';
+    activateSolidLayoutButton.classList.add('active');
+    boardHelp.textContent = `已覆盖并启用布局“${name}”（${SOLID_GEOMETRY_TYPE_LABELS[candidate.geometryType]}）；当前棋局未改变，下次重新开局时生效。`;
+    solidViewerStatus.textContent = boardHelp.textContent;
+  } catch (error) {
+    boardHelp.textContent = `无法启用布局：${error.message}`;
+  }
 }
 
-async function deleteLayoutFromLibrary(name = savedLayoutSelect.value, boardShape = 'flat') {
+async function deleteLayoutFromLibrary(
+  name = savedLayoutSelect.value,
+  boardShape = 'flat',
+  solidGeometryType = ''
+) {
   if (!customEditor || !name) return;
+  const query = solidGeometryType
+    ? `?boardShape=${boardShape}&solidGeometryType=${encodeURIComponent(solidGeometryType)}`
+    : `?boardShape=${boardShape}`;
   try {
     const library = await requestLayoutLibrary(
-      `/api/layouts/${encodeURIComponent(name)}?boardShape=${boardShape}`,
+      `/api/layouts/${encodeURIComponent(name)}${query}`,
       {
       method: 'DELETE'
       }
@@ -2764,14 +2896,17 @@ async function deleteLayoutFromLibrary(name = savedLayoutSelect.value, boardShap
     applyLayoutLibrary(library);
     const nameInput = boardShape === 'solid' ? solidLayoutNameInput : layoutNameInput;
     if (nameInput.value.trim() === name) nameInput.value = '';
-    boardHelp.textContent = `已从${layoutStorageLabel()}删除布局“${name}”。`;
+    boardHelp.textContent = `已从${layoutStorageLabel()}删除布局“${name}”` +
+      (solidGeometryType ? `（${SOLID_GEOMETRY_TYPE_LABELS[solidGeometryType]}）。` : '。');
   } catch (error) {
     boardHelp.textContent = `无法删除布局：${error.message}`;
   }
 }
 
 function deleteSolidLayoutFromLibrary() {
-  return deleteLayoutFromLibrary(savedSolidLayoutSelect.value, 'solid');
+  const candidate = findSolidCandidate(savedSolidLayoutSelect.value);
+  if (!candidate) return;
+  return deleteLayoutFromLibrary(candidate.name, 'solid', candidate.geometryType);
 }
 
 function setEditorMode(mode) {
@@ -2808,17 +2943,36 @@ function setBoardShape(boardShape) {
     const sourceLayout = enteredName
       ? layoutSnapshotFromEditor(schemeName, { ...customEditor, boardShape: 'flat' })
       : savedSource;
-    const pairedSolid = solidLayouts(savedLayouts).find(layout => layout.name === schemeName);
+    const selectedCandidate = findSolidCandidate(savedSolidLayoutSelect.value);
+    const targetType = customEditor.solidGeometryType ??
+      (selectedCandidate?.name === schemeName
+        ? selectedCandidate.geometryType
+        : CLASSIC_SOLID_GEOMETRY.type);
+    const pairedSolid = solidLayouts(savedLayouts).find(layout =>
+      layout.name === schemeName && solidGeometryTypeOf(layout.solidGeometry) === targetType);
     let synchronizationError = null;
-    if (customEditor.solidAssembly && customEditor.sourceFlatLayoutName === schemeName) {
-      const synchronized = syncAssemblyPieces(customEditor.solidAssembly, sourceLayout);
-      customEditor.solidAssembly = synchronized.assembly;
-      synchronizationError = synchronized.error ?? null;
+    if (customEditor.assemblyDrafts[targetType] && customEditor.sourceFlatLayoutName === schemeName) {
+      const synchronized = syncAssemblyPieces(customEditor.assemblyDrafts[targetType], sourceLayout);
+      customEditor.assemblyDrafts[targetType] = synchronized.assembly;
+      if (customEditor.solidGeometryType === targetType) {
+        synchronizationError = synchronized.error ?? null;
+      }
     } else {
-      customEditor.solidAssembly = createSolidAssembly(
+      let assembly = createSolidAssembly(
         sourceLayout,
         pairedSolid ? { installed: true, arrangement: pairedSolid } : undefined
       );
+      if (!pairedSolid && targetType === TETRAHEDRON_SOLID_GEOMETRY_TYPE) {
+        const converted = setAssemblyGeometryType(assembly, targetType);
+        if (converted.error) {
+          customEditor.boardShape = 'flat';
+          boardHelp.textContent = `不能切换棋盘结构：${converted.error}`;
+          render();
+          return;
+        }
+        assembly = converted.assembly;
+      }
+      setSolidAssemblyDraft(customEditor, targetType, assembly);
     }
     customEditor.sourceFlatLayoutName = schemeName;
     solidLayoutNameInput.value = schemeName;
@@ -3110,9 +3264,10 @@ stepButton.addEventListener('click', simulateStep);
 customizeButton.addEventListener('click', enterCustomEditor);
 solidCustomizeButton.addEventListener('click', () => {
   const layoutName = activeLayoutName;
+  const geometryType = activeSolidGeometryType ?? CLASSIC_SOLID_GEOMETRY.type;
   closeSolidBoard();
   enterCustomEditor();
-  loadSolidLayoutFromLibrary(layoutName);
+  loadSolidLayoutFromLibrary(solidLayoutOptionValue(layoutName, geometryType));
 });
 rotateSolidPanelButton.addEventListener('click', rotateSolidPanel);
 flipSolidPanelButton.addEventListener('click', flipSolidPanel);
