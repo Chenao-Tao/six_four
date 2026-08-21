@@ -36,6 +36,7 @@ import {
   shouldFallbackToBrowserStorage
 } from './layout-storage.js?v=solid-geometry-2';
 import {
+  BLIND_MODE_SIDE_LABELS,
   createSolidBoardViewer,
   mapPiecesToPanels,
   portalEndpointDisplayLabel
@@ -100,6 +101,7 @@ const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
 const undoButton = document.getElementById('undoButton');
 const customizeButton = document.getElementById('customizeButton');
+const blindModeButton = document.getElementById('blindModeButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
 const editorPanelBody = document.getElementById('editorPanelBody');
@@ -199,6 +201,8 @@ let solidBoardViewer = null;
 let solidSelectedPanel = null;
 let solidSelectedPanelId = null;
 let layoutStorageMode = 'server';
+const BLIND_MODE_STORAGE_KEY = 'flat-hex-blind-mode-v1';
+let blindMode = false;
 const browserLayoutStore = createBrowserLayoutStore(localStorage);
 const moveLifecycle = createOperationLifecycle();
 
@@ -1053,6 +1057,7 @@ function openSolidBoard() {
     onPieceSelect: selectSolidPiece,
     onMoveSelect: selectSolidMove
   });
+  solidBoardViewer.setBlindMode(blindMode);
   refreshSolidBoard();
   render();
 }
@@ -1310,6 +1315,33 @@ function pieceSymbol(type) {
   return ({ king: '王', queen: '后', bishop: '象', pawn: '兵' })[type];
 }
 
+function pieceNameFor(piece) {
+  return blindMode && !customEditor ? '棋子' : PIECE_NAMES[piece.type];
+}
+
+function blindPrompt(text) {
+  return blindMode ? text.replace(/后/g, '棋子') : text;
+}
+
+function loadBlindModePreference() {
+  try {
+    return localStorage.getItem(BLIND_MODE_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function toggleBlindMode() {
+  blindMode = !blindMode;
+  try {
+    localStorage.setItem(BLIND_MODE_STORAGE_KEY, blindMode ? '1' : '0');
+  } catch {
+    // 存储不可用时盲棋状态只在本次会话内生效
+  }
+  solidBoardViewer?.setBlindMode(blindMode);
+  render();
+}
+
 function renderPiece(piece) {
   const pixel = toPixel(piece.position);
   const group = svgElement('g', {
@@ -1325,9 +1357,11 @@ function renderPiece(piece) {
     class: `piece-label ${piece.side}`,
     x: 0, y: 7, 'text-anchor': 'middle', 'font-size': 18, 'font-weight': 750
   });
-  label.textContent = pieceSymbol(piece.type);
+  label.textContent = blindMode && !customEditor
+    ? BLIND_MODE_SIDE_LABELS[piece.side]
+    : pieceSymbol(piece.type);
   group.appendChild(label);
-  if (piece.type === 'queen' && piece.portalTurns > 0) {
+  if (!blindMode && piece.type === 'queen' && piece.portalTurns > 0) {
     group.appendChild(svgElement('circle', {
       class: 'portal-charge',
       cx: 18,
@@ -1483,6 +1517,7 @@ function render() {
       : `当前朝上 · ${sideName} · 已换层 ${state.layerExchangeCount ?? state.flipCount ?? 0} 次`;
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
+  blindModeButton.setAttribute('aria-pressed', String(blindMode));
   stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   resetButton.disabled = editing;
@@ -1535,7 +1570,7 @@ function render() {
   turnBadge.classList.toggle('winner-glow', Boolean(state.winner && !editing));
   historyElement.replaceChildren(...state.history.slice().reverse().map(item => {
     const line = document.createElement('li');
-    line.textContent = item;
+    line.textContent = blindMode ? item.replace(/[王后象兵]/g, '棋子') : item;
     return line;
   }));
   if (editing) {
@@ -1563,7 +1598,7 @@ function resetQueenTurnState() {
   queenTurn = null;
 }
 
-function cancelQueenTurn(message = '已取消后的本回合单步路线，棋子回到起点且不消耗回合。') {
+function cancelQueenTurn(message = blindPrompt('已取消后的本回合单步路线，棋子回到起点且不消耗回合。')) {
   if (pendingMoveChoice?.type === 'queen-portal') closeMoveChoice();
   resetQueenTurnState();
   selectedPieceId = null;
@@ -1579,7 +1614,7 @@ function showPortalDetection(autoFinish = false) {
   queenTurn.detecting = true;
   const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
   portalDetectionText.textContent = remaining > 0
-    ? `观察传送后的后：还可走 ${remaining} 步，第3步吃象才正式升沉`
+    ? blindPrompt(`观察传送后的后：还可走 ${remaining} 步，第3步吃象才正式升沉`)
     : '观察传送结果：未吃子也保留出口位置，但不会触发棋盘升沉';
   portalDetection.classList.remove('hidden');
   boardShell.classList.add('portal-detecting');
@@ -1639,14 +1674,14 @@ function updateQueenStepSelection(message = '') {
   selectedMoves = queenStepMoves(state, queenTurn.pieceId, queenTurn);
   const remaining = Math.max(0, 3 - queenTurn.stepsUsed);
   if (remaining > 0 && selectedMoves.size === 0) {
-    cancelQueenTurn('当前分步路线没有可继续的合法动作，后已回到起点且不消耗回合。');
+    cancelQueenTurn(blindPrompt('当前分步路线没有可继续的合法动作，后已回到起点且不消耗回合。'));
     return;
   }
-  selectedInfo.textContent = `后正在分步移动：已走 ${queenTurn.stepsUsed}/3 步，还可走 ${remaining} 步` +
+  selectedInfo.textContent = blindPrompt(`后正在分步移动：已走 ${queenTurn.stepsUsed}/3 步，还可走 ${remaining} 步`) +
     (queenTurn.usedPortal ? ' · 传送检测中' : '');
   boardHelp.textContent = message || (remaining > 0
-    ? `请选择第 ${queenTurn.stepsUsed + 1} 步；后只有第3步可以吃子。`
-    : '后的三步已经完成。');
+    ? blindPrompt(`请选择第 ${queenTurn.stepsUsed + 1} 步；后只有第3步可以吃子。`)
+    : blindPrompt('后的三步已经完成。'));
   if (solidBoardViewer) solidViewerStatus.textContent = boardHelp.textContent;
   render();
 }
@@ -1659,7 +1694,7 @@ function requestQueenPortalChoice() {
   if (!portalMove) return;
   pendingMoveChoice = { type: 'queen-portal', pieceId: queenTurn.pieceId };
   queenStepUndoChoiceButton.classList.toggle('hidden', !queenStepUndoHistory.canUndo);
-  moveChoiceQuestion.textContent = '后已到达传送点。下一步要穿越，还是继续在当前面移动？';
+  moveChoiceQuestion.textContent = blindPrompt('后已到达传送点。下一步要穿越，还是继续在当前面移动？');
 
   const transferButton = document.createElement('button');
   transferButton.type = 'button';
@@ -1800,7 +1835,7 @@ function selectPiece(pieceId) {
   }
   if (animationLock || state.winner || pendingPromotion || pendingMoveChoice) return;
   if (queenTurn && queenTurn.pieceId !== pieceId) {
-    boardHelp.textContent = `后本回合还剩 ${3 - queenTurn.stepsUsed} 步，必须先完成当前三步。`;
+    boardHelp.textContent = blindPrompt(`后本回合还剩 ${3 - queenTurn.stepsUsed} 步，必须先完成当前三步。`);
     return;
   }
   const piece = state.pieces.find(item => item.id === pieceId);
@@ -1823,19 +1858,19 @@ function selectPiece(pieceId) {
     if (selectedMoves.size === 0) {
       resetQueenTurnState();
       selectedPieceId = null;
-      selectedInfo.textContent = '当前后没有可完成的第1步。';
-      boardHelp.textContent = '当前后没有合法的单步起点，请选择其他棋子。';
+      selectedInfo.textContent = blindPrompt('当前后没有可完成的第1步。');
+      boardHelp.textContent = blindPrompt('当前后没有合法的单步起点，请选择其他棋子。');
       render();
       return;
     }
-    selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方后：还可走 3 步`;
-    boardHelp.textContent = '请选择后的第1个单步；只有第3步可以吃子。若后在传送点上，可再次点击自身位置传送。';
+    selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${pieceNameFor(piece)}：还可走 3 步`;
+    boardHelp.textContent = blindPrompt('请选择后的第1个单步；只有第3步可以吃子。若后在传送点上，可再次点击自身位置传送。');
     render();
     return;
   }
   resetQueenTurnState();
   selectedMoves = legalMoves(state, pieceId);
-  selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${PIECE_NAMES[piece.type]}：` +
+  selectedInfo.textContent = `${piece.side === 'white' ? '白' : '黑'}方${pieceNameFor(piece)}：` +
     `${selectedMoves.size} 个合法落点`;
   boardHelp.textContent = '青色为移动，红色为吃子；传送阵上方标当前层、下方标背面或内层。有3/2/1能力的后可选择普通三步路线或彩色传送路线。';
   render();
@@ -2101,9 +2136,11 @@ function chooseMove(move) {
   if (promotionType) {
     pendingPromotion = { pieceId: selectedPieceId, move };
     const nextType = PIECE_NAMES[promotionType];
-    promotionTitle.textContent = `${PIECE_NAMES[mover.type]}吃兵成功`;
-    promotionQuestion.textContent = `是否将这枚${PIECE_NAMES[mover.type]}升级为${nextType}？`;
-    promoteButton.textContent = `升级为${nextType}`;
+    promotionTitle.textContent = blindMode ? '吃子成功' : `${pieceNameFor(mover)}吃兵成功`;
+    promotionQuestion.textContent = blindMode
+      ? '是否升级？'
+      : `是否将这枚${pieceNameFor(mover)}升级为${nextType}？`;
+    promoteButton.textContent = blindMode ? '升级' : `升级为${nextType}`;
     promotionModal.classList.remove('hidden');
     return;
   }
@@ -2234,9 +2271,9 @@ function simulationActionLabel(action, mover, prefix = '即将执行') {
   const from = keyOf(mover.position);
   const target = keyOf(action.move.target);
   const operation = captured
-    ? `从 ${from} 攻击 ${target} 的${captured.side === 'white' ? '白方' : '黑方'}${PIECE_NAMES[captured.type]}`
+    ? `从 ${from} 攻击 ${target} 的${captured.side === 'white' ? '白方' : '黑方'}${pieceNameFor(captured)}`
     : `从 ${from} 移动到 ${target}`;
-  return `${prefix}：${side}${PIECE_NAMES[mover.type]}${operation}`;
+  return `${prefix}：${side}${pieceNameFor(mover)}${operation}`;
 }
 
 function previewSimulationAction(action, mover, prefix) {
@@ -3275,6 +3312,7 @@ async function simulateStep() {
 resetButton.addEventListener('click', resetGame);
 toggleEditorPanelButton.addEventListener('click', toggleEditorPanel);
 rulesToggleButton.addEventListener('click', toggleRulesCard);
+blindModeButton.addEventListener('click', toggleBlindMode);
 undoButton.addEventListener('click', undoLastMove);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);
@@ -3346,7 +3384,7 @@ svg.addEventListener('click', () => {
     return;
   }
   if (queenTurn) {
-    boardHelp.textContent = `后本回合还剩 ${Math.max(0, 3 - queenTurn.stepsUsed)} 步；请完成三步，或在传送检测时点击“结束检测”。`;
+    boardHelp.textContent = blindPrompt(`后本回合还剩 ${Math.max(0, 3 - queenTurn.stepsUsed)} 步；请完成三步，或在传送检测时点击“结束检测”。`);
     return;
   }
   selectedPieceId = null;
@@ -3367,5 +3405,6 @@ document.addEventListener('keydown', event => {
 });
 
 drawStaticBoard();
+blindMode = loadBlindModePreference();
 render();
 initializeLayoutLibrary();
