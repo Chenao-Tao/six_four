@@ -12,7 +12,7 @@ import {
 } from './solid-geometry.js?v=solid-geometry-2';
 
 const PIECE_SYMBOLS = { king: '王', queen: '后', bishop: '象', pawn: '兵' };
-export const BLIND_MODE_SIDE_LABELS = { white: '恒', black: '秦' };
+export const BLIND_MODE_SIDE_LABELS = { white: '衡', black: '秦' };
 const EPSILON = 1e-9;
 const EFFECT_DURATIONS = { rotate: 720, flip: 780, swap: 900 };
 
