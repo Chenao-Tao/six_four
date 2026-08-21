@@ -102,6 +102,10 @@ const undoButton = document.getElementById('undoButton');
 const customizeButton = document.getElementById('customizeButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
 const customEditorControls = document.getElementById('customEditorControls');
+const editorPanelBody = document.getElementById('editorPanelBody');
+const toggleEditorPanelButton = document.getElementById('toggleEditorPanelButton');
+const rulesToggleButton = document.getElementById('rulesToggleButton');
+const rulesBody = document.getElementById('rulesBody');
 const flatLayoutLibrary = document.getElementById('flatLayoutLibrary');
 const solidLayoutLibrary = document.getElementById('solidLayoutLibrary');
 const editorStatus = document.getElementById('editorStatus');
@@ -1426,6 +1430,17 @@ function renderMoves() {
     });
     targetLayer.appendChild(target);
   });
+}
+
+function toggleEditorPanel() {
+  const collapsed = editorPanelBody.classList.toggle('hidden');
+  toggleEditorPanelButton.setAttribute('aria-expanded', String(!collapsed));
+  toggleEditorPanelButton.textContent = collapsed ? '展开' : '收起';
+}
+
+function toggleRulesCard() {
+  const collapsed = rulesBody.classList.toggle('hidden');
+  rulesToggleButton.setAttribute('aria-expanded', String(!collapsed));
 }
 
 function render() {
@@ -3258,6 +3273,8 @@ async function simulateStep() {
 }
 
 resetButton.addEventListener('click', resetGame);
+toggleEditorPanelButton.addEventListener('click', toggleEditorPanel);
+rulesToggleButton.addEventListener('click', toggleRulesCard);
 undoButton.addEventListener('click', undoLastMove);
 previewButton.addEventListener('click', toggleFacePreview);
 stepButton.addEventListener('click', simulateStep);

@@ -178,6 +178,15 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .solid-panel-selection.hidden, .solid-panel-actions.hidden, #solidCustomizeButton.hidden, #solidStepButton.hidden, #solidAutoButton.hidden, #resetSolidGameButton.hidden, #saveSolidCustomButton.hidden, #closeSolidViewButton.hidden { display: none; }
 .editor-controls { margin-top: 12px; padding: 12px; border: 1px solid rgba(97,231,255,.25); border-radius: 12px; background: rgba(11,27,38,.86); }
 .editor-controls.hidden { display: none; }
+.editor-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding-bottom: 9px; border-bottom: 1px solid rgba(97,231,255,.18); }
+.editor-panel-title { color: var(--cyan); font-size: 13px; font-weight: 750; }
+.editor-panel-header button { padding: 4px 10px; font-size: 12px; }
+.editor-panel-body.hidden { display: none; }
+.rules-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin-bottom: 10px; padding: 0; color: #eaf2f8; border: 0; border-radius: 0; background: none; font-size: 16px; font-weight: 700; text-align: left; }
+.rules-toggle:hover { border: 0; color: var(--cyan); }
+.rules-toggle-icon { display: inline-block; color: var(--gold); font-size: 12px; transition: transform .18s ease; }
+.rules-toggle[aria-expanded="false"] .rules-toggle-icon { transform: rotate(-90deg); }
+.rules-body.hidden { display: none; }
 .editor-status { margin-bottom: 10px; color: var(--cyan); font-size: 13px; font-weight: 700; }
 .editor-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .editor-modes button.active { color: #071015; background: var(--cyan); }

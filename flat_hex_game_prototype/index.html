@@ -96,69 +96,79 @@
           </div>
           <div class="active-layout" id="activeLayoutStatus">当前启用布局：默认布局</div>
           <div class="editor-controls hidden" id="customEditorControls">
-            <div class="editor-status" id="editorStatus">正在编辑 A 面</div>
-            <div class="board-shape-control">
-              <span>编辑结构</span>
-              <div class="editor-modes" role="group" aria-label="棋盘保存形态">
-                <button id="flatShapeButton" class="active" aria-pressed="true">平面棋盘</button>
-                <button id="solidShapeButton" aria-pressed="false">立体棋盘</button>
+            <div class="editor-panel-header">
+              <span class="editor-panel-title">棋盘编辑</span>
+              <button type="button" id="toggleEditorPanelButton" aria-expanded="true" title="收起后露出更大棋盘视野">收起</button>
+            </div>
+            <div class="editor-panel-body" id="editorPanelBody">
+              <div class="editor-status" id="editorStatus">正在编辑 A 面</div>
+              <div class="board-shape-control">
+                <span>编辑结构</span>
+                <div class="editor-modes" role="group" aria-label="棋盘保存形态">
+                  <button id="flatShapeButton" class="active" aria-pressed="true">平面棋盘</button>
+                  <button id="solidShapeButton" aria-pressed="false">立体棋盘</button>
+                </div>
               </div>
-            </div>
-            <div class="editor-modes" role="group" aria-label="编辑工具">
-              <button id="pieceModeButton" class="active" aria-pressed="true">棋子摆放</button>
-              <button id="panelModeButton" aria-pressed="false">板块拆装</button>
-              <button id="portalModeButton" aria-pressed="false">传送阵</button>
-            </div>
-            <div class="panel-editor-actions hidden" id="panelEditorActions">
-              <div class="panel-selection" id="panelSelection">请选择一块三角板</div>
+              <div class="editor-modes" role="group" aria-label="编辑工具">
+                <button id="pieceModeButton" class="active" aria-pressed="true">棋子摆放</button>
+                <button id="panelModeButton" aria-pressed="false">板块拆装</button>
+                <button id="portalModeButton" aria-pressed="false">传送阵</button>
+              </div>
+              <div class="panel-editor-actions hidden" id="panelEditorActions">
+                <div class="panel-selection" id="panelSelection">请选择一块三角板</div>
+                <div class="buttons">
+                  <button id="rotateSelectedPanelButton" disabled>旋转120°</button>
+                  <button id="flipSelectedPanelButton" disabled>垂直镜像翻面</button>
+                  <button id="swapSelectedPanelButton" disabled>与另一块交换</button>
+                </div>
+              </div>
+              <div class="layout-library" id="flatLayoutLibrary">
+                <label for="layoutNameInput">平面布局存档（包含棋子）</label>
+                <div class="layout-save-row">
+                  <input id="layoutNameInput" maxlength="40" placeholder="输入布局名称">
+                  <button id="newFlatLayoutButton">新建布局</button>
+                  <button id="saveLayoutButton" title="可以保存尚未摆完棋子的编辑进度">保存平面布局</button>
+                </div>
+                <div class="layout-save-row">
+                  <select id="savedLayoutSelect" aria-label="已保存布局">
+                    <option value="">暂无已保存布局</option>
+                  </select>
+                  <button id="loadLayoutButton" disabled>载入编辑</button>
+                  <button id="activateLayoutButton" disabled>启用</button>
+                  <button id="deleteLayoutButton" disabled>删除</button>
+                </div>
+              </div>
+              <div class="layout-library" id="solidLayoutLibrary">
+                <label for="solidLayoutNameInput">立体装配结构（每个平面方案自动生成待组装入口）</label>
+                <div class="layout-save-row">
+                  <input id="solidLayoutNameInput" maxlength="40" placeholder="请先载入同名平面方案" readonly>
+                  <button id="saveSolidLayoutButton">保存立体布局</button>
+                </div>
+                <div class="layout-save-row">
+                  <select id="savedSolidLayoutSelect" aria-label="立体布局与待组装入口">
+                    <option value="">暂无可装配的立体布局</option>
+                  </select>
+                  <button id="loadSolidLayoutButton" disabled>载入装配</button>
+                  <button id="activateSolidLayoutButton" disabled>启用</button>
+                  <button id="deleteSolidLayoutButton" disabled>删除</button>
+                </div>
+              </div>
               <div class="buttons">
-                <button id="rotateSelectedPanelButton" disabled>旋转120°</button>
-                <button id="flipSelectedPanelButton" disabled>垂直镜像翻面</button>
-                <button id="swapSelectedPanelButton" disabled>与另一块交换</button>
+                <button id="switchEditorFaceButton">切换到 B 面</button>
+                <button id="clearEditorFaceButton">清空当前面</button>
+                <button id="saveCustomButton" class="primary">保存并开局</button>
+                <button id="cancelCustomButton">取消</button>
               </div>
-            </div>
-            <div class="layout-library" id="flatLayoutLibrary">
-              <label for="layoutNameInput">平面布局存档（包含棋子）</label>
-              <div class="layout-save-row">
-                <input id="layoutNameInput" maxlength="40" placeholder="输入布局名称">
-                <button id="newFlatLayoutButton">新建布局</button>
-                <button id="saveLayoutButton" title="可以保存尚未摆完棋子的编辑进度">保存平面布局</button>
-              </div>
-              <div class="layout-save-row">
-                <select id="savedLayoutSelect" aria-label="已保存布局">
-                  <option value="">暂无已保存布局</option>
-                </select>
-                <button id="loadLayoutButton" disabled>载入编辑</button>
-                <button id="activateLayoutButton" disabled>启用</button>
-                <button id="deleteLayoutButton" disabled>删除</button>
-              </div>
-            </div>
-            <div class="layout-library" id="solidLayoutLibrary">
-              <label for="solidLayoutNameInput">立体装配结构（每个平面方案自动生成待组装入口）</label>
-              <div class="layout-save-row">
-                <input id="solidLayoutNameInput" maxlength="40" placeholder="请先载入同名平面方案" readonly>
-                <button id="saveSolidLayoutButton">保存立体布局</button>
-              </div>
-              <div class="layout-save-row">
-                <select id="savedSolidLayoutSelect" aria-label="立体布局与待组装入口">
-                  <option value="">暂无可装配的立体布局</option>
-                </select>
-                <button id="loadSolidLayoutButton" disabled>载入装配</button>
-                <button id="activateSolidLayoutButton" disabled>启用</button>
-                <button id="deleteSolidLayoutButton" disabled>删除</button>
-              </div>
-            </div>
-            <div class="buttons">
-              <button id="switchEditorFaceButton">切换到 B 面</button>
-              <button id="clearEditorFaceButton">清空当前面</button>
-              <button id="saveCustomButton" class="primary">保存并开局</button>
-              <button id="cancelCustomButton">取消</button>
             </div>
           </div>
           <div class="selected" id="selectedInfo">尚未选择棋子</div>
         </section>
         <section class="card rules">
-          <h2>本版可执行定义</h2>
+          <button type="button" class="rules-toggle" id="rulesToggleButton" aria-expanded="true" title="收起规则说明">
+            <span>本版可执行定义</span>
+            <span class="rules-toggle-icon" aria-hidden="true">▾</span>
+          </button>
+          <div class="rules-body" id="rulesBody">
           <ul>
             <li><b>王</b>：普通移动只在六边形或立体图形的相邻顶点间沿棱进行，路径上的棋子不能阻挡；也可攻击表面相邻一格内的敌方后。</li>
             <li><b>皇后</b>：每回合分3次单步操作，每次移动1格，系统持续提示剩余步数；可转向、不能穿子，也可消耗一步原路返回或重复经过同一点。只有第3步可以吃子。</li>
@@ -174,6 +184,7 @@
             <li><b>板块拆装</b>：三角板旋转120°时板上的棋子跟随旋转；也可单独翻面或选择两块板交换位置，另一面同步更新。</li>
             <li><b>布局存储</b>：本地服务保存到项目文件，静态部署时自动保存在当前浏览器。每个方案按同一名称保存平面、立体两种独立结构；平面结构保存三角板与棋子位置，立体结构只保存装配方式，并实时读取同名平面棋子。切换棋盘形态时只显示当前形态的存档区。“载入编辑/载入装配”载入当前结构；“启用”覆盖当前结构并设为重开起点，但不改变当前棋局。</li>
           </ul>
+          </div>
         </section>
         <section class="card history-card">
           <h2>算法步骤</h2>

@@ -745,3 +745,20 @@ test('立体装配的旋转和翻面操作会触发对应特效', () => {
   assert.match(app, /playEffect\('rotate', \[solidSelectedPanel\]\)/);
   assert.match(app, /playEffect\('flip', \[solidSelectedPanel\]\)/);
 });
+
+test('编辑面板与规则说明卡片支持收起展开', () => {
+  assert.match(html, /id="toggleEditorPanelButton"[^>]*>收起</);
+  assert.match(html, /id="editorPanelBody"/);
+  assert.match(html, /id="rulesToggleButton"[^>]*aria-expanded="true"/);
+  assert.match(html, /id="rulesBody"/);
+  assert.match(app, /function toggleEditorPanel\(\)/);
+  assert.match(app, /function toggleRulesCard\(\)/);
+  assert.match(app, /toggleEditorPanelButton\.addEventListener\('click', toggleEditorPanel\)/);
+  assert.match(app, /rulesToggleButton\.addEventListener\('click', toggleRulesCard\)/);
+  assert.match(app, /editorPanelBody\.classList\.toggle\('hidden'\)/);
+  assert.match(app, /toggleEditorPanelButton\.textContent = collapsed \? '展开' : '收起';/);
+  assert.match(app, /rulesBody\.classList\.toggle\('hidden'\)/);
+  assert.match(styles, /\.editor-panel-body\.hidden \{ display: none; \}/);
+  assert.match(styles, /\.rules-body\.hidden \{ display: none; \}/);
+  assert.match(styles, /\.rules-toggle\[aria-expanded="false"\] \.rules-toggle-icon \{ transform: rotate\(-90deg\); \}/);
+});
