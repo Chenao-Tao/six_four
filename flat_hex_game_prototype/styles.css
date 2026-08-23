@@ -98,6 +98,7 @@ h2 { margin-bottom: 12px; font-size: 16px; }
   .portal-detection-iris { animation: none; }
   .portal-detection-eye::before,
   .portal-detection-eye::after { animation-duration: 7s; }
+  .bless-crown, .bless-crown-path, .bless-crown-flash { animation-duration: .2s; }
 }
 aside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { padding: 16px; }
@@ -277,6 +278,15 @@ button:disabled:hover { border-color: rgba(255,255,255,.16); }
 .move-choice-options button { width: 100%; text-align: left; }
 .move-choice-options .portal-move-choice { border-color: #c384ff; box-shadow: inset 3px 0 #c384ff; }
 .move-choice-options .ordinary-move-choice { border-color: #54d7c2; box-shadow: inset 3px 0 #54d7c2; }
+.blessing-options { display: grid; gap: 8px; margin-top: 16px; }
+.blessing-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #3f5a70; border-radius: 8px; background: #0e151e; color: #dce8f2; }
+.blessing-option input { accent-color: #ffbe55; }
+.bless-crown { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: bless-crown-appear .7s ease-out both; }
+.bless-crown-path { fill: #ffc96a; stroke: #fff3c2; stroke-width: 2.5; stroke-linejoin: round; filter: drop-shadow(0 0 8px rgba(255,201,106,.95)) drop-shadow(0 2px 3px rgba(0,0,0,.6)); animation: bless-crown-path-flash 1s ease-in-out both; }
+.bless-crown-flash { fill: none; stroke: rgba(255,214,122,.8); stroke-width: 3; animation: bless-crown-flash 1s ease-out both; }
+@keyframes bless-crown-appear { from { opacity: 0; transform: translateY(-5px) scale(.45); } 45% { opacity: 1; transform: translateY(1px) scale(1.12); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes bless-crown-path-flash { 0%, 28%, 56%, 84% { opacity: 1; } 14%, 42%, 70% { opacity: .25; } 100% { opacity: 1; } }
+@keyframes bless-crown-flash { from { opacity: .95; transform: scale(.4); } 60% { opacity: .45; } to { opacity: 0; transform: scale(1.8); } }
 .piece-editor-card { width: min(480px, calc(100vw - 32px)); }
 .piece-editor-card p { color: #aebfce; line-height: 1.5; }
 .piece-palette { display: grid; gap: 10px; margin: 16px 0; }

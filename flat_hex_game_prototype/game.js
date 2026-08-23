@@ -23,6 +23,9 @@ export const PIECE_NAMES = {
   king: '王', queen: '皇后', bishop: '象', pawn: '兵'
 };
 
+export const BLESS_CHARGES_PER_KING = 3;
+export const BLESS_UPGRADES = Object.freeze({ pawn: 'bishop', bishop: 'queen' });
+
 export function keyOf(point) {
   return `${point.q},${point.r}`;
 }
@@ -822,6 +825,8 @@ function doubleSidedState(frontPieces, backPieces, extra = {}) {
     boardFaceLabels: cloneFaceLabels(),
     boardPanelRotations: clonePanelRotations(),
     portalPairs: clonePortalPairs(),
+    blessCharges: { white: BLESS_CHARGES_PER_KING, black: BLESS_CHARGES_PER_KING },
+    blessedPieceIds: [],
     pieces: boardStates.front,
     ...extra
   };
@@ -847,7 +852,11 @@ export function positionSignature(state) {
       .map(endpoint => `${endpoint.faceLabel}${endpoint.pointNumber}`)
       .join('>')}`)
     .join('|');
-  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${portals}:${position}`;
+  const blessingCounts = state.blessCharges
+    ? `${state.blessCharges.white ?? BLESS_CHARGES_PER_KING}:${state.blessCharges.black ?? BLESS_CHARGES_PER_KING}`
+    : `${BLESS_CHARGES_PER_KING}:${BLESS_CHARGES_PER_KING}`;
+  const blessing = `${blessingCounts}:${(state.blessedPieceIds ?? []).slice().sort().join(',')}`;
+  return `${faceSides}:${state.turn}:${state.winner ?? '-'}:${portals}:${blessing}:${position}`;
 }
 
 function withInitialPositionHistory(state) {
@@ -1180,6 +1189,90 @@ function occupants(state) {
     boardPointKey(state, item.position, piecePanelIndex(item)),
     item
   ]));
+}
+
+export function blessingChargesForSide(state, side) {
+  const charges = state?.blessCharges?.[side];
+  return Number.isFinite(charges) ? Math.max(0, Math.floor(charges)) : BLESS_CHARGES_PER_KING;
+}
+
+export function blessingUpgradeFor(type) {
+  return BLESS_UPGRADES[type] ?? null;
+}
+
+export function blessingEligiblePieces(state, kingId) {
+  if (state.winner) return [];
+  const king = state.pieces.find(item => item.id === kingId);
+  if (!king || king.type !== 'king' || king.side !== state.turn) return [];
+  if (blessingChargesForSide(state, king.side) <= 0) return [];
+  if ((state.blessedPieceIds?.length ?? 0) > 0) return [];
+  const adjacentKeys = new Set(
+    stepTransitions(state, king.position, piecePanelIndex(king)).map(item => item.pointKey)
+  );
+  const alreadyBlessed = new Set(state.blessedPieceIds ?? []);
+  return state.pieces.filter(item => {
+    if (item.id === king.id || item.side !== king.side || !blessingUpgradeFor(item.type)) return false;
+    if (alreadyBlessed.has(item.id)) return false;
+    const pointKey = boardPointKey(state, item.position, piecePanelIndex(item));
+    return Boolean(pointKey) && adjacentKeys.has(pointKey);
+  });
+}
+
+export function applyBlessing(state, kingId, pieceIds = [], recordHistory = true) {
+  const king = state.pieces.find(item => item.id === kingId);
+  if (!king || king.type !== 'king' || king.side !== state.turn) {
+    return { state, error: '只有当前行动方的王可以发动加持' };
+  }
+  const eligible = blessingEligiblePieces(state, kingId);
+  if (!eligible.length) return { state, error: '当前没有可加持的棋子' };
+  const ids = Array.from(new Set(Array.isArray(pieceIds) ? pieceIds : []));
+  if (!ids.length) return { state, error: '请选择至少一枚可加持棋子' };
+  if (ids.some(id => !eligible.some(item => item.id === id))) {
+    return { state, error: '加持目标必须是王身边一格内且尚未加持的己方象或兵' };
+  }
+  const charges = blessingChargesForSide(state, king.side);
+  if (ids.length > charges) {
+    return { state, error: `王加持机会不足，剩余 ${charges} 次` };
+  }
+  const blessed = [];
+  const nextActivePieces = state.pieces.map(item => {
+    if (!ids.includes(item.id)) return { ...item, position: { ...item.position } };
+    const upgrade = blessingUpgradeFor(item.type);
+    if (!upgrade) return { ...item, position: { ...item.position } };
+    blessed.push({ id: item.id, from: item.type, to: upgrade, position: keyOf(item.position) });
+    const nextPiece = { ...item, type: upgrade, position: { ...item.position } };
+    if (upgrade === 'queen') delete nextPiece.portalTurns;
+    return nextPiece;
+  });
+  const nextState = {
+    ...state,
+    pieces: nextActivePieces,
+    blessCharges: {
+      ...(state.blessCharges ?? {
+        white: BLESS_CHARGES_PER_KING,
+        black: BLESS_CHARGES_PER_KING
+      }),
+      [king.side]: Math.max(0, charges - ids.length)
+    },
+    blessedPieceIds: Array.from(new Set([...(state.blessedPieceIds ?? []), ...ids]))
+  };
+  if (state.boardStates) {
+    nextState.boardStates = {
+      ...state.boardStates,
+      [state.boardSide ?? 'front']: nextActivePieces
+    };
+  }
+  if (state.solidLayers) {
+    nextState.solidLayers = { ...state.solidLayers, outer: nextActivePieces };
+  }
+  const description = `${king.side === 'white' ? '白' : '黑'}方王加持：` +
+    blessed.map(item => `${PIECE_NAMES[item.from]} ${item.position} 升级为${PIECE_NAMES[item.to]}`).join('、');
+  nextState.history = recordHistory
+    ? [...state.history, description]
+    : state.history;
+  const previousPositions = state.positionHistory ?? [positionSignature(state)];
+  nextState.positionHistory = [...previousPositions.slice(-11), positionSignature(nextState)];
+  return { state: nextState, blessed };
 }
 
 function canCapture(attackerType, defenderType) {
@@ -1934,7 +2027,12 @@ function moveForTarget(moves, target) {
   return moves.get(keyOf(target)) ?? [...moves.values()].find(move => pointsEqual(move.target, target));
 }
 
-export function applyMove(state, pieceId, target, promote = false, recordHistory = true) {
+export function applyMove(state, pieceId, target, promote = false, recordHistory = true, blessing = null) {
+  if (blessing) {
+    const blessed = applyBlessing(state, blessing.kingId, blessing.pieceIds, recordHistory);
+    if (blessed.error) return { state, error: blessed.error };
+    state = blessed.state;
+  }
   const moves = legalMoves(state, pieceId);
   const move = moveForTarget(moves, target);
   if (!move) return { state, error: '非法移动' };
@@ -2093,6 +2191,7 @@ export function applyMove(state, pieceId, target, promote = false, recordHistory
     turn: nextTurn,
     winner: nextWinner,
     moveNumber: state.moveNumber + 1,
+    blessedPieceIds: [],
     boardSide: nextBoardSide,
     flipCount: (state.flipCount ?? 0) + (shouldExchangeLayers ? 1 : 0),
     layerExchangeCount: (state.layerExchangeCount ?? state.flipCount ?? 0) +
@@ -2134,15 +2233,42 @@ export function allLegalActions(state) {
   return actions;
 }
 
-function actionVariants(state) {
-  return allLegalActions(state).flatMap(action => {
-    if (!promotionTypeForMove(state, action.pieceId, action.move)) {
-      return [{ ...action, promote: false }];
+function blessingOptionsForState(state) {
+  const king = state.pieces.find(item => item.type === 'king' && item.side === state.turn);
+  if (!king) return [null];
+  const eligible = blessingEligiblePieces(state, king.id);
+  if (!eligible.length) return [null];
+  const charges = blessingChargesForSide(state, king.side);
+  const maxCount = Math.min(BLESS_CHARGES_PER_KING, charges, eligible.length);
+  if (maxCount < 1) return [null];
+  const ids = eligible.map(item => item.id);
+  const options = [null];
+  const enumerate = (start, selected) => {
+    if (selected.length > 0) options.push({ kingId: king.id, pieceIds: [...selected] });
+    if (selected.length === maxCount) return;
+    for (let index = start; index < ids.length; index += 1) {
+      enumerate(index + 1, [...selected, ids[index]]);
     }
-    return [
-      { ...action, promote: false },
-      { ...action, promote: true }
-    ];
+  };
+  enumerate(0, []);
+  return options;
+}
+
+function actionVariants(state) {
+  return blessingOptionsForState(state).flatMap(blessing => {
+    const blessedState = blessing
+      ? applyBlessing(state, blessing.kingId, blessing.pieceIds, false).state
+      : state;
+    return allLegalActions(blessedState).flatMap(action => {
+      const base = { ...action, bless: blessing };
+      if (!promotionTypeForMove(blessedState, action.pieceId, action.move)) {
+        return [{ ...base, promote: false }];
+      }
+      return [
+        { ...base, promote: false },
+        { ...base, promote: true }
+      ];
+    });
   });
 }
 
@@ -2240,7 +2366,10 @@ function actionKey(action) {
     ? `${action.move.portalTransition.entry.layer}:${action.move.portalTransition.entry.pointKey}>` +
       `${action.move.portalTransition.exit.layer}:${action.move.portalTransition.exit.pointKey}`
     : '-';
-  return `${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${transition}:${route}:${action.promote}`;
+  const blessingKey = action.bless
+    ? `${action.bless.kingId}:${action.bless.pieceIds.join(',')}`
+    : 'plain';
+  return `${blessingKey}|${action.pieceId}:${action.move.mapKey ?? keyOf(action.move.target)}:${panel}:${transition}:${route}:${action.promote}`;
 }
 
 function orderedActions(state) {
@@ -2266,7 +2395,8 @@ function repetitionAwareActions(state) {
       action.pieceId,
       actionTarget(action),
       action.promote,
-      false
+      false,
+      action.bless
     );
     return { action, result, repetitionCount: priorRepetitionCount(result.state) };
   }).sort((left, right) => left.repetitionCount - right.repetitionCount);
@@ -2474,7 +2604,8 @@ function principalVariation(state, rootAction, searchDepth, context) {
       currentAction.pieceId,
       actionTarget(currentAction),
       currentAction.promote,
-      false
+      false,
+      currentAction.bless
     );
     currentState = applied.state;
     const entry = context.transpositionTable.get(tableKey(currentState, ply + 1));

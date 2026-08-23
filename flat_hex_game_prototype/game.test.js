@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   BOARD_FACE_LABELS,
+  applyBlessing,
   applyMove,
+  blessingChargesForSide,
+  blessingEligiblePieces,
+  blessingUpgradeFor,
   captureMoveForClickedPiece,
   chooseSimulationAction,
   createCaptureDemoState,
@@ -22,10 +26,15 @@ import {
   promotionTypeForMove,
   rotateBoardPanel,
   solidEdgeKey,
+  solidSurfaceGraph,
   stepwiseGameSearch,
   swapBoardPanels,
   verticalMirrorPanelIndex
 } from './game.js';
+import {
+  normalizeSolidGeometry,
+  TETRAHEDRON_SOLID_GEOMETRY_TYPE
+} from './solid-geometry.js';
 
 function stateOf(pieces, turn = 'white') {
   return {
@@ -1985,4 +1994,159 @@ test('交换两块实体板时板上的棋子随板换位', () => {
   assert.deepEqual(result.boardStates.front.find(item => item.id === 'first').position, { q: -1, r: 2 });
   assert.deepEqual(result.boardStates.front.find(item => item.id === 'second').position, { q: 1, r: 1 });
   assert.deepEqual(result.boardStates.front.map(item => item.id).sort(), ['first', 'second']);
+});
+
+test('王只能加持身边一格的己方象或兵且后不可加持', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 3, 1),
+    piece('wB', 'white', 'bishop', 3, 0),
+    piece('wQ', 'white', 'queen', 4, -1),
+    piece('bP', 'black', 'pawn', 2, 1)
+  ]);
+
+  const eligible = blessingEligiblePieces(state, 'wK').map(item => item.id).sort();
+  assert.deepEqual(eligible, ['wB', 'wP']);
+  assert.equal(blessingUpgradeFor('pawn'), 'bishop');
+  assert.equal(blessingUpgradeFor('bishop'), 'queen');
+  assert.equal(blessingUpgradeFor('queen'), null);
+});
+
+test('一次加持多枚棋子时每枚各消耗一次机会且不改变回合', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 3, 1),
+    piece('wB', 'white', 'bishop', 3, 0)
+  ]);
+
+  const result = applyBlessing(state, 'wK', ['wP', 'wB']);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.pieces.find(item => item.id === 'wP').type, 'bishop');
+  assert.equal(result.state.pieces.find(item => item.id === 'wB').type, 'queen');
+  assert.equal(result.state.pieces.find(item => item.id === 'wB').portalTurns, undefined);
+  assert.equal(blessingChargesForSide(result.state, 'white'), 1);
+  assert.deepEqual(result.state.blessedPieceIds.slice().sort(), ['wB', 'wP']);
+  assert.equal(result.state.turn, 'white');
+  assert.equal(result.state.moveNumber, 1);
+  assert.equal(result.state.history.length, 1);
+});
+
+test('同一回合只能发动一次加持且机会不足时拒绝', () => {
+  const state = {
+    ...stateOf([
+      piece('wK', 'white', 'king', 4, 0),
+      piece('wP', 'white', 'pawn', 3, 1),
+      piece('wB', 'white', 'bishop', 3, 0)
+    ]),
+    blessCharges: { white: 1, black: 3 }
+  };
+
+  assert.match(applyBlessing(state, 'wK', ['wP', 'wB']).error, /机会不足/);
+  const blessed = applyBlessing(state, 'wK', ['wP']);
+  assert.equal(blessed.error, undefined);
+  assert.equal(blessingEligiblePieces(blessed.state, 'wK').length, 0);
+  assert.match(applyBlessing(blessed.state, 'wK', ['wB']).error, /当前没有可加持/);
+});
+
+test('加持后本回合仍可走棋且吃兵升级选择保留', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 3, 1),
+    piece('bP', 'black', 'pawn', 2, 0)
+  ]);
+
+  const blessed = applyBlessing(state, 'wK', ['wP']).state;
+  assert.equal(blessed.pieces.find(item => item.id === 'wP').type, 'bishop');
+  const capture = [...legalMoves(blessed, 'wP').values()].find(move => move.captureId === 'bP');
+  assert.ok(capture);
+  assert.equal(promotionTypeForMove(blessed, 'wP', capture), 'queen');
+  const moved = applyMove(blessed, 'wP', capture.target, true);
+  assert.equal(moved.error, undefined);
+  assert.equal(moved.state.pieces.find(item => item.id === 'wP').type, 'queen');
+  assert.deepEqual(moved.state.blessedPieceIds, []);
+});
+
+test('双面棋盘只加持当前活动层的棋子', () => {
+  const state = defaultDoubleSidedState([
+    { ...piece('wK', 'white', 'king', 4, 0), panelIndex: 0 },
+    { ...piece('wP', 'white', 'pawn', 3, 1), panelIndex: 0 }
+  ], [
+    { ...piece('back-wP', 'white', 'pawn', 3, 1), panelIndex: 0 }
+  ]);
+
+  const eligible = blessingEligiblePieces(state, 'wK').map(item => item.id);
+  assert.deepEqual(eligible, ['wP']);
+});
+
+test('立体六面体王可跨相邻面加持身边棋子', () => {
+  const state = solidStateOf([
+    { ...piece('wK', 'white', 'king', 0, 0), panelIndex: 0 },
+    { ...piece('wB', 'white', 'bishop', -1, 1), panelIndex: 1 },
+    { ...piece('wP', 'white', 'pawn', 1, 0), panelIndex: 0 }
+  ]);
+
+  const eligible = blessingEligiblePieces(state, 'wK').map(item => item.id).sort();
+  assert.deepEqual(eligible, ['wB', 'wP']);
+  const result = applyBlessing(state, 'wK', ['wB']);
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.pieces.find(item => item.id === 'wB').type, 'queen');
+  assert.equal(result.state.pieces.find(item => item.id === 'wB').panelIndex, 1);
+});
+
+test('四面体插板王可加持相邻表面棋子', () => {
+  const geometry = normalizeSolidGeometry({ type: TETRAHEDRON_SOLID_GEOMETRY_TYPE });
+  const graph = solidSurfaceGraph(geometry);
+  const kingNode = [...graph.values()].find(node => node.aliases.length >= 3 && node.step.length > 0);
+  const kingAlias = kingNode.aliases[0];
+  const adjacent = kingNode.step[0];
+  const state = {
+    ...stateOf([
+      { ...piece('wK', 'white', 'king', kingAlias.position.q, kingAlias.position.r), panelIndex: kingAlias.panelIndex },
+      { ...piece('wP', 'white', 'pawn', adjacent.position.q, adjacent.position.r), panelIndex: adjacent.panelIndex }
+    ]),
+    boardShape: 'solid',
+    solidGeometry: geometry
+  };
+
+  const eligible = blessingEligiblePieces(state, 'wK');
+  assert.equal(eligible.some(item => item.id === 'wP'), true);
+  const result = applyBlessing(state, 'wK', ['wP']);
+  assert.equal(result.error, undefined);
+  assert.equal(result.state.pieces.find(item => item.id === 'wP').type, 'bishop');
+});
+
+test('每个棋盘形态开局时双王各有三次加持机会', () => {
+  const flat = createInitialState();
+  assert.deepEqual(flat.blessCharges, { white: 3, black: 3 });
+  const solid = createCustomState({
+    front: [{ ...piece('wk', 'white', 'king', 0, 0), panelIndex: 0 }],
+    back: [{ ...piece('bk', 'black', 'king', -4, 0), panelIndex: 2 }]
+  }, undefined, undefined, 'solid');
+  assert.equal(solid.error, undefined);
+  assert.deepEqual(solid.state.blessCharges, { white: 3, black: 3 });
+});
+
+test('加持次数与本回合标记进入局面指纹', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wP', 'white', 'pawn', 3, 1)
+  ]);
+  const before = positionSignature(state);
+  const blessed = applyBlessing(state, 'wK', ['wP']).state;
+  assert.notEqual(positionSignature(blessed), before);
+});
+
+test('AI 搜索会把王加持作为可执行动作并优先选择吃象', () => {
+  const state = stateOf([
+    piece('wK', 'white', 'king', 4, 0),
+    piece('wB', 'white', 'bishop', 3, 0),
+    piece('bB', 'black', 'bishop', 1, 1)
+  ]);
+
+  const action = chooseSimulationAction(state, 1);
+
+  assert.ok(action);
+  assert.equal(action.bless?.pieceIds.includes('wB'), true);
+  assert.equal(action.move.captureId, 'bB');
 });

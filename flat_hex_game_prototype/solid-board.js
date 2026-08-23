@@ -398,6 +398,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
   let operationEffect = null;
   let portalEffect = null;
   let cameraMotion = null;
+  let blessEffect = null;
   let layerExchange = null;
   let blindMode = false;
 
@@ -663,6 +664,68 @@ export function createSolidBoardViewer(canvas, initialModel, {
       portalEffect = null;
       resolve(true);
     }
+  }
+
+  function drawBlessingEffect(renderFaces, now) {
+    if (!blessEffect) return;
+    const frame = solidEffectFrame(blessEffect, now);
+    if (!frame) {
+      const resolve = blessEffect.resolve;
+      blessEffect = null;
+      resolve(true);
+      return;
+    }
+    blessEffect.points.forEach(point => {
+      let mapped;
+      try {
+        [mapped] = mapPiecesToPanels([{
+          id: 'bless-effect',
+          position: point.position,
+          ...(Number.isInteger(point.panelIndex) ? { panelIndex: point.panelIndex } : {})
+        }]);
+      } catch {
+        return;
+      }
+      const face = renderFaces.find(item => item.panelIndex === mapped.panelIndex);
+      if (!face) return;
+      const normal = normalize(cross(
+        subtract(face.vertices[1], face.vertices[0]),
+        subtract(face.vertices[2], face.vertices[0])
+      ));
+      const position = project(add(barycentricPoint(face.vertices, mapped.local), scale(normal, 0.055)),
+        canvas.clientWidth, canvas.clientHeight);
+      drawBlessingCrown(position, frame);
+    });
+  }
+
+  function drawBlessingCrown(position, frame) {
+    const radius = Math.max(12, 17 * position.perspective * zoom);
+    const size = Math.max(15, radius * 1.25);
+    const crownY = position.y - radius * 1.5;
+    context.save();
+    context.shadowColor = `rgba(255, 201, 106, ${0.9 * frame.alpha})`;
+    context.shadowBlur = 10 + frame.pulse * 14;
+    context.beginPath();
+    context.moveTo(position.x - size * 0.72, crownY + size * 0.4);
+    context.lineTo(position.x - size * 0.72, crownY - size * 0.26);
+    context.lineTo(position.x - size * 0.3, crownY + size * 0.08);
+    context.lineTo(position.x, crownY - size * 0.5);
+    context.lineTo(position.x + size * 0.3, crownY + size * 0.08);
+    context.lineTo(position.x + size * 0.72, crownY - size * 0.26);
+    context.lineTo(position.x + size * 0.72, crownY + size * 0.4);
+    context.closePath();
+    context.fillStyle = `rgba(255, 201, 106, ${0.9 * frame.alpha})`;
+    context.fill();
+    context.lineWidth = 2.5;
+    context.strokeStyle = `rgba(255, 243, 194, ${0.95 * frame.alpha})`;
+    context.stroke();
+    context.shadowBlur = 8 + frame.pulse * 8;
+    context.beginPath();
+    context.arc(position.x, crownY, size * (0.52 + frame.pulse * 0.14), 0, Math.PI * 2);
+    context.strokeStyle = `rgba(255, 214, 122, ${0.45 * frame.alpha})`;
+    context.lineWidth = 3;
+    context.stroke();
+    context.restore();
   }
 
   function drawPlannedMove(renderFaces) {
@@ -1126,6 +1189,7 @@ export function createSolidBoardViewer(canvas, initialModel, {
     lastInteractionTargets = interactionTargets;
     drawOperationEffect(renderFaces, now);
     drawPortalEffect(renderFaces, now);
+    drawBlessingEffect(renderFaces, now);
     animationFrame = requestAnimationFrame(render);
   }
 
@@ -1183,6 +1247,8 @@ export function createSolidBoardViewer(canvas, initialModel, {
     layerExchange = null;
     portalEffect?.resolve(false);
     portalEffect = null;
+    blessEffect?.resolve(false);
+    blessEffect = null;
     operationEffect = null;
     cameraMotion = null;
     model = nextModel;
@@ -1265,6 +1331,28 @@ export function createSolidBoardViewer(canvas, initialModel, {
         duration: reducedMotion ? 260 : EFFECT_DURATIONS[type]
       };
       return true;
+    },
+    playBlessing(points) {
+      if (blessEffect) return Promise.resolve(false);
+      const normalized = (Array.isArray(points) ? points : [])
+        .filter(point => point && point.position &&
+          Number.isFinite(point.position.q) && Number.isFinite(point.position.r))
+        .map(point => ({
+          position: { ...point.position },
+          ...(Number.isInteger(point.panelIndex) && point.panelIndex >= 0 && point.panelIndex < 6
+            ? { panelIndex: point.panelIndex }
+            : {})
+        }));
+      if (!normalized.length) return Promise.resolve(false);
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      return new Promise(resolve => {
+        blessEffect = {
+          points: normalized,
+          startedAt: performance.now(),
+          duration: reducedMotion ? 200 : 1000,
+          resolve
+        };
+      });
     },
     playPortalTransition(transition, portalColor = '#d8aaff') {
       if (!transition || portalEffect) return Promise.resolve(false);

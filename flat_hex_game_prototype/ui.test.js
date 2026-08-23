@@ -88,7 +88,7 @@ test('成功落子保存走前状态，非法动作和重新开局不保留撤�
   const saveAndStart = app.match(/async function saveCustomBoard\(\)[\s\S]*?\n}\n\nfunction layoutSnapshotFromEditor/);
 
   assert.ok(commit);
-  assert.match(commit[0], /const previousState = cloneGameState\(state\)/);
+  assert.match(commit[0], /const previousState = pendingBlessing \? null : cloneGameState\(state\)/);
   assert.match(commit[0], /if \(result\.error\)[\s\S]*?return;[\s\S]*?undoHistory\.push\(previousState\)/);
   assert.ok(reset);
   assert.match(reset[0], /undoHistory\.clear\(\)/);
@@ -514,7 +514,7 @@ test('立体棋盘支持选择棋子、显示合法落点并复用现有走棋�
   assert.match(app, /selectedMoves = legalMoves\(state, pieceId\)/);
   assert.match(app, /const move = selectedMoves\.get\(targetKey\)/);
   assert.match(app, /if \(move\) handleSelectedMove\(move\)/);
-  assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote\)/);
+  assert.match(app, /const result = applyMove\(state, pieceId, \{[\s\S]*?panelIndex[\s\S]*?\}, promote, true, blessing\)/);
   assert.match(app, /const renderedTarget = move\.displayTarget \?\? move\.target/);
   assert.match(app, /mapSolidPoint\(renderedTarget, renderedPanelIndex\)/);
   assert.match(app, /visibleFaceSides\.forEach/);
@@ -791,4 +791,29 @@ test('盲棋模式下选中、移动、升级与历史提示不泄露棋子身�
   assert.match(app, /\$\{piece\.side === 'white' \? '白' : '黑'\}方\$\{pieceNameFor\(piece\)\}/);
   assert.match(app, /promotionTitle\.textContent = blindMode \? '吃子成功' :/);
   assert.match(app, /promotionQuestion\.textContent = blindMode[\s\S]*?是否升级？/);
+});
+
+test('王加持入口与弹窗在平面和立体界面均存在', () => {
+  assert.match(html, /id="blessButton"[^>]*>王加持</);
+  assert.match(html, /id="solidBlessButton"[^>]*>王加持</);
+  assert.match(html, /id="blessingModal"/);
+  assert.match(app, /function openBlessingModal\(\)/);
+  assert.match(app, /async function confirmBlessing\(\)/);
+  assert.match(app, /blessButton\.addEventListener\('click', openBlessingModal\)/);
+  assert.match(app, /solidBlessButton\.addEventListener\('click', openBlessingModal\)/);
+});
+
+test('王加持确认时先播放王冠特效再升级', () => {
+  assert.match(app, /async function playBlessingCrown\(pieceIds\)/);
+  assert.match(app, /await playBlessingCrown\(ids\)/);
+  assert.match(app, /playBlessingCrown\(action\.bless\.pieceIds\)/);
+  assert.match(app, /id: 'blessEffectLayer'/);
+  assert.match(app, /document\.getElementById\('blessEffectLayer'\)\.replaceChildren\(\)/);
+  assert.match(solidBoard, /playBlessing\(points\)/);
+  assert.match(solidBoard, /blessEffect\?\.resolve\(false\)/);
+  assert.match(solidBoard, /function drawBlessingEffect\(renderFaces, now\)/);
+  assert.match(styles, /\.bless-crown/);
+  assert.match(styles, /@keyframes bless-crown-appear/);
+  assert.match(app, /setTimeout\(resolve, reducedMotion \? 200 : 1000\)/);
+  assert.match(styles, /@keyframes bless-crown-path-flash/);
 });

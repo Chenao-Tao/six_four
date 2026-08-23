@@ -71,6 +71,7 @@
               <button id="solidAutoButton">连续模拟</button>
               <button id="resetSolidGameButton">重新开局</button>
               <button id="solidUndoButton" disabled>回退一步</button>
+              <button id="solidBlessButton" disabled>王加持</button>
               <button id="saveSolidCustomButton" class="primary">保存立体并开局</button>
               <button id="solidCustomizeButton">自定义棋盘</button>
               <button id="closeSolidViewButton" class="primary">返回保存布局</button>
@@ -89,6 +90,7 @@
           <div class="buttons">
             <button id="resetButton">重新开局</button>
             <button id="undoButton" disabled>回退一步</button>
+            <button id="blessButton" disabled>王加持</button>
             <button id="previewButton" aria-pressed="false">预览背面</button>
             <button id="stepButton">算法演示一步</button>
             <button id="autoButton">连续模拟</button>
@@ -172,6 +174,7 @@
           <div class="rules-body" id="rulesBody">
           <ul>
             <li><b>王</b>：普通移动只在六边形或立体图形的相邻顶点间沿棱进行，路径上的棋子不能阻挡；也可攻击表面相邻一格内的敌方后。</li>
+            <li><b>王加持</b>：每方王每局有3次加持机会，回合开始时可一次加持身边一格内的多枚己方象或兵，每枚消耗一次机会；兵升象、象升后，后不可加持，加持成后的象不获得传送能力，本回合仍正常走棋。</li>
             <li><b>皇后</b>：每回合分3次单步操作，每次移动1格，系统持续提示剩余步数；可转向、不能穿子，也可消耗一步原路返回或重复经过同一点。只有第3步可以吃子。</li>
             <li><b>象</b>：每回合只移动一个菱形长对角线的长度。</li>
             <li><b>兵</b>：沿任意相邻线路移动1格。</li>
@@ -194,6 +197,17 @@
       </aside>
     </section>
   </main>
+  <div class="modal hidden" id="blessingModal">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="blessingTitle">
+      <h2 id="blessingTitle">王加持</h2>
+      <p id="blessingQuestion">请选择王身边一格内要加持的己方象或兵。</p>
+      <div class="blessing-options" id="blessingOptions"></div>
+      <div class="buttons modal-actions">
+        <button id="confirmBlessingButton" disabled>请选择棋子</button>
+        <button id="cancelBlessingButton">取消</button>
+      </div>
+    </div>
+  </div>
   <div class="modal hidden" id="moveChoiceModal">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="moveChoiceTitle">
       <h2 id="moveChoiceTitle">选择移动方式</h2>

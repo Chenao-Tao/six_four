@@ -1,4 +1,5 @@
 import {
+  BLESS_CHARGES_PER_KING,
   BOARD_FACE_LABELS,
   BOARD_PANEL_ROTATIONS,
   BOARD_POINTS,
@@ -8,7 +9,10 @@ import {
   KING_POINTS,
   PIECE_NAMES,
   add,
+  applyBlessing,
   applyMove,
+  blessingChargesForSide,
+  blessingEligiblePieces,
   capturePositionEffect,
   captureMoveForClickedPiece,
   clonePortalPairs,
@@ -93,6 +97,11 @@ const moveChoiceModal = document.getElementById('moveChoiceModal');
 const moveChoiceQuestion = document.getElementById('moveChoiceQuestion');
 const moveChoiceOptions = document.getElementById('moveChoiceOptions');
 const queenStepUndoChoiceButton = document.getElementById('queenStepUndoChoiceButton');
+const blessingModal = document.getElementById('blessingModal');
+const blessingQuestion = document.getElementById('blessingQuestion');
+const blessingOptions = document.getElementById('blessingOptions');
+const confirmBlessingButton = document.getElementById('confirmBlessingButton');
+const cancelBlessingButton = document.getElementById('cancelBlessingButton');
 const boardShell = document.getElementById('boardShell');
 const faceBadge = document.getElementById('faceBadge');
 const previewButton = document.getElementById('previewButton');
@@ -100,6 +109,7 @@ const stepButton = document.getElementById('stepButton');
 const autoButton = document.getElementById('autoButton');
 const resetButton = document.getElementById('resetButton');
 const undoButton = document.getElementById('undoButton');
+const blessButton = document.getElementById('blessButton');
 const customizeButton = document.getElementById('customizeButton');
 const blindModeButton = document.getElementById('blindModeButton');
 const activeLayoutStatus = document.getElementById('activeLayoutStatus');
@@ -153,6 +163,7 @@ const solidStepButton = document.getElementById('solidStepButton');
 const solidAutoButton = document.getElementById('solidAutoButton');
 const resetSolidGameButton = document.getElementById('resetSolidGameButton');
 const solidUndoButton = document.getElementById('solidUndoButton');
+const solidBlessButton = document.getElementById('solidBlessButton');
 const saveSolidCustomButton = document.getElementById('saveSolidCustomButton');
 const closeSolidViewButton = document.getElementById('closeSolidViewButton');
 const solidCustomizeButton = document.getElementById('solidCustomizeButton');
@@ -177,6 +188,7 @@ let selectedPieceId = null;
 let selectedMoves = new Map();
 let pendingPromotion = null;
 let pendingMoveChoice = null;
+let pendingBlessing = null;
 let queenTurn = null;
 let portalDetectionTimer = null;
 let autoTimer = null;
@@ -231,6 +243,13 @@ function cloneGameState(source) {
     ...source,
     history: [...source.history],
     positionHistory: [...(source.positionHistory ?? [])],
+    blessCharges: {
+      ...(source.blessCharges ?? {
+        white: BLESS_CHARGES_PER_KING,
+        black: BLESS_CHARGES_PER_KING
+      })
+    },
+    blessedPieceIds: [...(source.blessedPieceIds ?? [])],
     boardStates,
     ...(solidLayers ? { solidLayers, solidFaceSides: [...source.solidFaceSides] } : {}),
     pieces: solidLayers ? solidLayers.outer : boardStates[source.boardSide],
@@ -510,6 +529,7 @@ function drawStaticBoard() {
   svg.appendChild(svgElement('g', { id: 'portalEffectLayer' }));
   svg.appendChild(svgElement('g', { id: 'movePathLayer' }));
   svg.appendChild(svgElement('g', { id: 'pieceLayer' }));
+  svg.appendChild(svgElement('g', { id: 'blessEffectLayer' }));
   svg.appendChild(svgElement('g', { id: 'moveTargetLayer' }));
   svg.appendChild(svgElement('g', { id: 'editorTargetLayer' }));
   svg.appendChild(svgElement('g', { id: 'panelTargetLayer' }));
@@ -896,6 +916,7 @@ function refreshSolidBoard(message = '') {
   solidCustomizeButton.classList.toggle('hidden', editingSolid);
   resetSolidGameButton.classList.toggle('hidden', editingSolid);
   solidUndoButton.classList.toggle('hidden', editingSolid);
+  solidBlessButton.classList.toggle('hidden', editingSolid);
   solidStepButton.classList.toggle('hidden', editingSolid);
   solidAutoButton.classList.toggle('hidden', editingSolid);
   saveSolidCustomButton.classList.toggle('hidden', !editingSolid);
@@ -904,6 +925,8 @@ function refreshSolidBoard(message = '') {
   solidViewerHelp.textContent = editingSolid
     ? '先选右侧三角板，再点中央空槽安装；已安装的面可点击选中'
     : '点击棋子和落点 · 拖动旋转视角 · 滚轮缩放';
+  solidBlessButton.textContent = blessingButtonLabel();
+  solidBlessButton.disabled = blessingButtonDisabled();
   solidStepButton.disabled = editingSolid || simulationLock || animationLock ||
     Boolean(pendingPromotion || pendingMoveChoice || queenTurn);
   solidAutoButton.disabled = editingSolid || animationLock ||
@@ -1477,6 +1500,141 @@ function toggleRulesCard() {
   rulesToggleButton.setAttribute('aria-expanded', String(!collapsed));
 }
 
+function currentBlessingKing() {
+  if (!state || customEditor || state.winner) return null;
+  return state.pieces.find(item => item.type === 'king' && item.side === state.turn) ?? null;
+}
+
+function blessingButtonDisabled() {
+  if (customEditor || isPreviewing() || animationLock || simulationLock || state.winner) return true;
+  if (pendingPromotion || pendingMoveChoice || queenTurn) return true;
+  const king = currentBlessingKing();
+  return !king || blessingEligiblePieces(state, king.id).length === 0;
+}
+
+function blessingButtonLabel() {
+  const king = currentBlessingKing();
+  const remaining = king ? blessingChargesForSide(state, king.side) : 0;
+  return `王加持（剩 ${remaining} 次）`;
+}
+
+function updateBlessingSelection() {
+  const king = currentBlessingKing();
+  const checkboxes = [...blessingOptions.querySelectorAll('input[type="checkbox"]')];
+  const selectedCount = checkboxes.filter(input => input.checked).length;
+  const maxSelect = king ? Math.min(blessingChargesForSide(state, king.side), checkboxes.length) : 0;
+  confirmBlessingButton.textContent = selectedCount
+    ? `加持选中棋子（消耗 ${selectedCount} 次机会）`
+    : '请选择棋子';
+  confirmBlessingButton.disabled = selectedCount === 0;
+  checkboxes.forEach(input => {
+    input.disabled = !input.checked && selectedCount >= maxSelect;
+  });
+}
+
+function openBlessingModal() {
+  if (customEditor || isPreviewing() || animationLock || simulationLock || state.winner) return;
+  if (pendingPromotion || pendingMoveChoice || queenTurn) return;
+  const king = currentBlessingKing();
+  if (!king) return;
+  const eligible = blessingEligiblePieces(state, king.id);
+  if (!eligible.length) return;
+  selectedPieceId = null;
+  selectedMoves = new Map();
+  simulationPreview = null;
+  const remaining = blessingChargesForSide(state, king.side);
+  blessingQuestion.textContent = blindPrompt(
+    `请选择王身边一格内要加持的己方象或兵；剩余 ${remaining} 次机会，每枚棋子消耗一次。`
+  );
+  blessingOptions.replaceChildren(...eligible.map(piece => {
+    const label = document.createElement('label');
+    label.className = 'blessing-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.pieceId = piece.id;
+    checkbox.addEventListener('change', updateBlessingSelection);
+    const name = document.createElement('span');
+    name.textContent = `${pieceNameFor(piece)} ${keyOf(piece.position)}`;
+    label.append(checkbox, name);
+    return label;
+  }));
+  updateBlessingSelection();
+  blessingModal.classList.remove('hidden');
+}
+
+function closeBlessingModal() {
+  blessingModal.classList.add('hidden');
+  blessingOptions.replaceChildren();
+}
+
+async function playBlessingCrown(pieceIds) {
+  if (solidBoardViewer) {
+    const points = pieceIds
+      .map(id => displayedPieces().find(piece => piece.id === id))
+      .filter(Boolean)
+      .map(piece => ({
+        position: { ...piece.position },
+        ...(Number.isInteger(piece.panelIndex) ? { panelIndex: piece.panelIndex } : {})
+      }));
+    return solidBoardViewer.playBlessing(points);
+  }
+  const effectLayer = document.getElementById('blessEffectLayer');
+  effectLayer.replaceChildren(...pieceIds
+    .map(id => displayedPieces().find(piece => piece.id === id))
+    .filter(Boolean)
+    .map(piece => {
+      const pixel = toPixel(piece.position);
+      const group = svgElement('g', { transform: `translate(${pixel.x} ${pixel.y - 34})` });
+      const crown = svgElement('g', { class: 'bless-crown' });
+      crown.appendChild(svgElement('path', {
+        class: 'bless-crown-path',
+        d: 'M -17 9 L -17 -7 L -8 1 L 0 -13 L 8 1 L 17 -7 L 17 9 Z'
+      }));
+      crown.appendChild(svgElement('circle', {
+        class: 'bless-crown-flash',
+        cx: 0,
+        cy: 0,
+        r: 26
+      }));
+      group.appendChild(crown);
+      return group;
+    }));
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  await new Promise(resolve => setTimeout(resolve, reducedMotion ? 200 : 1000));
+  effectLayer.replaceChildren();
+  return true;
+}
+
+async function confirmBlessing() {
+  const king = currentBlessingKing();
+  if (!king) return;
+  const ids = [...blessingOptions.querySelectorAll('input[type="checkbox"]:checked')]
+    .map(input => input.dataset.pieceId);
+  if (!ids.length) return;
+  const operation = moveLifecycle.begin();
+  closeBlessingModal();
+  animationLock = true;
+  lockUndoControls();
+  render();
+  try {
+    await playBlessingCrown(ids);
+    if (!operation.isCurrent()) return;
+    const previousState = cloneGameState(state);
+    const result = applyBlessing(state, king.id, ids);
+    if (result.error) {
+      boardHelp.textContent = result.error;
+      return;
+    }
+    undoHistory.push(previousState);
+    pendingBlessing = { kingId: king.id, pieceIds: ids };
+    state = result.state;
+    boardHelp.textContent = blindPrompt('王加持完成；本回合仍可正常走棋。');
+  } finally {
+    animationLock = false;
+    render();
+  }
+}
+
 function render() {
   const boardSide = displayedBoardSide();
   const previewing = isPreviewing();
@@ -1487,6 +1645,7 @@ function render() {
   boardShell.classList.toggle('editing', editing);
   const pieceLayer = document.getElementById('pieceLayer');
   pieceLayer.replaceChildren(...displayedPieces().map(renderPiece));
+  document.getElementById('blessEffectLayer').replaceChildren();
   renderFaceLabels(boardSide);
   renderPortals();
   renderEditorTargets();
@@ -1518,6 +1677,8 @@ function render() {
   previewButton.textContent = previewing ? '返回当前朝上面' : '预览背面';
   previewButton.setAttribute('aria-pressed', String(previewing));
   blindModeButton.setAttribute('aria-pressed', String(blindMode));
+  blessButton.textContent = blessingButtonLabel();
+  blessButton.disabled = blessingButtonDisabled();
   stepButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   autoButton.disabled = previewing || editing || Boolean(pendingMoveChoice) || Boolean(queenTurn);
   resetButton.disabled = editing;
@@ -1580,7 +1741,11 @@ function render() {
         ? '点击另一块三角板交换两个实体板的位置；另一面会同步更新。'
         : '选择三角板后可以翻转该板正反面，或与另一块板交换位置。';
   } else if (!selectedPieceId) {
-    selectedInfo.textContent = state.winner ? '整局结束。' : '尚未选择棋子';
+    const king = currentBlessingKing();
+    const remaining = king ? blessingChargesForSide(state, king.side) : 0;
+    selectedInfo.textContent = state.winner
+      ? '整局结束。'
+      : `尚未选择棋子 · 王加持剩余 ${remaining} 次`;
   }
   if (solidBoardViewer) refreshSolidBoard();
 }
@@ -2011,12 +2176,13 @@ async function commitMove(
   move,
   promote = false,
   decisionNote = '',
-  { skipMoveAnimation = false } = {}
+  { skipMoveAnimation = false } = {},
+  blessing = null
 ) {
   if (customEditor || isPreviewing()) return;
   const operation = moveLifecycle.begin();
   lockUndoControls();
-  const previousState = cloneGameState(state);
+  const previousState = pendingBlessing ? null : cloneGameState(state);
   const observationBaseModel = solidBoardViewer && queenTurn?.detecting
     ? solidBoardModel({ closePortalObservation: true })
     : null;
@@ -2050,14 +2216,15 @@ async function commitMove(
     ...move.target,
     ...(Number.isInteger(move.panelIndex) ? { panelIndex: move.panelIndex } : {}),
     ...(move.mapKey ? { mapKey: move.mapKey } : {})
-  }, promote);
+  }, promote, true, blessing);
   if (result.error) {
     boardHelp.textContent = result.error;
     render();
     return;
   }
   const finalizeMoveUi = () => {
-    undoHistory.push(previousState);
+    if (previousState) undoHistory.push(previousState);
+    pendingBlessing = null;
     resetQueenTurnState();
     selectedPieceId = null;
     selectedMoves = new Map();
@@ -2273,7 +2440,10 @@ function simulationActionLabel(action, mover, prefix = '即将执行') {
   const operation = captured
     ? `从 ${from} 攻击 ${target} 的${captured.side === 'white' ? '白方' : '黑方'}${pieceNameFor(captured)}`
     : `从 ${from} 移动到 ${target}`;
-  return `${prefix}：${side}${pieceNameFor(mover)}${operation}`;
+  const blessingNote = action.bless?.pieceIds?.length
+    ? `王先加持 ${action.bless.pieceIds.length} 枚棋子，`
+    : '';
+  return `${prefix}：${blessingNote}${side}${pieceNameFor(mover)}${operation}`;
 }
 
 function previewSimulationAction(action, mover, prefix) {
@@ -3173,6 +3343,7 @@ async function undoLastMove() {
   const previousState = undoHistory.undo();
   if (!previousState) return;
   state = previousState;
+  pendingBlessing = null;
   previewSide = null;
   selectedPieceId = null;
   selectedMoves = new Map();
@@ -3190,7 +3361,9 @@ function resetGame() {
   moveLifecycle.invalidate();
   stopAutoSimulation();
   closeMoveChoice();
+  closeBlessingModal();
   resetQueenTurnState();
+  pendingBlessing = null;
   undoHistory.clear();
   state = cloneGameState(activeInitialState);
   previewSide = null;
@@ -3288,6 +3461,7 @@ async function simulateStep() {
       ? `，已选择重复次数最低的局面（${action.repetitionCount} 次）`
       : '，已避开近期重复局面';
     selectedInfo.textContent = `${operationLabel}；限时博弈最终选择（完整 ${action.searchDepth} 层）：` +
+      `${action.bless?.pieceIds?.length ? `王加持${action.bless.pieceIds.length}枚棋子后，` : ''}` +
       `${PIECE_NAMES[mover.type]}${action.move.captureId ? '攻击' : '移动'}，评估 ${action.score}${choice}${repetitionNote}`;
     if (solidBoardViewer) solidViewerStatus.textContent = operationLabel;
     solidBoardViewer?.followPoint(
@@ -3297,10 +3471,14 @@ async function simulateStep() {
     render();
     await new Promise(resolve => setTimeout(resolve, 720));
     if (simulationPauseRequested || runId !== simulationRunId) return;
+    if (action.bless?.pieceIds?.length) {
+      await playBlessingCrown(action.bless.pieceIds);
+      if (simulationPauseRequested || runId !== simulationRunId) return;
+    }
     const decisionNote = `限时博弈完成 ${action.searchDepth} 层，搜索 ${action.searchedNodes} 个常规节点和 ` +
       `${action.quiescenceNodes ?? 0} 个静态节点，缓存命中 ${action.cacheHits ?? 0} 次，` +
       `执行评估值 ${action.score} 的动作。`;
-    await commitMove(action.pieceId, action.move, action.promote, decisionNote);
+    await commitMove(action.pieceId, action.move, action.promote, decisionNote, {}, action.bless);
     if (state.winner && autoTimer) stopAutoSimulation();
   } finally {
     if (runId === simulationRunId) cancelAiSearch();
@@ -3310,6 +3488,10 @@ async function simulateStep() {
 }
 
 resetButton.addEventListener('click', resetGame);
+blessButton.addEventListener('click', openBlessingModal);
+solidBlessButton.addEventListener('click', openBlessingModal);
+cancelBlessingButton.addEventListener('click', closeBlessingModal);
+confirmBlessingButton.addEventListener('click', confirmBlessing);
 toggleEditorPanelButton.addEventListener('click', toggleEditorPanel);
 rulesToggleButton.addEventListener('click', toggleRulesCard);
 blindModeButton.addEventListener('click', toggleBlindMode);
