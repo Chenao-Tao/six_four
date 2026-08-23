@@ -1388,12 +1388,24 @@ function syncBackgroundMusic() {
 
 function initializeBackgroundMusic() {
   bgmAudio = createBackgroundMusic();
+  bgmAudio.preload = 'auto';
   const unlock = () => {
-    if (bgmAudio.paused) bgmAudio.play().catch(() => {});
+    if (bgmAudio.paused) {
+      bgmAudio.play().then(() => {
+        document.removeEventListener('pointerdown', unlock);
+        document.removeEventListener('keydown', unlock);
+        if (boardHelp.textContent === '点击棋盘开启背景音乐。') {
+          boardHelp.textContent = '点击己方棋子，查看合法移动位置。';
+        }
+      }).catch(() => {});
+    }
   };
-  document.addEventListener('pointerdown', unlock, { once: true });
-  document.addEventListener('keydown', unlock, { once: true });
-  syncBackgroundMusic();
+  document.addEventListener('pointerdown', unlock);
+  document.addEventListener('keydown', unlock);
+  bgmAudio.play().catch(() => {
+    // 浏览器自动播放策略拦截时，等待首次交互后由 unlock 恢复
+    boardHelp.textContent = '点击棋盘开启背景音乐。';
+  });
 }
 
 function renderPiece(piece) {

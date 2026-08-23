@@ -826,8 +826,10 @@ test('背景音乐默认循环播放且编辑时暂停、游戏时恢复', () =>
   assert.match(app, /audio\.volume = BGM_VOLUME;/);
   assert.match(app, /function syncBackgroundMusic\(\) \{\s*if \(!bgmAudio\) return;\s*if \(customEditor\) \{\s*bgmAudio\.pause\(\);\s*\} else \{\s*bgmAudio\.play\(\)\.catch/);
   assert.match(app, /function initializeBackgroundMusic\(\)/);
-  assert.match(app, /document\.addEventListener\('pointerdown', unlock, \{ once: true \}\)/);
-  assert.match(app, /document\.addEventListener\('keydown', unlock, \{ once: true \}\)/);
+  assert.match(app, /bgmAudio\.preload = 'auto';/);
+  assert.match(app, /document\.addEventListener\('pointerdown', unlock\);/);
+  assert.match(app, /document\.addEventListener\('keydown', unlock\);/);
+  assert.match(app, /点击棋盘开启背景音乐。'/);
   assert.match(app, /syncBackgroundMusic\(\);\s*\}/);
   assert.match(app, /initializeBackgroundMusic\(\);\s*\n?drawStaticBoard\(\);/);
 });
