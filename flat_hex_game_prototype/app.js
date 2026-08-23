@@ -214,6 +214,9 @@ let solidSelectedPanel = null;
 let solidSelectedPanelId = null;
 let layoutStorageMode = 'server';
 const BLIND_MODE_STORAGE_KEY = 'flat-hex-blind-mode-v1';
+const BGM_SOURCE = 'assets/music/witness-testimony.mp3';
+const BGM_VOLUME = 0.5;
+let bgmAudio = null;
 let blindMode = false;
 const browserLayoutStore = createBrowserLayoutStore(localStorage);
 const moveLifecycle = createOperationLifecycle();
@@ -1365,6 +1368,34 @@ function toggleBlindMode() {
   render();
 }
 
+function createBackgroundMusic() {
+  const audio = new Audio(BGM_SOURCE);
+  audio.loop = true;
+  audio.volume = BGM_VOLUME;
+  return audio;
+}
+
+function syncBackgroundMusic() {
+  if (!bgmAudio) return;
+  if (customEditor) {
+    bgmAudio.pause();
+  } else {
+    bgmAudio.play().catch(() => {
+      // 浏览器自动播放策略拦截时，等待首次交互后由 initializeBackgroundMusic 恢复
+    });
+  }
+}
+
+function initializeBackgroundMusic() {
+  bgmAudio = createBackgroundMusic();
+  const unlock = () => {
+    if (bgmAudio.paused) bgmAudio.play().catch(() => {});
+  };
+  document.addEventListener('pointerdown', unlock, { once: true });
+  document.addEventListener('keydown', unlock, { once: true });
+  syncBackgroundMusic();
+}
+
 function renderPiece(piece) {
   const pixel = toPixel(piece.position);
   const group = svgElement('g', {
@@ -1748,6 +1779,7 @@ function render() {
       : `尚未选择棋子 · 王加持剩余 ${remaining} 次`;
   }
   if (solidBoardViewer) refreshSolidBoard();
+  syncBackgroundMusic();
 }
 
 function clearPortalDetection() {
@@ -3586,6 +3618,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !pieceEditorModal.classList.contains('hidden')) closePieceEditor();
 });
 
+initializeBackgroundMusic();
 drawStaticBoard();
 blindMode = loadBlindModePreference();
 render();
