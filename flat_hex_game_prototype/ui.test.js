@@ -817,3 +817,24 @@ test('王加持确认时先播放王冠特效再升级', () => {
   assert.match(app, /setTimeout\(resolve, reducedMotion \? 200 : 1000\)/);
   assert.match(styles, /@keyframes bless-crown-path-flash/);
 });
+
+test('背景音乐默认循环播放且编辑时暂停、游戏时恢复', () => {
+  assert.match(app, /const BGM_SOURCE = 'assets\/music\/witness-testimony\.mp3';/);
+  assert.match(app, /const BGM_VOLUME = 0\.5;/);
+  assert.match(app, /function createBackgroundMusic\(\) \{\s*const audio = new Audio\(BGM_SOURCE\);/);
+  assert.match(app, /audio\.loop = true;/);
+  assert.match(app, /audio\.volume = BGM_VOLUME;/);
+  assert.match(app, /function syncBackgroundMusic\(\) \{\s*if \(!bgmAudio\) return;\s*if \(customEditor\) \{\s*bgmAudio\.pause\(\);\s*\} else \{\s*bgmAudio\.play\(\)\.catch/);
+  assert.match(app, /function initializeBackgroundMusic\(\)/);
+  assert.match(app, /bgmAudio\.preload = 'auto';/);
+  assert.match(app, /document\.addEventListener\('pointerdown', unlock\);/);
+  assert.match(app, /document\.addEventListener\('keydown', unlock\);/);
+  assert.match(app, /点击棋盘开启背景音乐。'/);
+  assert.match(app, /syncBackgroundMusic\(\);\s*\}/);
+  assert.match(app, /initializeBackgroundMusic\(\);\s*\n?drawStaticBoard\(\);/);
+});
+
+test('本地服务支持 mp3 音频类型', () => {
+  const serverSource = readFileSync(new URL('./server.mjs', import.meta.url), 'utf8');
+  assert.match(serverSource, /'\.mp3': 'audio\/mpeg'/);
+});
